@@ -1,0 +1,70 @@
+# Greenhouse profile sketch. Data only. See README.md in this directory.
+#
+# Deliberately unlike espresso: slow, overlapping, delayed feedback.
+
+profile: "greenhouse/v0"
+
+tools:
+  - id: "adi.greenhouse.irrigation.dose"
+    parameters:
+      volume: { type: number, unit: ml, min: 0, max: 5000, resolution: 10 }
+    effects: ["substrate_moisture"]
+    reversible: false
+    duration_ms_max: 600000
+
+  - id: "adi.greenhouse.light.set_photoperiod"
+    parameters:
+      hours: { type: number, unit: s, min: 0, max: 86400, resolution: 900 }
+    effects: ["daily_light_integral"]
+    reversible: true
+
+  - id: "adi.greenhouse.climate.set_temperature"
+    parameters:
+      temperature: { type: number, unit: c, min: 10.0, max: 40.0, resolution: 0.5 }
+    effects: ["air_temperature"]
+    reversible: true
+
+  - id: "adi.greenhouse.nutrient.dose"
+    parameters:
+      volume: { type: number, unit: ml, min: 0, max: 500, resolution: 1 }
+    effects: ["nutrient_concentration"]
+    reversible: false
+
+signals:
+  - id: "adi.greenhouse.signal.substrate_moisture"
+    unit: pct
+    sample_rate_hz: 0.0017          # once every ten minutes
+    accuracy: { abs: 2.0, unit: pct }
+  - id: "adi.greenhouse.signal.air_temperature"
+    unit: c
+    sample_rate_hz: 0.0017
+    accuracy: { abs: 0.3, unit: c }
+  - id: "adi.greenhouse.signal.nutrient_ec"
+    unit: pct
+    sample_rate_hz: 0.0017
+    accuracy: { abs: 1.5, unit: pct }
+
+variables:
+  - substrate_moisture
+  - air_temperature
+  - daily_light_integral
+  - nutrient_concentration
+  - growth_rate
+  - leaf_health
+
+# The point of the exercise. Espresso never produces numbers like these, and
+# any neutral code that cannot represent them has an espresso assumption in it.
+characteristics:
+  cycle_duration_s: 604800          # one week
+  feedback_delay_s: 1209600         # two weeks
+  cycles_overlap: true
+  subjects_per_cycle: many
+  cost_of_overshoot: "a crop"
+
+feedback_vocabulary:
+  - "yellowing"
+  - "wilting"
+  - "leggy"
+  - "healthy"
+  - "slow"
+  - "burnt_tips"

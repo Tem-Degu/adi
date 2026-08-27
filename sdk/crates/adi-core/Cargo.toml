@@ -1,0 +1,14 @@
+[package]
+name = "adi-core"
+description = "The domain-neutral reasoning loop: observe, compare, diagnose, correct, learn."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-protocol = { workspace = true }
+adi-safety = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

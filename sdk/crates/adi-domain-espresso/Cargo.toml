@@ -1,0 +1,15 @@
+[package]
+name = "adi-domain-espresso"
+description = "The espresso domain profile: registry, knowledge and diagnosis rules."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-protocol = { workspace = true }
+adi-core = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/adi-protocol",
+    "crates/adi-safety",
+    "crates/adi-core",
+    "crates/adi-decision",
+    "crates/adi-domain-espresso",
+    "crates/adi-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "UNLICENSED"
+authors = ["StreetAI"]
+
+[workspace.dependencies]
+adi-protocol = { path = "crates/adi-protocol" }
+adi-safety = { path = "crates/adi-safety" }
+adi-core = { path = "crates/adi-core" }
+adi-decision = { path = "crates/adi-decision" }
+adi-domain-espresso = { path = "crates/adi-domain-espresso" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

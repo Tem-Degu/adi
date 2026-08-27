@@ -1,0 +1,93 @@
+# Conformance cases: input and expected decision.
+#
+# These live in data rather than in Rust on purpose. When the engine is
+# rewritten, ported, or reimplemented in another language, these files transfer
+# unchanged and prove the new build behaves identically. The corpus is worth
+# more than the implementation, because it is what lets you replace the
+# implementation without fear.
+
+profile: "espresso/v1"
+declaration: "../../../examples/declarations/ex900.yaml"
+skill: "../../../examples/declarations/ex900.skill.yaml"
+
+cases:
+  - id: "sour-and-fast-goes-finer"
+    style: "adi.espresso.style.espresso"
+    settings:
+      dose_mass:     { value: 9.0,  unit: g }
+      grind_setting: { value: 24,   unit: step }
+    trace:
+      signal: "adi.espresso.signal.mass"
+      samples: [[0,0],[5,2],[10,8],[15,15],[20,24],[22,30]]
+    feedback:
+      descriptors: ["sour"]
+    expect:
+      cause: "under_extracted"
+      target_variable: "shot_time"
+      desired_delta_sign: positive
+      selected_tool: "adi.espresso.grind.set_setting"
+      direction: finer
+
+  - id: "erratic-flow-is-channeling-not-grind"
+    style: "adi.espresso.style.espresso"
+    settings:
+      dose_mass:     { value: 9.0, unit: g }
+      grind_setting: { value: 24,  unit: step }
+    trace:
+      signal: "adi.espresso.signal.mass"
+      samples: [[0,0],[5,1],[8,9],[10,10],[14,11],[16,22],[20,24],[21,31]]
+    feedback:
+      descriptors: ["sour", "bitter"]
+    expect:
+      cause: "channeling"
+      # No actuation. Prescribing a grind change here makes the next shot worse,
+      # which is why this case exists and why it must be checked first.
+      target_variable: null
+      selected_tool: null
+
+  - id: "slow-and-bitter-goes-coarser"
+    style: "adi.espresso.style.espresso"
+    settings:
+      dose_mass:     { value: 9.0, unit: g }
+      grind_setting: { value: 18,  unit: step }
+    trace:
+      signal: "adi.espresso.signal.mass"
+      samples: [[0,0],[10,3],[20,11],[30,20],[38,26],[41,30]]
+    feedback:
+      descriptors: ["bitter"]
+    expect:
+      cause: "over_extracted"
+      target_variable: "shot_time"
+      desired_delta_sign: negative
+      selected_tool: "adi.espresso.grind.set_setting"
+      direction: coarser
+
+  - id: "in-target-does-nothing"
+    style: "adi.espresso.style.espresso"
+    settings:
+      dose_mass:     { value: 9.0, unit: g }
+      grind_setting: { value: 21,  unit: step }
+    trace:
+      signal: "adi.espresso.signal.mass"
+      samples: [[0,0],[7,3],[14,10],[21,19],[28,27]]
+    feedback:
+      descriptors: ["balanced"]
+    expect:
+      cause: "balanced"
+      target_variable: null
+      selected_tool: null
+
+  # The case that separates D0 from D1. The sweetener is a vendor tool with a
+  # declared skill response, so the engine can reason about it, but a request
+  # for "less sugar" must never be answered by changing the extraction.
+  - id: "less-sugar-never-touches-extraction"
+    style: "adi.espresso.style.for_milk"
+    request: "less sugar"
+    settings:
+      dose_mass:  { value: 9.0, unit: g }
+      sugar_mass: { value: 8.0, unit: g }
+    expect:
+      cause: "preference_adjustment"
+      target_variable: "sugar_mass"
+      selected_tool: "x.example.additive.sweetener_pump"
+      must_not_touch: ["grind_setting", "brew_temperature", "yield_mass"]

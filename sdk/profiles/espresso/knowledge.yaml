@@ -1,0 +1,80 @@
+# Espresso base knowledge. Layer 0, owned by StreetAI.
+#
+# Data, not code. Diagnosis rule *ordering* lives in rules.rs because it is
+# logic; everything here is values the engine reads.
+#
+# Manufacturers never edit this file. They add their own layer under their
+# namespace, and constraint monotonicity means their layer can only narrow what
+# is here. See PROTOCOL.md section 6.
+
+profile: "espresso/v1"
+knowledge_version: "1.0"
+
+styles:
+  - id: "adi.espresso.style.espresso"
+    targets:
+      ratio:            { min: 1.8,  max: 2.4,  unit: none }
+      shot_time:        { min: 25.0, max: 32.0, unit: s }
+      brew_temperature: { min: 90.0, max: 96.0, resolution: 0.5, unit: c }
+
+  - id: "adi.espresso.style.ristretto"
+    inherits: "adi.espresso.style.espresso"
+    targets:
+      ratio:     { min: 1.2,  max: 1.8,  unit: none }
+      shot_time: { min: 22.0, max: 30.0, unit: s }
+
+  - id: "adi.espresso.style.lungo"
+    inherits: "adi.espresso.style.espresso"
+    targets:
+      ratio:     { min: 3.0,  max: 4.0,  unit: none }
+      shot_time: { min: 28.0, max: 40.0, unit: s }
+
+  - id: "adi.espresso.style.for_milk"
+    inherits: "adi.espresso.style.espresso"
+    targets:
+      ratio:     { min: 1.5,  max: 2.0,  unit: none }
+      shot_time: { min: 25.0, max: 32.0, unit: s }
+
+# Starting points by roast. Offsets apply to the user's current setting; they
+# are not absolute values, because grinder scales are not comparable.
+material_priors:
+  - id: "adi.espresso.roast.light"
+    attributes: { roast: "light" }
+    offsets: { grind_setting: -3.0 }
+    targets:
+      brew_temperature: { min: 92.0, max: 96.0, unit: c }
+      ratio:            { min: 2.0,  max: 2.6,  unit: none }
+
+  - id: "adi.espresso.roast.medium"
+    attributes: { roast: "medium" }
+    offsets: { grind_setting: 0.0 }
+    targets:
+      brew_temperature: { min: 91.0, max: 94.0, unit: c }
+
+  - id: "adi.espresso.roast.dark"
+    attributes: { roast: "dark" }
+    offsets: { grind_setting: 2.0 }
+    targets:
+      brew_temperature: { min: 88.0, max: 92.0, unit: c }
+      ratio:            { min: 1.6,  max: 2.0,  unit: none }
+
+# Used only where a skill declares no response for a variable. Deliberately
+# conservative: a wrong big step costs a whole cycle and a bag of beans.
+default_steps:
+  shot_time:        { value: 2.0, unit: s }
+  ratio:            { value: 0.1, unit: none }
+  brew_temperature: { value: 0.5, unit: c }
+
+# The quality envelope. Distinct from any machine's safety envelope, which
+# lives in firmware and is unreachable from here.
+constraints:
+  brew_temperature: { min: 85.0, max: 98.0, unit: c }
+  ratio:            { min: 1.0,  max: 4.0,  unit: none }
+  shot_time:        { min: 15.0, max: 60.0, unit: s }
+
+# Additives are preference variables. The engine must never try to fix a taste
+# fault by changing them. See PROTOCOL.md 7.1.
+preference_variables:
+  - milk_volume
+  - sugar_mass
+  - syrup_volume

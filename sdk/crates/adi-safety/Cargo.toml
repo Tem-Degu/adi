@@ -1,0 +1,16 @@
+[package]
+name = "adi-safety"
+description = "Safe Action Protocol: envelope, stateful invariants, rate limits, resource accounting."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-protocol = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = { workspace = true }

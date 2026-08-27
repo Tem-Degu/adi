@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------- build output
+sdk/target/
+__pycache__/
+*.pyc
+
+# ---------------------------------------------------------------- NOT PUBLIC
+#
+# These are excluded from the public repository, not merely from version
+# control. See "What is public" in README.md.
+#
+# If you split this into a public repo, verify with:
+#     git ls-files | grep -Ei 'investor|wefunder|deck|whitepaper|build-guide'
+# which must return nothing.
+
+# Fundraising and commercial material
+Decks/
+uae-investor-targets.txt
+
+# Superseded internal documents. Both contradict the current work.
+WHITEPAPER.md
+BUILD-GUIDE.md
+
+# ---------------------------------------------------------------- local
+.claude/settings.local.json
+*.bak
+*~
+.DS_Store
+Thumbs.db

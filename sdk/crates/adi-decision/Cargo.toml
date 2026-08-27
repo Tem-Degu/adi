@@ -1,0 +1,18 @@
+[package]
+name = "adi-decision"
+description = "Autonomy levels D0, D1 and D2 behind one selector trait."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-protocol = { workspace = true }
+adi-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = { workspace = true }

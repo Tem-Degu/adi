@@ -1,0 +1,87 @@
+# The skill for EX-900. How the machine behaves, not what to do about it.
+#
+# The last response is the interesting one: it describes a vendor tool the
+# registry has never heard of. That single entry is what turns the sweetener
+# pump from "callable if the user names it" into "selectable by the engine".
+
+skill_version: "1.0"
+skill_id: "skill/EX-900/2.1"
+
+applies_to:
+  vendor: "Example Appliances"
+  model: "EX-900"
+  firmware_range: { min: "3.0.0", max: "3.9.99" }
+
+responses:
+  # Signed: increasing the step number coarsens, which runs the shot faster.
+  - tool: "adi.espresso.grind.set_setting"
+    parameter: "setting"
+    variable: "shot_time"
+    per_unit: -1.4
+    unit: s
+    valid_range: { min: 8.0, max: 45.0 }
+    confidence: 0.75
+
+  - tool: "adi.espresso.brew.set_temperature"
+    parameter: "temperature"
+    variable: "shot_time"
+    per_unit: -0.4
+    unit: s
+    valid_range: { min: 88.0, max: 94.0 }
+    confidence: 0.5
+
+  - tool: "adi.espresso.dose.by_mass"
+    parameter: "mass"
+    variable: "shot_time"
+    per_unit: 1.1
+    unit: s
+    valid_range: { min: 7.0, max: 12.0 }
+    confidence: 0.6
+
+  - tool: "adi.espresso.brew.start"
+    parameter: "stop_at_mass"
+    variable: "yield_mass"
+    per_unit: 1.0
+    unit: g
+    confidence: 0.95
+
+  - tool: "x.example.additive.sweetener_pump"
+    parameter: "level"
+    variable: "sugar_mass"
+    per_unit: 1.0
+    unit: g
+    confidence: 0.9
+
+dynamics:
+  - tool: "adi.espresso.grind.set_setting"
+    retention:
+      mass: { value: 0.8, unit: g }
+      remedy_tool: "adi.espresso.grind.purge"
+    hysteresis:
+      steps: 2.0
+      direction: "coarser_to_finer"
+
+  - tool: "adi.espresso.brew.set_temperature"
+    settling:
+      time: { value: 15.0, unit: s }
+      tolerance: { value: 0.3, unit: c }
+
+interactions:
+  - changing: "grind_setting"
+    invalidates: ["last_cycle_baseline"]
+  - changing: "dose_mass"
+    also_affects: ["shot_time", "extraction_yield"]
+
+operating:
+  reliable_ranges:
+    - variable: "brew_temperature"
+      min: 88.0
+      max: 94.0
+      unit: c
+      note_id: "temp_ceiling"
+  recovery:
+    between_cycles: { value: 25.0, unit: s }
+
+notes:
+  - id: "temp_ceiling"
+    text: "Above 94C the boiler cannot hold setpoint across consecutive shots."

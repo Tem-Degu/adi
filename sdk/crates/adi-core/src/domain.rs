@@ -1,0 +1,79 @@
+//! The `Domain` trait. Everything a profile must supply.
+//!
+//! Domain rules are code rather than data for now, deliberately. Designing a
+//! rules language from one example produces a language that fits one example.
+//! Extract a data format later, once a second domain exists to test it.
+//!
+//! Everything that is not rules stays as data: registry, targets, priors, step
+//! sizes, constraints.
+
+use adi_protocol::ids::VariableId;
+use adi_protocol::knowledge::ResolvedTargets;
+
+use crate::cycle::Cycle;
+
+/// A cause the profile can identify from a cycle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Diagnosis {
+    /// Profile-defined cause identifier.
+    pub cause: String,
+    /// The variable the profile wants moved, if any. `None` means no
+    /// actuation will help, for example a preparation fault the operator must
+    /// fix themselves.
+    pub target_variable: Option<VariableId>,
+    /// Signed magnitude of the desired change, in the variable's own unit.
+    pub desired_delta: Option<f64>,
+    /// 0 to 1. Low confidence produces smaller corrections.
+    pub confidence: f64,
+    /// Human-readable reasoning, for the language layer to phrase. Never used
+    /// as an actuation input.
+    pub explanation: String,
+}
+
+impl Diagnosis {
+    /// A diagnosis with nothing to correct. The cycle was good, or the fix is
+    /// not something the machine can do.
+    pub fn advisory(cause: impl Into<String>, explanation: impl Into<String>) -> Self {
+        Self {
+            cause: cause.into(),
+            target_variable: None,
+            desired_delta: None,
+            confidence: 1.0,
+            explanation: explanation.into(),
+        }
+    }
+}
+
+/// One domain profile.
+pub trait Domain {
+    /// Profile identifier, matching `domain_profile` in a declaration.
+    fn profile_id(&self) -> &str;
+
+    /// Variables this profile models. A skill response naming anything outside
+    /// this list is ignored rather than guessed at.
+    fn variables(&self) -> &[VariableId];
+
+    /// Base targets before vendor, deployment and user layers are applied.
+    fn base_targets(&self, style: &str) -> ResolvedTargets;
+
+    /// Derive modelled variables from raw traces. This is where a profile turns
+    /// signals into meaning, and where most of its perception work lives.
+    fn derive(&self, cycle: &mut Cycle);
+
+    /// Identify what went wrong, if anything.
+    ///
+    /// Ordering matters and is the profile's responsibility. A profile that can
+    /// distinguish a preparation fault from a settings fault must check the
+    /// preparation fault first, because prescribing a settings change for a
+    /// preparation fault makes the result worse.
+    fn diagnose(&self, cycle: &Cycle, targets: &ResolvedTargets) -> Diagnosis;
+
+    /// Default step size for a variable when no skill response covers it.
+    /// Returning `None` means the engine must not select tools affecting this
+    /// variable on its own. See ADI-P 5.6.
+    fn default_step(&self, variable: &VariableId) -> Option<f64>;
+
+    /// Descriptors this profile accepts as subjective feedback, used to close
+    /// the language layer's output schema.
+    fn feedback_vocabulary(&self) -> &[&str];
+}

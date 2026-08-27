@@ -1,0 +1,148 @@
+# A fictional machine in a fictional domain.
+#
+# This exists so the domain-neutral crates can be tested without depending on
+# any real domain profile. If a test in adi-protocol, adi-safety, adi-core or
+# adi-decision needs a declaration, it uses this one.
+#
+# That is not a formality. If the safety layer could only be exercised against
+# the espresso example, "domain-neutral" would be a claim rather than a
+# demonstrated property.
+#
+# It carries a stateful envelope so the D2 refusal path is testable.
+
+adip_version: "0.2"
+domain: "example"
+domain_profile: "example/v1"
+conformance_level: autonomous
+
+device:
+  vendor: "Example Devices"
+  model: "REF-1"
+  firmware_version: "1.0.0"
+  declaration_id: "sha256:neutralfixture"
+
+session:
+  max_concurrent: 1
+  heartbeat_interval_ms: 500
+  control_timeout_ms: 2000
+
+signals:
+  - id: "adi.example.signal.mass"
+    unit: g
+    range: { min: 0, max: 2000, unit: g }
+    sample_rate_hz: 20
+    accuracy: { abs: 0.2, unit: g }
+  - id: "adi.example.signal.elapsed"
+    unit: s
+    sample_rate_hz: 20
+    accuracy: { abs: 0.05, unit: s }
+
+tools:
+  # A discrete mechanism with a direction that carries meaning.
+  - id: "adi.example.actuator.set_position"
+    name: "set_position"
+    parameters:
+      position:
+        type: integer
+        unit: step
+        min: 0
+        max: 60
+        resolution: 1
+        monotonic: profile_defined
+    preconditions: ["state == idle"]
+    effects: ["position"]
+    duration_ms_typ: 2000
+    reversible: true
+
+  # Consumes measured input material.
+  - id: "adi.example.input.by_mass"
+    name: "load_input"
+    parameters:
+      mass: { type: number, unit: g, min: 6.0, max: 14.0, resolution: 0.1 }
+    effects: ["input_mass"]
+    reversible: false
+
+  # The main process. Non-reversible, hazardous, rate limited.
+  - id: "adi.example.process.start"
+    name: "run_process"
+    parameters:
+      stop_at_mass: { type: number, unit: g, min: 15.0, max: 90.0, resolution: 0.5 }
+    preconditions: ["state == ready", "supply_present == true"]
+    effects: ["output_mass"]
+    duration_ms_max: 60000
+    reversible: false
+    abortable: true
+    hazard: ["hot_liquid", "pressure"]
+
+  # Accumulates toward the container invariant.
+  - id: "adi.example.additive.dispense"
+    name: "dispense"
+    parameters:
+      substance: { type: enum, values: ["a", "b"] }
+      volume: { type: number, unit: ml, min: 0, max: 300, resolution: 1 }
+    effects: ["container_contents"]
+    reversible: false
+    hazard: ["hot_liquid"]
+
+  # Resets the container accumulator.
+  - id: "adi.example.container.empty"
+    name: "empty_container"
+    preconditions: ["state == idle", "waste_present == true"]
+    effects: ["container_state"]
+    reversible: false
+
+  # A vendor tool, outside the registry. Callable, but not selectable until a
+  # skill response describes it.
+  - id: "x.example.aux.actuate"
+    name: "auxiliary"
+    parameters:
+      level: { type: integer, unit: g, min: 0, max: 20, resolution: 1 }
+    preconditions: ["state == idle"]
+    effects: ["aux_level"]
+    reversible: false
+
+envelope:
+  enforced_by: both
+  independent_of_engine: true
+
+  limits:
+    - { parameter: "mass", unit: g, hard_max: 16.0 }
+
+  interlocks:
+    - { id: "supply_present", blocks: ["adi.example.process.start"] }
+    - { id: "waste_present", blocks: ["adi.example.process.start", "adi.example.container.empty"] }
+    - { id: "service_door_closed", blocks: ["*"] }
+
+  # Stateful constraints. Individually valid calls can breach these in sequence,
+  # and D2 refuses to initialise without them.
+  invariants:
+    - id: "container_capacity"
+      quantity: "container_contents"
+      max: 320.0
+      unit: ml
+      accumulates:
+        "adi.example.additive.dispense": "volume"
+        "adi.example.process.start": "stop_at_mass"
+      reset_on: ["adi.example.container.empty"]
+
+  rate_limits:
+    - id: "process_recovery"
+      tools: ["adi.example.process.start"]
+      min_interval_s: 25.0
+      max_invocations: 12
+      window_s: 600.0
+
+  resources:
+    - id: "supply_reservoir"
+      unit: ml
+      capacity: 1800.0
+      consumed_by:
+        "adi.example.process.start": "stop_at_mass"
+        "adi.example.additive.dispense": "volume"
+
+  failsafe:
+    on_control_timeout: "abort_to_safe"
+    on_signal_loss: "abort_to_safe"
+    on_fault: "abort_to_safe"
+    safe_state: "no_heat_no_pressure_no_motion"
+    max_time_to_safe_ms: 500
