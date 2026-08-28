@@ -52,7 +52,11 @@ fn diagnose(samples: &[(f64, f64)], descriptors: &[&str], grind: f64) -> adi_cor
     let domain = Espresso::new();
     let mut c = cycle(samples, descriptors, grind);
     domain.derive(&mut c);
-    let targets = domain.base_targets("espresso");
+    let targets = domain
+        .knowledge()
+        .resolve("adi.espresso.style.espresso", None)
+        .expect("the espresso style must resolve")
+        .targets;
     domain.diagnose(&c, &targets)
 }
 

@@ -9,6 +9,7 @@
 
 pub mod declaration;
 pub mod ids;
+pub mod intent;
 pub mod invocation;
 pub mod knowledge;
 pub mod skill;
@@ -16,8 +17,12 @@ pub mod units;
 
 pub use declaration::{Declaration, ConformanceLevel, Tool, Signal, Parameter};
 pub use ids::{SemanticId, VariableId};
+pub use intent::{Intent, IntentError, IntentKind, Reference, TargetSpec};
 pub use invocation::{Invocation, Outcome, RejectReason};
-pub use knowledge::{Attributed, KnowledgeExtension, Layer};
+pub use knowledge::{
+    Attributed, ExtensionError, Knowledge, KnowledgeBase, KnowledgeError, KnowledgeExtension,
+    KnowledgeLayer, Layer, MaterialPrior, Resolution, ResolvedTargets, StyleEntry,
+};
 pub use skill::{Response, Skill};
 pub use units::{Quantity, Range, Unit};
 

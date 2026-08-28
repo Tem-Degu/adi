@@ -8,7 +8,7 @@
 //! sizes, constraints.
 
 use adi_protocol::ids::VariableId;
-use adi_protocol::knowledge::ResolvedTargets;
+use adi_protocol::knowledge::{Knowledge, ResolvedTargets};
 
 use crate::cycle::Cycle;
 
@@ -53,8 +53,16 @@ pub trait Domain {
     /// this list is ignored rather than guessed at.
     fn variables(&self) -> &[VariableId];
 
-    /// Base targets before vendor, deployment and user layers are applied.
-    fn base_targets(&self, style: &str) -> ResolvedTargets;
+    /// The knowledge this machine reasons from: the domain base plus whatever
+    /// vendor, deployment and user layers were accepted.
+    ///
+    /// Returned whole rather than as a `targets(style)` call, because resolution
+    /// needs a style, a material and the layer stack together, and because a
+    /// caller also needs step sizes, constraints and which variables are
+    /// preferences. An earlier `base_targets(&self, style) -> ResolvedTargets`
+    /// could not report an unknown style at all, so it fell back to a default
+    /// and quietly made every drink the same one.
+    fn knowledge(&self) -> &Knowledge;
 
     /// Derive modelled variables from raw traces. This is where a profile turns
     /// signals into meaning, and where most of its perception work lives.
@@ -68,10 +76,9 @@ pub trait Domain {
     /// preparation fault makes the result worse.
     fn diagnose(&self, cycle: &Cycle, targets: &ResolvedTargets) -> Diagnosis;
 
-    /// Default step size for a variable when no skill response covers it.
-    /// Returning `None` means the engine must not select tools affecting this
-    /// variable on its own. See ADI-P 5.6.
-    fn default_step(&self, variable: &VariableId) -> Option<f64>;
+    // Step sizes come from `knowledge().default_step()`, which carries the unit
+    // and the layer that supplied it. A bare `f64` on this trait duplicated the
+    // `default_steps` map in the knowledge base and could drift from it.
 
     /// Descriptors this profile accepts as subjective feedback, used to close
     /// the language layer's output schema.

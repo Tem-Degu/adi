@@ -63,12 +63,17 @@ tools:
     reversible: false
 
   # The main process. Non-reversible, hazardous, rate limited.
+  #
+  # The output is a volume, not a mass, because it accumulates into
+  # container_capacity and supply_reservoir below. A quantity that feeds an
+  # accumulator has to share that accumulator's unit; adding grams to a
+  # millilitre total produces a number that means nothing.
   - id: "adi.example.process.start"
     name: "run_process"
     parameters:
-      stop_at_mass: { type: number, unit: g, min: 15.0, max: 90.0, resolution: 0.5 }
+      stop_at_volume: { type: number, unit: ml, min: 15.0, max: 90.0, resolution: 0.5 }
     preconditions: ["state == ready", "supply_present == true"]
-    effects: ["output_mass"]
+    effects: ["output_volume"]
     duration_ms_max: 60000
     reversible: false
     abortable: true
@@ -89,6 +94,38 @@ tools:
     name: "empty_container"
     preconditions: ["state == idle", "waste_present == true"]
     effects: ["container_state"]
+    reversible: false
+
+  # Clears material held over from the previous position. Named as the remedy
+  # for the retention the skill declares on set_position.
+  - id: "adi.example.actuator.purge"
+    name: "purge"
+    parameters:
+      mass: { type: number, unit: g, min: 0.0, max: 5.0, resolution: 0.1 }
+    preconditions: ["state == idle"]
+    effects: ["retained_mass"]
+    reversible: false
+
+  # Operator only. The engine must never select this, whatever the skill says
+  # about it, so it is here to prove the planner honours 4.5 authority.
+  - id: "adi.example.manual.service"
+    name: "service"
+    parameters:
+      level: { type: integer, unit: step, min: 0, max: 10, resolution: 1 }
+    effects: ["service_state"]
+    reversible: false
+    authority: ["operator"]
+
+  # Changes taste rather than process. Its only effect is a preference
+  # variable, which is what lets a preference request use it. Contrast with
+  # additive.dispense above, which also moves container_contents and is
+  # therefore refused for a preference request.
+  - id: "x.example.aux.additive"
+    name: "additive"
+    parameters:
+      amount: { type: number, unit: ml, min: 0, max: 60, resolution: 1 }
+    preconditions: ["state == idle"]
+    effects: ["additive_volume"]
     reversible: false
 
   # A vendor tool, outside the registry. Callable, but not selectable until a
@@ -122,7 +159,7 @@ envelope:
       unit: ml
       accumulates:
         "adi.example.additive.dispense": "volume"
-        "adi.example.process.start": "stop_at_mass"
+        "adi.example.process.start": "stop_at_volume"
       reset_on: ["adi.example.container.empty"]
 
   rate_limits:
@@ -137,7 +174,7 @@ envelope:
       unit: ml
       capacity: 1800.0
       consumed_by:
-        "adi.example.process.start": "stop_at_mass"
+        "adi.example.process.start": "stop_at_volume"
         "adi.example.additive.dispense": "volume"
 
   failsafe:

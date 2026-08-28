@@ -225,6 +225,16 @@ impl<'a> Guard<'a> {
             let Some(contribution) = invocation.numeric_arguments.get(param_name) else {
                 continue;
             };
+
+            // Adding grams to a millilitre total produces a number that means
+            // nothing, and an accumulator that means nothing stops enforcing
+            // the limit it exists to enforce. Refuse rather than sum.
+            if !contribution.unit.compatible_with(invariant.unit) {
+                return Err(SafetyViolation::UnitMismatch {
+                    parameter: param_name.clone(),
+                });
+            }
+
             let projected = state.accumulated(&invariant.id) + contribution.value;
             if let Some(max) = invariant.max {
                 if projected > max {
@@ -306,6 +316,13 @@ impl<'a> Guard<'a> {
             let Some(consumption) = invocation.numeric_arguments.get(param_name) else {
                 continue;
             };
+
+            if !consumption.unit.compatible_with(resource.unit) {
+                return Err(SafetyViolation::UnitMismatch {
+                    parameter: param_name.clone(),
+                });
+            }
+
             let remaining = state
                 .resources
                 .get(&resource.id)
@@ -325,10 +342,15 @@ impl<'a> Guard<'a> {
         for invariant in &self.envelope().invariants {
             if let Some(param_name) = invariant.accumulates.get(invocation.tool.as_str()) {
                 if let Some(contribution) = invocation.numeric_arguments.get(param_name) {
-                    *state
-                        .accumulated
-                        .entry(invariant.id.clone())
-                        .or_insert(0.0) += contribution.value;
+                    // Mirrors the check above. If these two disagreed about
+                    // what counts, an invocation could pass the check and then
+                    // record something different.
+                    if contribution.unit.compatible_with(invariant.unit) {
+                        *state
+                            .accumulated
+                            .entry(invariant.id.clone())
+                            .or_insert(0.0) += contribution.value;
+                    }
                 }
             }
             if invariant

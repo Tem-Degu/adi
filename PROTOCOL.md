@@ -253,30 +253,48 @@ default nor a skill entry. See section 5.6.
 
 ### 3.3 Autonomy levels
 
-Autonomy level sets how much of each decision the language model makes. It is
-configuration on the engine side, chosen per integration, and it is not part of
-the declaration.
+The model is present at every level. It turns what a person said into structured
+intent before any of this applies, and it explains what happened afterwards.
+Neither job is graded here, because neither touches an actuation value.
 
-Two decisions are involved in any correction: **which action** to take, and
-**what value** to give it. The levels differ only in who makes each.
+What the level grades is what happens **after** intent: how much of the action
+itself the model decides. It is configuration on the engine side, chosen per
+integration, and it is not part of the declaration.
 
-| Level | Chooses the action | Chooses the value | Reproducible |
+| Level | Model decides | Engine decides | Reproducible |
 |---|---|---|---|
-| **D0** | Engine | Engine | Yes, fully |
-| **D1** | Model, from declared candidates | Engine | Values yes, selection no |
-| **D2** | Model | Model, within declared bounds | No |
+| **D0** | intent only | the tools and every value | Yes, fully |
+| **D1** | intent, and which tool | every value | Values yes, selection no |
+| **D2** | intent, the tools, and their values | validates, clamps, may refuse | No |
 
 **D0.** The engine ranks the candidate tools by declared confidence and takes
 the best. Every decision replays identically from the same inputs. This is the
-level to use where certification requires reproducibility.
+level to pin where a decision must be reproducible, and it is the level a
+conformance corpus runs at.
 
 **D1.** The engine derives the candidate list from the declaration and the
-skill, and the model chooses among it. This is what makes a vendor tool usable
-without the engine having been taught what it means in advance. The model never
-sees or produces a magnitude.
+skill, and the model chooses among it. The model never sees or produces a
+magnitude.
 
-**D2.** The model chooses the value as well. More flexible on genuinely novel
-requests, and correspondingly less predictable.
+A selector at D1 or D2 MUST be given, alongside the candidates, the history the
+engine holds: earlier decisions and their outcomes. Without it the model sees
+only what the engine already used to rank the list, so it can disagree with the
+ranking but never on evidence, and the level is decorative.
+
+**D2. The default.** The model proposes the tools and their magnitudes, as a
+sequence rather than a single action, and the engine verifies the whole plan
+before any physical action.
+
+D2 is the default because a machine that can only do what someone anticipated in
+advance is a program with a microphone attached. The safety of a model-chosen
+magnitude does not rest on trusting the model: it is clamped to the declared
+range and snapped to the declared resolution by the engine, and validated again
+independently by the appliance under §9.2. A plan that fails any check is
+refused whole, and no step of it is performed.
+
+An engine MUST NOT silently fall back to a lower level when the requested level
+is unavailable. A decision record naming a level other than the one that ran is
+false, and the record is what the certification argument rests on.
 
 #### 3.3.1 Requirements at every level
 
@@ -674,7 +692,7 @@ interactions:
 `invalidates` tells the engine that a stored comparison point is no longer valid,
 so it does not attribute a change to the wrong cause. `also_affects` warns that a
 parameter moves more than one variable, which interacts with the
-one-variable-at-a-time rule in 9.4.
+one-variable-at-a-time rule in 9.5.
 
 ### 5.5 Operating limits
 
@@ -764,18 +782,20 @@ knowledge_extension:
   extension_version: "1.4"
   extends: { domain_profile: "espresso/v1", base_min_version: "1.0" }
 
-  drink_styles:
+  # `styles` and `material_priors`, not `drink_styles` and `bean_priors`. This
+  # format is domain-neutral, and a coffee word here would be a leak.
+  styles:
     - id: "x.example.style.flat_white"
       inherits: "adi.espresso.style.espresso"
       targets:
-        ratio:       { min: 1.8, max: 2.2 }
+        ratio:       { min: 1.8, max: 2.2, unit: none }
         shot_time:   { min: 25, max: 32, unit: s }
         milk_volume: { min: 90, max: 130, unit: ml }
 
-  bean_priors:
-    - id: "x.example.bean.house_blend"
-      roast: "medium_dark"
-      starting_grind_offset: -3
+  material_priors:
+    - id: "x.example.material.house_blend"
+      attributes: { roast: "medium_dark" }
+      offsets:    { grind_setting: -3.0 }
       targets:
         brew_temperature: { min: 90.0, max: 92.0, unit: c }
 
@@ -784,10 +804,17 @@ knowledge_extension:
       value: 9.0
       unit: g
       rationale_note_id: "brew_unit_basket_size"
+
+  # Narrowing a constraint the base already declares. Permitted by 6.4, which
+  # allows any layer to narrow and none to widen.
+  constraints:
+    brew_temperature: { min: 88.0, max: 96.0, unit: c }
 ```
 
 Requirements:
 
+0. Every range MUST carry a unit, as everywhere else in this protocol. A
+   dimensionless ratio uses `none`.
 1. Every identifier a vendor introduces MUST begin with its namespace.
 2. A vendor extension MUST NOT redefine an identifier it does not own. Attempting
    to redefine `adi.espresso.style.espresso` MUST be rejected at validation.
@@ -845,6 +872,43 @@ Before loading, the engine MUST verify:
 A failing extension MUST be rejected with a reason and the engine MUST continue
 on base knowledge alone. A bad extension degrades a machine to standard
 behaviour. It never stops it working.
+
+### 6.6 Resolution
+
+Normative. Three rules combine ranges, and they differ. An implementation that
+applies one where another belongs will either reject valid knowledge or accept
+a target nobody set.
+
+**1. Inheritance overrides.** A style naming `inherits` starts from its parent's
+targets and replaces the fields it names, keeping the rest. The child's range is
+used as written. It MAY lie partly or wholly outside the parent's, and an
+implementation MUST NOT intersect the two.
+
+In the espresso profile `adi.espresso.style.lungo` inherits from
+`adi.espresso.style.espresso` and declares a ratio of 3.0 to 4.0 against the
+parent's 1.8 to 2.4. The ranges do not overlap. Intersecting them would yield an
+empty range and no lungo could be produced.
+
+**2. A style MUST lie within the constraints.** The effective constraint from
+6.4 is the envelope. A resolved style target reaching outside it is a fault in
+the knowledge and MUST be reported. An implementation MUST NOT silently clamp
+it, because a clamped target is one the machine would then pursue and report
+without anyone having declared it.
+
+**3. A material prior composes with the style by intersection.** A prior
+describes what a batch of input material tends to need. It is not a bound on the
+style, so a prior MAY reach outside the style's range, and the effective target
+is the overlap. The overlap MUST be non-empty; a prior disjoint from the style
+is a fault and MUST be reported.
+
+A prior MUST NOT carry a target for a variable that distinguishes one style from
+another, since by rule 3 it would silently narrow every style that uses it and
+by disjointness would make some styles unreachable. In espresso, `ratio` is such
+a variable and no roast prior declares one.
+
+**Attribution.** Under 9.3 requirement 5 every effective value carries the layer that
+produced it. A layer that restates a range already in force has narrowed
+nothing, and attribution MUST remain with the layer that last changed the value.
 
 ---
 
@@ -1088,14 +1152,25 @@ misbehaving engine in the field.
 
 Normative, and central to the certification argument.
 
-1. Every actuation parameter MUST be produced by the deterministic reasoning
-   engine from declared signals, the skill, the resolved knowledge layers and
-   structured intent.
-2. A language model MUST NOT produce, modify or select any actuation parameter.
-3. The language model's output MUST be confined to structured intent, validated
-   against a closed schema before use.
-4. Every invocation MUST be reproducible: identical signals, knowledge, skill and
-   intent MUST produce an identical invocation.
+1. At D0 and D1, every actuation parameter MUST be produced by the
+   deterministic reasoning engine from declared signals, the skill, the resolved
+   knowledge layers and structured intent. At those levels a language model MUST
+   NOT produce, modify or select any actuation parameter.
+2. At D2 a model MAY propose a magnitude. The engine MUST NOT send it as given.
+   It MUST clamp the value to the declared range, snap it to the declared
+   resolution, reject it if it does not carry the parameter's declared unit, and
+   reject the plan whole if any step fails, performing none of it. The appliance
+   MUST validate independently in every case, at every level, as §9.2 requires.
+3. A model's output MUST be confined to a closed schema, validated before use.
+   At D2 that schema is a sequence of steps naming candidates by index into a
+   list the engine derived from the declaration. A model MUST NOT be able to
+   name a tool by string, so it cannot call one the machine did not declare.
+4. At D0 every invocation MUST be reproducible: identical signals, knowledge,
+   skill and intent MUST produce an identical invocation. At D1 and D2 an
+   invocation is not reproducible, and MUST instead be **reconstructable**: the
+   record MUST hold what the model was given, what it returned, and the result
+   of every check applied to it. Claiming reproducibility at D1 or D2 is a
+   defect in the record, not a property of the engine.
 5. The engine MUST retain, for each invocation, the inputs, the resolved
    knowledge layer for each value used, and the rule that produced it, sufficient
    to reconstruct the decision.
@@ -1105,7 +1180,118 @@ insurer will eventually ask, which is why the machine did that. Layer
 attribution matters here: "the dose came from the vendor default, the temperature
 from the user's learned preference" is the level of detail required.
 
-### 9.4 One variable at a time
+### 9.4 Structured intent
+
+Normative. This is the schema §9.3 requirement 3 calls for, and the only thing a
+model may emit on the request path.
+
+Intent describes a **goal**, never an action. There is no field for a tool name
+and no way to add one. A model that wants a particular tool used cannot say so.
+
+```yaml
+kind: adjust                     # adjust | produce
+style: "adi.espresso.style.for_milk"
+targets:
+  sugar_mass:  { of: last, scale: 0.5 }
+  milk_volume: { value: 120, unit: ml }
+```
+
+A target is either **absolute**, `{ value, unit }`, or **relative** to a
+remembered cycle, naming `of` plus at most one of `scale` and `offset`. Absent
+both means "the same as then".
+
+**A relative target MUST be resolved by the engine, not by the model.** "Half of
+last time" is expressible without the model knowing what last time was. A model
+required to emit `4 g` would have to be trusted to remember correctly and to
+divide correctly, and would be wrong silently when it did not. The engine holds
+the memory and does the arithmetic; the model states the relation.
+
+An engine MUST reject an intent that gives both a scale and an offset for one
+variable, a negative scale, or any non-finite number. A scale of zero is valid
+and means none at all.
+
+`last` is reserved as a reference. A cycle identifier MUST NOT be that word.
+
+#### 9.4.1 What the model is given
+
+The reasoning on this path is the model's. An engine MUST therefore supply it
+with what reasoning requires: the utterance, the declared styles and materials,
+the decision history, and **the cycles the machine remembers**, meaning the same
+store the engine resolves a relative target against.
+
+Both sides see that store, and they use it for different things. The model reads
+it to work out which earlier cycle a person means and whether that one was any
+good. The engine reads it to turn "half of that one" into a number that can be
+checked against the stored cycle afterwards.
+
+A model given the request without the history would be asked to interpret "last
+time" without being told what last time was.
+
+#### 9.4.2 Where models attach
+
+Four seams, and every one of them is a model. None of them produces an actuation
+value, which is why the language layer may be as capable as the best model
+available without weakening §9.3.
+
+| Seam | Turns | Into |
+|---|---|---|
+| Transcriber | recorded audio | words, with a confidence |
+| Interpreter | words | intent, or a question |
+| Explainer | a decision record | words |
+| Speaker | words | audio |
+
+An engine MAY ship without any of them. Such a build MUST refuse the parts it
+cannot perform and name the seam that is missing, rather than returning silence
+or empty text. It MUST still explain, because the decision record carries the
+rule that fired and a flat true sentence is better than none.
+
+Audio MUST carry its sample rate, and a backend MUST refuse audio at a rate it
+does not accept rather than resampling silently. Audio at the wrong rate does
+not fail; it transcribes badly, and the model is blamed for it.
+
+**A transcript is a guess and MUST carry a confidence.** An engine MUST treat a
+transcript below its configured threshold as not heard, and ask, per §9.4.3. The
+transcript is the one place in the pipeline where a wrong word is
+indistinguishable from a right one downstream: "hotter" misheard as "shorter" is
+a physical action on a machine with a heating element. A backend that cannot
+state a confidence MUST NOT be treated as certain.
+
+#### 9.4.3 A model MAY ask instead of answering
+
+Normative, and the reason is that the alternative to asking is guessing, and on
+this path a guess becomes a physical action.
+
+Where a request cannot be resolved, a model MAY return a question for the person
+instead of an intent. An engine MUST treat this as an ordinary outcome and MUST
+NOT act on a partially understood request.
+
+A question is text shown to a person. It reaches no actuation value, so none of
+the checks in §9.3 apply to it and the model is under no constraint in composing
+it.
+
+This is distinct from an engine with no model at all, which is a configuration
+error and MUST be reported as one. A model that asks a question has understood
+enough to know what it is missing, and the machine is working correctly.
+
+#### 9.4.4 A preference request MUST NOT alter the process
+
+Normative, and the counterpart to §7.1.
+
+§7.1 forbids the engine from correcting a taste fault by changing a preference
+variable. This is the same rule from the other side: a request that names only
+preference variables MUST NOT be served by a tool that also moves a process
+variable.
+
+Someone asking for less sugar has asked about taste. Achieving it by changing
+grind or temperature has altered the drink they did not ask about, and the next
+cycle cannot attribute the difference.
+
+The check MUST cover every variable a tool touches, meaning its declared
+`effects`, the variable any skill response attributes to that parameter, and
+anything `also_affects` names. Where no capable tool passes, the engine MUST
+refuse and say so rather than serve the request by other means.
+
+### 9.5 One variable at a time, not one action at a time
 
 When correcting a diagnosed fault, the engine MUST NOT invoke two tools whose
 `effects` sets intersect the same domain variable within one iteration, unless
@@ -1114,6 +1300,18 @@ the knowledge base explicitly declares the combination.
 Where a skill declares `also_affects` (5.4), those variables count toward this
 rule. A machine whose dose mechanism also shifts shot time is prevented from
 having both adjusted at once.
+
+**This limits actions per variable, not actions per plan.** A plan that moves
+five variables once each breaks no rule and is what a request ordinarily needs:
+"weaker and smaller than last time" is two goals served by two different tools.
+A plan that moves one variable twice is refused, because the next cycle could
+not then attribute the difference to either action, and losing that is losing
+the machine's ability to learn from what it just did.
+
+An engine MUST therefore derive its candidate set from **every** goal in the
+plan. Deriving it from one variable makes the rule above unsatisfiable for any
+plan longer than one step, since every candidate on offer then moves the same
+variable.
 
 ---
 

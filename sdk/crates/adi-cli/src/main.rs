@@ -3,6 +3,9 @@
 //! The validator is one of the three things a manufacturer needs in order to
 //! integrate without waiting on us. See ROADMAP phase 12.
 
+mod conformance;
+mod genc;
+
 use std::path::PathBuf;
 
 use adi_protocol::{Declaration, Skill};
@@ -31,6 +34,20 @@ enum Command {
         #[arg(long)]
         skill: Option<PathBuf>,
     },
+    /// Compile a declaration into C tables for the appliance-side SDK.
+    ///
+    /// A device never parses a declaration. This runs on a host at build time
+    /// and emits const tables that land in flash. See sdk/c/DESIGN.md.
+    GenerateC {
+        path: PathBuf,
+        /// Directory to write adip_generated_<name>.{h,c} into.
+        #[arg(long, short, default_value = ".")]
+        out: PathBuf,
+        /// Basename for the generated files. Defaults to the declaration's
+        /// model, lowercased.
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Run the conformance corpus.
     Conformance {
         #[arg(default_value = "conformance/espresso/cases")]
@@ -43,6 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Validate { path, skill } => validate(path, skill),
         Command::Capabilities { path, skill } => capabilities(path, skill),
+        Command::GenerateC { path, out, name } => generate_c(path, out, name),
         Command::Conformance { dir } => conformance(dir),
     }
 }
@@ -135,6 +153,50 @@ fn capabilities(
     Ok(())
 }
 
-fn conformance(_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    todo!("load case files, run the domain, compare against expected decisions")
+fn generate_c(
+    path: PathBuf,
+    out: PathBuf,
+    name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let declaration = load_declaration(&path)?;
+    declaration.validate()?;
+
+    let basename = name.unwrap_or_else(|| {
+        declaration
+            .device
+            .model
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect()
+    });
+
+    let generated = genc::generate(&declaration, &basename)?;
+
+    std::fs::create_dir_all(&out)?;
+    let h = out.join(format!("adip_generated_{basename}.h"));
+    let c = out.join(format!("adip_generated_{basename}.c"));
+    std::fs::write(&h, generated.header)?;
+    std::fs::write(&c, generated.source)?;
+
+    println!("wrote {}", h.display());
+    println!("wrote {}", c.display());
+    println!(
+        "  {} tools, {} signals, {} invariants, {} rate limits",
+        declaration.tools.len(),
+        declaration.signals.len(),
+        declaration.envelope.invariants.len(),
+        declaration.envelope.rate_limits.len()
+    );
+    Ok(())
+}
+
+fn conformance(dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let failures = conformance::run(&dir)?;
+    if failures > 0 {
+        // A conformance run that fails must fail the process, or it cannot be
+        // wired into anyone's build.
+        std::process::exit(1);
+    }
+    Ok(())
 }

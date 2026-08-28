@@ -106,7 +106,7 @@ pub struct Tool {
     #[serde(default)]
     pub preconditions: Vec<String>,
     /// Domain variables this tool changes. Used by the one-variable-at-a-time
-    /// rule in ADI-P 9.4.
+    /// rule in ADI-P 9.5.
     #[serde(default)]
     pub effects: Vec<VariableId>,
     #[serde(default)]

@@ -82,7 +82,92 @@ cases:
   # for "less sugar" must never be answered by changing the extraction.
   - id: "less-sugar-never-touches-extraction"
     style: "adi.espresso.style.for_milk"
-    request: "less sugar"
+    request: "half the sugar of last time"
+    # The words above are what a person says. The structure below is what a
+    # model must turn them into, and it is all the engine ever sees. Note that
+    # it says "half of last time" rather than "4 g": the model is not trusted to
+    # remember what last time was, nor to do the division. The engine resolves
+    # the reference against memory.
+    intent:
+      kind: adjust
+      style: "adi.espresso.style.for_milk"
+      targets:
+        sugar_mass: { of: last, scale: 0.5 }
+    # Seeded as the remembered previous cycle, so "last time" means 8 g.
+    settings:
+      dose_mass:  { value: 9.0, unit: g }
+      sugar_mass: { value: 8.0, unit: g }
+    expect:
+      cause: "preference_adjustment"
+      target_variable: "sugar_mass"
+      selected_tool: "x.example.additive.sweetener_pump"
+      must_not_touch: ["grind_setting", "brew_temperature", "yield_mass"]
+
+  # The next two cases carry the same shot and differ only by style. They exist
+  # because the engine previously resolved targets from a hardcoded table that
+  # matched on short names like "espresso", so every case here fell through to a
+  # default and the declared style was ignored. A pair that must disagree is the
+  # only way to keep that from happening again quietly.
+  - id: "a-long-shot-is-over-extracted-as-an-espresso"
+    style: "adi.espresso.style.espresso"
+    settings:
+      dose_mass:     { value: 9.0, unit: g }
+      grind_setting: { value: 19,  unit: step }
+    trace:
+      signal: "adi.espresso.signal.mass"
+      samples: [[0,0],[8,2],[16,9],[24,18],[32,26],[36,31]]
+    feedback:
+      descriptors: []
+    expect:
+      cause: "over_extracted"
+      target_variable: "shot_time"
+      desired_delta_sign: negative
+      selected_tool: "adi.espresso.grind.set_setting"
+      direction: coarser
+
+  - id: "the-same-shot-is-in-target-as-a-lungo"
+    style: "adi.espresso.style.lungo"
+    settings:
+      dose_mass:     { value: 9.0, unit: g }
+      grind_setting: { value: 19,  unit: step }
+    trace:
+      signal: "adi.espresso.signal.mass"
+      samples: [[0,0],[8,2],[16,9],[24,18],[32,26],[36,31]]
+    feedback:
+      descriptors: []
+    expect:
+      cause: "balanced"
+      target_variable: null
+      selected_tool: null
+
+  # A material prior resolves alongside the style. Dark roast narrows brew
+  # temperature; it must not disturb the shot time diagnosis.
+  - id: "a-roast-prior-resolves-without-changing-the-diagnosis"
+    style: "adi.espresso.style.espresso"
+    material: "adi.espresso.roast.dark"
+    settings:
+      dose_mass:     { value: 9.0, unit: g }
+      grind_setting: { value: 21,  unit: step }
+    trace:
+      signal: "adi.espresso.signal.mass"
+      samples: [[0,0],[7,3],[14,10],[21,19],[28,27]]
+    feedback:
+      descriptors: ["balanced"]
+    expect:
+      cause: "balanced"
+      target_variable: null
+      selected_tool: null
+
+  # The one thing still missing, declared rather than left implicit.
+  #
+  # The case above carries the same request already turned into structured
+  # intent, and passes. This one carries only the words, which is what a person
+  # actually produces. Turning words into intent is the model's job and the one
+  # job on this path that is not deterministic, so this case stays pending until
+  # a backend exists. It is here so the gap is visible in every run.
+  - id: "spoken-request-needs-a-model"
+    style: "adi.espresso.style.for_milk"
+    request: "make it half as sweet as the last one"
     settings:
       dose_mass:  { value: 9.0, unit: g }
       sugar_mass: { value: 8.0, unit: g }

@@ -12,6 +12,7 @@ dependencies = [
  "adi-protocol",
  "adi-safety",
  "clap",
+ "serde",
  "serde_json",
  "serde_yaml",
 ]
@@ -23,6 +24,7 @@ dependencies = [
  "adi-protocol",
  "adi-safety",
  "serde",
+ "serde_yaml",
  "thiserror",
 ]
 
@@ -46,6 +48,16 @@ dependencies = [
  "adi-protocol",
  "serde",
  "serde_yaml",
+ "thiserror",
+]
+
+[[package]]
+name = "adi-language"
+version = "0.1.0"
+dependencies = [
+ "adi-core",
+ "adi-decision",
+ "adi-protocol",
  "thiserror",
 ]
 

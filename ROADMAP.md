@@ -128,6 +128,21 @@ conversation requires it, ideally funded by them.
 C reference SDK, declaration validator, conformance test suite. These three turn
 `PROTOCOL.md` from a document into something a firmware team can schedule.
 
+Status:
+
+- **C reference SDK**: `sdk/c`, milestones M1 to M5 complete. Types, generated
+  tables, framing, decode, validation, dispatch, the stateful envelope and the
+  failsafe. 232 host checks. M6, a port to real hardware, needs a board.
+- **Validator**: `adi validate`, plus `adi capabilities` to show what the
+  engine can actually move on a given machine.
+- **Conformance suite**: `adi conformance`. Runs a corpus of input and expected
+  decision pairs, reports each case, and fails the process on any regression.
+  Wired into `cargo test` so it cannot rot.
+- **Code generator**: `adi generate-c`, which was not in the original plan.
+  It compiles a declaration into C tables so a device never parses one, and it
+  removes the drift risk of a range written in both the declaration and the
+  firmware.
+
 ---
 
 ## The second-profile discipline

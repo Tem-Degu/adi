@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------- build output
 sdk/target/
+sdk/c/build/
 __pycache__/
 *.pyc
 
@@ -14,6 +15,12 @@ __pycache__/
 
 # Fundraising and commercial material
 Decks/
+
+# The deck build scripts, which contain the full slide copy: market figures,
+# the use-of-funds split and the team placeholders. The .pptx files are the
+# output; these are the source, and they are no less private for it.
+tools/
+
 uae-investor-targets.txt
 
 # Superseded internal documents. Both contradict the current work.
@@ -22,6 +29,11 @@ BUILD-GUIDE.md
 
 # ---------------------------------------------------------------- local
 .claude/settings.local.json
+
+# Working notes for picking the project back up. Internal, and it names the
+# files that must never be published, so it must not be published either.
+CONTEXT.md
+TODO.md
 *.bak
 *~
 .DS_Store

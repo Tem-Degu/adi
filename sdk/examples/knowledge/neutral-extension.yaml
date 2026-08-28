@@ -1,0 +1,37 @@
+# A fictional vendor extension against neutral-base.yaml.
+#
+# Shows every part of PROTOCOL.md section 6 that a manufacturer may use: a new
+# style inheriting from a base one, a material prior, a default, and a narrowed
+# constraint.
+
+namespace: "x.acme"
+extension_version: "1.0"
+extends:
+  domain_profile: "example/v1"
+  base_min_version: "1.0"
+
+styles:
+  # Narrower than the base style it inherits from. Narrowing is allowed;
+  # widening is refused. See PROTOCOL.md 6.4.
+  - id: "x.acme.style.custom"
+    inherits: "adi.example.style.standard"
+    targets:
+      cycle_time: { min: 26.0, max: 30.0, unit: s }
+
+material_priors:
+  - id: "x.acme.material.house"
+    attributes: { grade: "medium" }
+    offsets:    { position: -1.0 }
+    targets:
+      process_temperature: { min: 90.0, max: 94.0, unit: c }
+
+defaults:
+  - variable: "input_mass"
+    value: 9.0
+    unit: g
+    rationale_note_id: "carrier_size"
+
+# This machine cannot hold the top of the base range reliably, so it says so.
+# Narrower than the base, therefore permitted.
+constraints:
+  process_temperature: { min: 88.0, max: 96.0, unit: c }

@@ -1,0 +1,53 @@
+# A fictional base knowledge base, for testing the domain-neutral crates.
+#
+# Pairs with examples/declarations/neutral-machine.yaml. If layering could only
+# be exercised against the espresso knowledge, "domain-neutral" would be a
+# claim rather than a demonstrated property.
+
+profile: "example/v1"
+knowledge_version: "1.0"
+
+styles:
+  - id: "adi.example.style.standard"
+    targets:
+      cycle_time:   { min: 25.0, max: 32.0, unit: s }
+      output_ratio: { min: 1.8,  max: 2.4,  unit: none }
+
+  # Inheritance, so the chain walk has something real to follow.
+  - id: "adi.example.style.short"
+    inherits: "adi.example.style.standard"
+    targets:
+      cycle_time:   { min: 22.0, max: 30.0, unit: s }
+      output_ratio: { min: 1.2,  max: 1.8,  unit: none }
+
+material_priors:
+  - id: "adi.example.material.light"
+    attributes: { grade: "light" }
+    offsets:    { position: -3.0 }
+    targets:
+      process_temperature: { min: 92.0, max: 96.0, unit: c }
+
+  - id: "adi.example.material.heavy"
+    attributes: { grade: "heavy" }
+    offsets:    { position: 2.0 }
+    targets:
+      process_temperature: { min: 88.0, max: 92.0, unit: c }
+
+# Used only where a skill declares no response for a variable. Deliberately
+# conservative: a wrong large step costs a whole cycle.
+default_steps:
+  cycle_time:          { value: 2.0, unit: s }
+  output_ratio:        { value: 0.1, unit: none }
+  process_temperature: { value: 0.5, unit: c }
+
+# The quality envelope, distinct from any machine's safety envelope, which
+# lives in firmware and is unreachable from here.
+constraints:
+  cycle_time:          { min: 15.0, max: 60.0, unit: s }
+  output_ratio:        { min: 1.0,  max: 4.0,  unit: none }
+  process_temperature: { min: 85.0, max: 98.0, unit: c }
+
+# Variables that express taste rather than process. The engine must never try
+# to correct a process fault by changing one. Only the base may declare these.
+preference_variables:
+  - additive_volume

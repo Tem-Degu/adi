@@ -8,11 +8,33 @@ pub mod rules;
 use adi_core::cycle::Cycle;
 use adi_core::domain::{Diagnosis, Domain};
 use adi_protocol::ids::VariableId;
-use adi_protocol::knowledge::ResolvedTargets;
-use adi_protocol::units::{Range, Unit};
+use adi_protocol::knowledge::{Knowledge, KnowledgeBase, KnowledgeExtension, Layer, ResolvedTargets};
+
+/// The base knowledge, compiled in.
+///
+/// Embedded rather than read from disk because the engine runs on an appliance
+/// module with no filesystem to read from, and because the knowledge a build
+/// shipped with should be a property of that build rather than of whatever
+/// happens to be next to the binary.
+const BASE_KNOWLEDGE: &str = include_str!("../../../profiles/espresso/knowledge.yaml");
 
 pub struct Espresso {
     variables: Vec<VariableId>,
+    knowledge: Knowledge,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EspressoError {
+    #[error("the espresso knowledge base does not parse: {0}")]
+    Parse(#[from] serde_yaml::Error),
+    /// The extension is malformed in itself: bad namespace, redefinition,
+    /// a missing parent. ADI-P 6.5 items 1 to 4 and 6.
+    #[error(transparent)]
+    Extension(#[from] adi_protocol::ExtensionError),
+    /// The extension is well formed but does not layer: it widens a constraint,
+    /// or changes a unit. ADI-P 6.4.
+    #[error(transparent)]
+    Knowledge(#[from] adi_protocol::KnowledgeError),
 }
 
 impl Default for Espresso {
@@ -22,9 +44,40 @@ impl Default for Espresso {
 }
 
 impl Espresso {
+    /// Panics only if the compiled-in knowledge base is malformed, which is a
+    /// build fault rather than a runtime one and is caught by the tests in this
+    /// crate. `try_new` is available where a caller would rather handle it.
     pub fn new() -> Self {
-        Self {
-            variables: [
+        Self::try_new().expect("the compiled-in espresso knowledge base must be valid")
+    }
+
+    pub fn try_new() -> Result<Self, EspressoError> {
+        let base: KnowledgeBase = serde_yaml::from_str(BASE_KNOWLEDGE)?;
+        Ok(Self {
+            variables: Self::modelled_variables(),
+            knowledge: Knowledge::new(base.into_layer())?,
+        })
+    }
+
+    /// Accept a manufacturer's or integrator's knowledge extension.
+    ///
+    /// Validated structurally first, then for constraint monotonicity as it is
+    /// layered. A rejected extension leaves the profile exactly as it was, per
+    /// ADI-P 6.5: the machine keeps working on the knowledge it already has.
+    pub fn add_extension(
+        &mut self,
+        extension: KnowledgeExtension,
+        layer: Layer,
+    ) -> Result<(), EspressoError> {
+        let base: KnowledgeBase = serde_yaml::from_str(BASE_KNOWLEDGE)?;
+        extension.validate(&base)?;
+        self.knowledge.add(extension.into_layer(layer))?;
+        Ok(())
+    }
+
+    fn modelled_variables() -> Vec<VariableId> {
+        {
+            [
                 registry::vars::DOSE_MASS,
                 registry::vars::YIELD_MASS,
                 registry::vars::RATIO,
@@ -37,7 +90,7 @@ impl Espresso {
             ]
             .iter()
             .map(|v| VariableId::from(*v))
-            .collect(),
+            .collect()
         }
     }
 }
@@ -51,49 +104,8 @@ impl Domain for Espresso {
         &self.variables
     }
 
-    fn base_targets(&self, style: &str) -> ResolvedTargets {
-        let mut targets = ResolvedTargets::new();
-        let layer = adi_protocol::knowledge::Layer::Base;
-
-        // Loaded from profiles/espresso/knowledge.yaml in the real build.
-        // Inlined here so the scaffold has something to reason over.
-        let (ratio, time) = match style {
-            "ristretto" => ((1.2, 1.8), (22.0, 30.0)),
-            "lungo" => ((3.0, 4.0), (28.0, 40.0)),
-            _ => ((1.8, 2.4), (25.0, 32.0)),
-        };
-
-        let _ = targets.apply(
-            registry::vars::RATIO,
-            Range {
-                min: ratio.0,
-                max: ratio.1,
-                resolution: None,
-                unit: Unit::None,
-            },
-            layer,
-        );
-        let _ = targets.apply(
-            registry::vars::SHOT_TIME,
-            Range {
-                min: time.0,
-                max: time.1,
-                resolution: None,
-                unit: Unit::S,
-            },
-            layer,
-        );
-        let _ = targets.apply(
-            registry::vars::BREW_TEMPERATURE,
-            Range {
-                min: 90.0,
-                max: 96.0,
-                resolution: Some(0.5),
-                unit: Unit::C,
-            },
-            layer,
-        );
-        targets
+    fn knowledge(&self) -> &Knowledge {
+        &self.knowledge
     }
 
     fn derive(&self, cycle: &mut Cycle) {
@@ -102,15 +114,6 @@ impl Domain for Espresso {
 
     fn diagnose(&self, cycle: &Cycle, targets: &ResolvedTargets) -> Diagnosis {
         rules::diagnose(cycle, targets)
-    }
-
-    fn default_step(&self, variable: &VariableId) -> Option<f64> {
-        match variable.as_str() {
-            registry::vars::SHOT_TIME => Some(2.0),
-            registry::vars::RATIO => Some(0.1),
-            registry::vars::BREW_TEMPERATURE => Some(0.5),
-            _ => None,
-        }
     }
 
     fn feedback_vocabulary(&self) -> &[&str] {

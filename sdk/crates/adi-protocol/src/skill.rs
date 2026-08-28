@@ -133,7 +133,7 @@ pub struct Interaction {
     #[serde(default)]
     pub invalidates: Vec<String>,
     /// Other variables this change moves. Counts toward the
-    /// one-variable-at-a-time rule in ADI-P 9.4.
+    /// one-variable-at-a-time rule in ADI-P 9.5.
     #[serde(default)]
     pub also_affects: Vec<VariableId>,
 }

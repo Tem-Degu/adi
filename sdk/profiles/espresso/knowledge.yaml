@@ -37,13 +37,21 @@ styles:
 
 # Starting points by roast. Offsets apply to the user's current setting; they
 # are not absolute values, because grinder scales are not comparable.
+# Roast changes how the coffee behaves: where the grind starts and how hot it
+# should be brewed. It does not change what a drink is. Ratio is what separates
+# a ristretto from a lungo, so it belongs to the style and is deliberately
+# absent here.
+#
+# An earlier version put a ratio on the light and dark roasts, written with a
+# plain espresso in mind. Light asked for 2.0 to 2.6 while a lungo is 3.0 to
+# 4.0, so no value satisfied both and a lungo from light roast beans could not
+# be resolved at all. It is an ordinary drink.
 material_priors:
   - id: "adi.espresso.roast.light"
     attributes: { roast: "light" }
     offsets: { grind_setting: -3.0 }
     targets:
       brew_temperature: { min: 92.0, max: 96.0, unit: c }
-      ratio:            { min: 2.0,  max: 2.6,  unit: none }
 
   - id: "adi.espresso.roast.medium"
     attributes: { roast: "medium" }
@@ -56,7 +64,6 @@ material_priors:
     offsets: { grind_setting: 2.0 }
     targets:
       brew_temperature: { min: 88.0, max: 92.0, unit: c }
-      ratio:            { min: 1.6,  max: 2.0,  unit: none }
 
 # Used only where a skill declares no response for a variable. Deliberately
 # conservative: a wrong big step costs a whole cycle and a bag of beans.

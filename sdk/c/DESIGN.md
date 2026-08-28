@@ -1,9 +1,9 @@
 # libadip: C reference SDK
 
-**Design plan · Status: not yet implemented · Targets ADI-P 0.2**
+**Design plan · M1 to M5 complete, M6 needs hardware · Targets ADI-P 0.2**
 
 The appliance side of ADI-P, written to be linked into a manufacturer's existing
-firmware. This document is the plan. No code exists yet.
+firmware. This document is the plan and the record of progress against it.
 
 ---
 
@@ -235,22 +235,155 @@ device side is that it does not.
 
 ## 9. Build order
 
-**M1. Types and generated tables.** `adip_num_t`, the unit vocabulary, table
-layouts. `adi generate-c` emitting tables for `neutral-machine.yaml` and
-`ex900.yaml`. Nothing executes yet.
+**M1. Types and generated tables. DONE.** `adip_num_t`, the unit vocabulary,
+table layouts, and `adi generate-c` emitting tables for both example
+declarations.
 
-**M2. Decode and validate.** Feed bytes, produce a validated invocation or a
-rejection with the right reason code. Host tests only. This is where most of the
-correctness lives, so it gets the most tests.
+Measured on an x86-64 host, so indicative rather than final, but the shape is
+what matters:
 
-**M3. Dispatch and reply.** The handler contract, synchronous and asynchronous
-completion, response formatting.
+| | text | data | bss |
+|---|---|---|---|
+| `adip_num.o` | 860 B | 0 | 0 |
+| `adip_tables.o` | 408 B | 0 | 0 |
+| generated tables, 6 tools | 2320 B | 0 | 0 |
 
-**M4. Stateful envelope.** Invariants, rate limits, resources. Ported directly
-from the logic already proven in `adi-safety`, and tested against the same
-cases, so both implementations agree.
+**Zero bytes of `data` and `bss`.** The tables are genuinely const and live in
+flash, which was the point of generating them. 49 host checks pass, and the
+whole thing compiles clean under `-Wall -Wextra -pedantic -Wconversion
+-Wsign-conversion -Wcast-qual -Wshadow -Wdouble-promotion`.
 
-**M5. Failsafe and timing.** Link timeout, safe state entry, the 200 ms deadline.
+Three defects the compiler caught that review had not: enum value arrays were
+being emitted inside an initialiser list, which is not valid C; sizing macros
+and tool index enums collided when two generated headers appeared in one
+translation unit; and the device symbol itself collided for the same reason. It
+is now `adip_device_<basename>` with every header symbol namespaced.
+
+**M2. Decode and validate. DONE.** Framing with CRC, a CBOR reader, decode into
+a resolved invocation, and validation against the declaration. 54 host checks,
+almost all of them rejection paths.
+
+Runtime footprint after M2, x86-64 host, indicative:
+
+| | text | data | bss |
+|---|---|---|---|
+| `adip_cbor.o` | 1492 B | 0 | 0 |
+| `adip_decode.o` | 1324 B | 0 | 0 |
+| `adip_validate.o` | 804 B | 0 | 0 |
+| `adip_num.o` | 860 B | 0 | 0 |
+| `adip_frame.o` | 548 B | 0 | 0 |
+| `adip_tables.o` | 408 B | 0 | 0 |
+| **total** | **5436 B** | **0** | **0** |
+
+Under half the 12 KB budget with the hardest part done, and still no RAM.
+
+**M3. Dispatch and reply. DONE.** Context, feed, poll, dispatch, the handler
+contract, asynchronous completion. 57 host checks.
+
+Footprint after M3, x86-64 host, indicative:
+
+| | text | data | bss |
+|---|---|---|---|
+| all six core files | 5436 B | 0 | 0 |
+| `adip_runtime.o` | 1744 B | 0 | 0 |
+| **total** | **7180 B** | **0** | **0** |
+
+RAM per instance: `adip_ctx_t` is 136 bytes, plus a caller-supplied receive
+buffer of 517. About 650 bytes against a 2 KB target, and still nothing in
+`bss` because the caller owns the buffer.
+
+Two decisions worth recording.
+
+**The handler is called before ACCEPTED is sent.** That lets firmware refuse
+for a reason only it knows, such as a hardware fault, without having to abort
+something it already acknowledged. It is only sound because handlers must not
+block, so the non-blocking contract is what keeps the 200 ms reply deadline
+reachable rather than being a separate mechanism.
+
+**A second invocation while busy is refused with BUSY, not queued.** Queuing
+would mean holding an invocation whose preconditions may no longer hold by the
+time it runs, which is exactly the kind of stale-state bug the protocol exists
+to prevent.
+
+The build now separates `CORE` from `RUNTIME`. Only `adip_runtime.c` calls the
+port layer, so everything else links and tests with no platform at all.
+
+**M4. Stateful envelope. DONE.** Invariants, rate limits and resources, with
+the first test group mirroring `adi-safety`'s `composition.rs` case for case
+against the same fixture. 30 host checks.
+
+**Cross-implementation testing paid for itself immediately.** It found a real
+bug in `adi-safety`: `check_invariants` added the raw `f64` of a contribution
+without comparing its unit to the invariant's, so grams could be summed into a
+millilitre total. The C refused, the Rust accepted, and the two disagreed about
+whether an action was legal. That is precisely the divergence that would show up
+in the field as an engine permitting what the appliance rejects. Both sides now
+check, with a regression test in `composition.rs`.
+
+It also found a modelling error in the neutral fixture, which had one invariant
+accumulating from a millilitre parameter and a gram one. The process output is
+now a volume.
+
+Footprint after M4:
+
+| | text |
+|---|---|
+| core, six files | 5648 B |
+| `adip_runtime.o` | 2000 B |
+| `adip_state.o` | 1480 B |
+| **total** | **9148 B** |
+
+RAM: `adip_ctx_t` grew to 496 bytes, since it now carries accumulators,
+resource levels and rate-limit history. With the 517 byte receive buffer that
+is about 1 KB against the 2 KB target.
+
+The compile-time maxima are enforced at init: a declaration with more
+invariants, rate limits or resources than this build can track is REFUSED with
+`ADIP_ERR_UNSUPPORTED` rather than partially enforced. Tracking eight of nine
+invariants would mean the declaration advertises a limit the firmware silently
+ignores, which is worse than not starting.
+
+**M5. Failsafe and timing. DONE.** Link timeout, safe state entry, duration
+overrun, and the reply deadline as a measurement. 42 host checks, all of them
+on paths that only run when something has gone wrong.
+
+Four decisions worth recording.
+
+**Noise is not liveness.** `link_ms` advances only when a frame passes its CRC,
+never when bytes merely arrive. A stuck transmitter spraying rubbish must not
+hold the failsafe off, because rubbish is not the engine talking. A test feeds
+noise throughout an operation and confirms the failsafe still fires.
+
+**An idle machine does not fault.** The failsafe is scoped to an operation in
+flight. Faulting a machine that is doing nothing because the engine went quiet
+would be a nuisance rather than a safeguard.
+
+**Reversible operations are stopped but do not fault.** PROTOCOL.md 4.6
+requirement 4 scopes the MUST to non-reversible operations, and that is where
+the safe state is driven. A reversible one is still stopped, since continuing
+to move a machine nobody is talking to is not defensible either.
+
+**Resuming is not automatic.** Once the failsafe fires the context refuses
+further invocations with FAULT until the firmware calls `adip_clear_fault()`.
+A machine interrupted mid-cycle may hold material the engine knows nothing
+about, and only the firmware can say when it is fit to continue.
+
+The 200 ms deadline is measured rather than asserted. `stat_worst_reply_ms` and
+`stat_deadline_misses` give a conformance run evidence instead of a claim, and
+a handler that blocks shows up there immediately.
+
+Footprint after M5: 9516 B text, 0 data, 0 bss. `adip_ctx_t` is 496 bytes plus
+the 517 byte receive buffer.
+
+**A correction to the M4 work, found later.** `adip_check_stateful` read the
+clock itself while `adip_commit_stateful` took `now_ms` from its caller. Two
+consequences. A rate limit could be tested against one instant and recorded
+against another, which is a real defect in safety code. And `adip_state.c`
+therefore called the port layer, so the `CORE` and `RUNTIME` split above was not
+true as written: `CORE` could not link without a platform. `adip_check_stateful`
+now takes `now_ms` too, the runtime reads the clock once and uses it for both
+calls, and `test_m1` and `test_m2` link `CORE` alone, which is what makes the
+claim checkable rather than merely stated.
 
 **M6. Port and integrate.** Reference port for one real MCU, then run the
 conformance suite against a device rather than a simulator.
@@ -287,11 +420,22 @@ pass, since some customers will require it.
 
 ## 12. Open questions
 
-**Wire encoding.** The spec recommends JSON for documents and CBOR for the BLE
-binding. On an MCU, a minimal CBOR decoder is smaller and faster than a JSON
-one, and CBOR is self-delimiting, which simplifies framing. Leaning CBOR for
-invocations with a development-only JSON path, but this needs deciding before
-M2 rather than during it.
+**Wire encoding. DECIDED: CBOR.** Three reasons, in order of weight.
+
+RFC 8949 tag 4 is a decimal fraction, encoded as `[exponent, mantissa]`, which
+is exactly `adip_num_t`. Numbers cross the wire with no conversion and no
+rounding, which is what keeps a range check against a safety limit exact. JSON
+would have meant parsing decimal text into scaled integers on an MCU.
+
+A decoder for the subset we need is 1.5 KB and needs no allocation.
+
+It matches the BLE binding the spec already specifies.
+
+Binary floats are refused rather than converted, since a float cannot hold 0.1
+exactly and accepting one would put back the ambiguity scaled integers remove.
+
+The development-only JSON path was dropped. A second encoder is a second thing
+to get wrong, and `adi-cli` can print a decoded frame on the host instead.
 
 **Timer wraparound.** `adip_port_millis` wraps every 49 days on a 32-bit
 counter. Unsigned subtraction handles it correctly, but every comparison must be

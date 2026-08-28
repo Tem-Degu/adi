@@ -33,6 +33,109 @@ pub struct KnowledgeExtension {
     pub material_priors: Vec<MaterialPrior>,
     #[serde(default)]
     pub defaults: Vec<DefaultEntry>,
+    /// Narrower bounds on variables the base already constrains.
+    ///
+    /// PROTOCOL.md 6.4 lets any layer narrow a range and none widen one, so a
+    /// vendor that knows its machine cannot hold a temperature above 94 can say
+    /// so. Optional, and absent in most extensions.
+    #[serde(default)]
+    pub constraints: BTreeMap<String, Range>,
+}
+
+/// The base domain knowledge, owned by StreetAI. Layer 0.
+///
+/// Structurally the same as an extension, minus the namespace and version
+/// negotiation an extension needs, plus the things only the base may define:
+/// hard constraints and the list of preference variables.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeBase {
+    pub profile: String,
+    pub knowledge_version: String,
+    #[serde(default)]
+    pub styles: Vec<StyleEntry>,
+    #[serde(default)]
+    pub material_priors: Vec<MaterialPrior>,
+    /// How far to move a variable when no skill response covers it.
+    #[serde(default)]
+    pub default_steps: BTreeMap<String, crate::units::Quantity>,
+    #[serde(default)]
+    pub constraints: BTreeMap<String, Range>,
+    /// Variables that express taste rather than process. The engine must never
+    /// try to correct a process fault by changing one. See PROTOCOL.md 7.1.
+    #[serde(default)]
+    pub preference_variables: Vec<VariableId>,
+}
+
+/// One layer of knowledge in the form resolution works with.
+///
+/// Base files and vendor extensions arrive in slightly different shapes,
+/// because each carries fields the other has no use for. Both collapse to this,
+/// so layering has one kind of thing to combine rather than a special case per
+/// source.
+#[derive(Debug, Clone)]
+pub struct KnowledgeLayer {
+    pub layer: Layer,
+    /// Empty for the base, which owns the unprefixed namespace.
+    pub namespace: Option<String>,
+    pub styles: Vec<StyleEntry>,
+    pub material_priors: Vec<MaterialPrior>,
+    pub default_steps: BTreeMap<String, crate::units::Quantity>,
+    pub constraints: BTreeMap<String, Range>,
+    pub preference_variables: Vec<VariableId>,
+}
+
+impl KnowledgeBase {
+    pub fn into_layer(self) -> KnowledgeLayer {
+        KnowledgeLayer {
+            layer: Layer::Base,
+            namespace: None,
+            styles: self.styles,
+            material_priors: self.material_priors,
+            default_steps: self.default_steps,
+            constraints: self.constraints,
+            preference_variables: self.preference_variables,
+        }
+    }
+
+    /// Every identifier this base introduces, for the redefinition check a
+    /// higher layer has to pass.
+    pub fn identifiers(&self) -> Vec<&str> {
+        self.styles
+            .iter()
+            .map(|s| s.id.as_str())
+            .chain(self.material_priors.iter().map(|m| m.id.as_str()))
+            .collect()
+    }
+}
+
+impl KnowledgeExtension {
+    /// Collapse into a layer. `layer` says which, since the same document can
+    /// be supplied by a manufacturer or by an integrator.
+    pub fn into_layer(self, layer: Layer) -> KnowledgeLayer {
+        let default_steps = self
+            .defaults
+            .iter()
+            .map(|d| {
+                (
+                    d.variable.0.clone(),
+                    crate::units::Quantity::new(d.value, d.unit),
+                )
+            })
+            .collect();
+
+        KnowledgeLayer {
+            layer,
+            namespace: Some(self.namespace),
+            styles: self.styles,
+            material_priors: self.material_priors,
+            default_steps,
+            constraints: self.constraints,
+            // Only the base declares which variables are preferences. A vendor
+            // that could add one could reclassify a process variable as taste
+            // and take it out of the engine's reach.
+            preference_variables: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,23 +223,90 @@ impl ResolvedTargets {
                 Ok(())
             }
             Some(existing) => {
+                if existing.value.unit != range.unit {
+                    return Err(MonotonicityError::UnitMismatch {
+                        key: key.to_string(),
+                        layer,
+                        expected: existing.value.unit,
+                        found: range.unit,
+                    });
+                }
+                // Disjoint or empty first, so it is not misreported as widening.
                 let narrowed = existing.value.intersect(&range).ok_or_else(|| {
                     MonotonicityError::Incompatible {
                         key: key.to_string(),
                         layer,
                     }
                 })?;
-                if narrowed.min < existing.value.min || narrowed.max > existing.value.max {
+                // The test is on the incoming range, not the intersection.
+                // Intersecting has already clamped to the narrower of the two,
+                // so comparing the result against `existing` can never fail and
+                // a widening layer would be accepted with its widening quietly
+                // dropped. 6.4 requires the layer be rejected, not corrected.
+                if range.min < existing.value.min || range.max > existing.value.max {
                     return Err(MonotonicityError::Widened {
                         key: key.to_string(),
                         layer,
                     });
+                }
+                // A layer that restates what already held has not narrowed
+                // anything, so attribution stays with the layer that did.
+                // Section 9.3 asks which layer produced the effective value,
+                // not which one mentioned it last.
+                if narrowed.min == existing.value.min && narrowed.max == existing.value.max {
+                    return Ok(());
                 }
                 self.entries
                     .insert(key.to_string(), Attributed::new(narrowed, layer));
                 Ok(())
             }
         }
+    }
+
+    /// Combine two opinions about what is wanted, keeping the overlap.
+    ///
+    /// Distinct from `apply`, and the difference is not a technicality.
+    /// `apply` enforces 6.4: a layer may not widen a constraint, so anything
+    /// reaching outside what already holds is a rejected layer. This is for
+    /// composing preferences, where reaching outside is ordinary. A material
+    /// prior saying "this batch runs long" against a style saying "an espresso
+    /// is 1.8 to 2.4" means the overlap, not a fault.
+    ///
+    /// Disjoint is still an error: there is no value that satisfies both, and
+    /// silently picking one would make the machine claim a target nobody set.
+    pub fn narrow_to(
+        &mut self,
+        key: &str,
+        range: Range,
+        layer: Layer,
+    ) -> Result<(), MonotonicityError> {
+        let Some(existing) = self.entries.get(key) else {
+            self.entries
+                .insert(key.to_string(), Attributed::new(range, layer));
+            return Ok(());
+        };
+        if existing.value.unit != range.unit {
+            return Err(MonotonicityError::UnitMismatch {
+                key: key.to_string(),
+                layer,
+                expected: existing.value.unit,
+                found: range.unit,
+            });
+        }
+        let overlap =
+            existing
+                .value
+                .intersect(&range)
+                .ok_or_else(|| MonotonicityError::Incompatible {
+                    key: key.to_string(),
+                    layer,
+                })?;
+        if overlap.min == existing.value.min && overlap.max == existing.value.max {
+            return Ok(());
+        }
+        self.entries
+            .insert(key.to_string(), Attributed::new(overlap, layer));
+        Ok(())
     }
 
     pub fn get(&self, key: &str) -> Option<&Attributed<Range>> {
@@ -154,4 +324,383 @@ pub enum MonotonicityError {
     Widened { key: String, layer: Layer },
     #[error("layer {layer:?} declares an incompatible or empty range for '{key}'")]
     Incompatible { key: String, layer: Layer },
+    /// Intersecting ranges of different units would produce a number that means
+    /// nothing. `adi-safety` had this same hole in accumulation.
+    #[error("layer {layer:?} declares '{key}' in {found:?}, but it is already {expected:?}")]
+    UnitMismatch {
+        key: String,
+        layer: Layer,
+        expected: crate::units::Unit,
+        found: crate::units::Unit,
+    },
+}
+
+// ------------------------------------------------------------- validation
+
+/// Structural faults in a knowledge extension. PROTOCOL.md 6.5.
+///
+/// Monotonicity is not here: it needs the resolved base to compare against, so
+/// it is reported by resolution rather than by this check.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ExtensionError {
+    #[error("extension extends profile '{found}', but this engine implements '{expected}'")]
+    WrongProfile { expected: String, found: String },
+    #[error("identifier '{id}' is outside the vendor namespace '{namespace}'")]
+    NotNamespaced { id: String, namespace: String },
+    #[error("a vendor extension may not redefine base identifier '{0}'")]
+    Redefinition(String),
+    #[error("'{child}' inherits from '{parent}', which does not exist")]
+    UnknownParent { child: String, parent: String },
+    #[error("inheritance cycle through '{0}'")]
+    InheritanceCycle(String),
+    #[error("range for '{0}' is empty: min exceeds max")]
+    EmptyRange(String),
+}
+
+impl KnowledgeExtension {
+    /// Check everything that can be checked without resolving against the base
+    /// values, per PROTOCOL.md 6.5 items 1 to 4 and 6.
+    ///
+    /// `base` supplies the identifiers a vendor may inherit from but must not
+    /// redefine.
+    pub fn validate(&self, base: &KnowledgeBase) -> Result<(), ExtensionError> {
+        if self.extends.domain_profile != base.profile {
+            return Err(ExtensionError::WrongProfile {
+                expected: base.profile.clone(),
+                found: self.extends.domain_profile.clone(),
+            });
+        }
+
+        let base_ids = base.identifiers();
+        let prefix = format!("{}.", self.namespace);
+
+        let mine: Vec<&str> = self
+            .styles
+            .iter()
+            .map(|s| s.id.as_str())
+            .chain(self.material_priors.iter().map(|m| m.id.as_str()))
+            .collect();
+
+        for id in &mine {
+            // Redefinition is checked before namespacing, because it is the
+            // more specific complaint and the more useful message.
+            if base_ids.contains(id) {
+                return Err(ExtensionError::Redefinition((*id).to_string()));
+            }
+            if !id.starts_with(&prefix) {
+                return Err(ExtensionError::NotNamespaced {
+                    id: (*id).to_string(),
+                    namespace: self.namespace.clone(),
+                });
+            }
+        }
+
+        // Every declared range must be satisfiable on its own terms. An empty
+        // range would make every value illegal, which is never what anyone
+        // meant to write.
+        let ranges = self
+            .styles
+            .iter()
+            .flat_map(|s| s.targets.iter())
+            .chain(self.material_priors.iter().flat_map(|m| m.targets.iter()))
+            .chain(self.constraints.iter());
+        for (key, range) in ranges {
+            if range.min > range.max {
+                return Err(ExtensionError::EmptyRange(key.clone()));
+            }
+        }
+
+        self.check_inheritance(base)
+    }
+
+    /// Every `inherits` target must exist, and the chain must terminate.
+    ///
+    /// Iterative with a step budget rather than recursive, so a cycle is
+    /// reported instead of overflowing the stack.
+    fn check_inheritance(&self, base: &KnowledgeBase) -> Result<(), ExtensionError> {
+        let parent_of = |id: &str| -> Option<Option<String>> {
+            self.styles
+                .iter()
+                .find(|s| s.id == id)
+                .or_else(|| base.styles.iter().find(|s| s.id == id))
+                .map(|s| s.inherits.clone())
+        };
+
+        for style in &self.styles {
+            let mut current = style.inherits.clone();
+            let budget = self.styles.len() + base.styles.len() + 1;
+
+            for _ in 0..budget {
+                let Some(parent) = current else {
+                    break;
+                };
+                match parent_of(&parent) {
+                    None => {
+                        return Err(ExtensionError::UnknownParent {
+                            child: style.id.clone(),
+                            parent,
+                        })
+                    }
+                    Some(next) => current = next,
+                }
+            }
+
+            // Still walking after the budget means the chain does not end.
+            if current.is_some() {
+                return Err(ExtensionError::InheritanceCycle(style.id.clone()));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------- resolution
+
+/// The knowledge of one machine: a base plus whatever layers were accepted on
+/// top of it. ADI-P section 6.
+///
+/// Two mechanisms live here, and they are deliberately not the same code path.
+///
+/// **Inheritance** (`inherits`) creates a new identifier that starts from
+/// another's values and overrides the fields it names. It is override, not
+/// intersection. The espresso base is the proof: `lungo` inherits from
+/// `espresso` and sets a ratio of 3.0 to 4.0 against the parent's 1.8 to 2.4.
+/// Those ranges do not overlap. Intersecting them would yield an empty range
+/// and every lungo would fail to resolve.
+///
+/// **Layering** intersects: for one key, each higher layer may narrow the range
+/// and none may widen it, per 6.4. The two never collide, because an identifier
+/// is defined by exactly one layer; redefinition is refused before it gets here.
+#[derive(Debug, Clone)]
+pub struct Knowledge {
+    layers: Vec<KnowledgeLayer>,
+    /// Folded across layers as each is accepted, so a widening layer is caught
+    /// when it is added rather than at the first resolution that trips over it.
+    constraints: ResolvedTargets,
+}
+
+/// One resolved style, with the layer behind every effective value.
+#[derive(Debug, Clone)]
+pub struct Resolution {
+    pub style: String,
+    pub material: Option<String>,
+    pub targets: ResolvedTargets,
+    /// Additive corrections from the material prior, for example a starting
+    /// offset that puts a new batch near the mark instead of at the last one.
+    pub offsets: BTreeMap<String, Attributed<f64>>,
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum KnowledgeError {
+    #[error("knowledge must start from the base layer, but layer {0:?} was supplied")]
+    NotBase(Layer),
+    #[error("layer {0:?} is already present; each layer may be supplied once")]
+    DuplicateLayer(Layer),
+    #[error("layer {added:?} may not sit below {existing:?}")]
+    OutOfOrder { added: Layer, existing: Layer },
+    #[error("no style '{0}'")]
+    UnknownStyle(String),
+    #[error("no material '{0}'")]
+    UnknownMaterial(String),
+    #[error("'{child}' inherits from '{parent}', which does not exist")]
+    UnknownParent { child: String, parent: String },
+    #[error("inheritance cycle through '{0}'")]
+    InheritanceCycle(String),
+    #[error(transparent)]
+    Monotonicity(#[from] MonotonicityError),
+}
+
+impl Knowledge {
+    pub fn new(base: KnowledgeLayer) -> Result<Self, KnowledgeError> {
+        if base.layer != Layer::Base {
+            return Err(KnowledgeError::NotBase(base.layer));
+        }
+        let mut k = Self {
+            layers: Vec::new(),
+            constraints: ResolvedTargets::new(),
+        };
+        k.push(base)?;
+        Ok(k)
+    }
+
+    /// Accept a layer, or reject it whole.
+    ///
+    /// Section 6.5 is explicit that a failing extension is rejected with a
+    /// reason and the engine continues on the knowledge it already has. So this
+    /// is atomic: on error nothing is retained, and the machine keeps working
+    /// with slightly less knowledge rather than stopping. A vendor shipping a
+    /// bad extension should not brick an appliance.
+    pub fn add(&mut self, layer: KnowledgeLayer) -> Result<(), KnowledgeError> {
+        if layer.layer == Layer::Base {
+            return Err(KnowledgeError::DuplicateLayer(Layer::Base));
+        }
+        if let Some(top) = self.layers.last() {
+            if layer.layer == top.layer {
+                return Err(KnowledgeError::DuplicateLayer(layer.layer));
+            }
+            if layer.layer < top.layer {
+                return Err(KnowledgeError::OutOfOrder {
+                    added: layer.layer,
+                    existing: top.layer,
+                });
+            }
+        }
+        self.push(layer)
+    }
+
+    fn push(&mut self, layer: KnowledgeLayer) -> Result<(), KnowledgeError> {
+        // Fold into a copy first. If any constraint widens, the copy is dropped
+        // and this instance is untouched.
+        let mut trial = self.constraints.clone();
+        for (key, range) in &layer.constraints {
+            trial.apply(key, range.clone(), layer.layer)?;
+        }
+        self.constraints = trial;
+        self.layers.push(layer);
+        Ok(())
+    }
+
+    /// Resolve a style, optionally through a material prior.
+    ///
+    /// Three composition rules meet here, and they are different on purpose.
+    ///
+    /// 1. **Inheritance** overrides. A child style replaces the fields it names
+    ///    and inherits the rest, so it may sit anywhere, including outside its
+    ///    parent's range.
+    /// 2. **A style against the constraints** must be contained. Constraints
+    ///    are the envelope, and a style reaching outside one is a fault in the
+    ///    knowledge, reported rather than clamped: clamping would let a machine
+    ///    claim a target nobody set.
+    /// 3. **A material prior against a style** takes the overlap. A prior is a
+    ///    second opinion about this batch rather than a bound on the style, so
+    ///    leaning outside it is ordinary. Disjoint is still an error.
+    pub fn resolve(
+        &self,
+        style_id: &str,
+        material_id: Option<&str>,
+    ) -> Result<Resolution, KnowledgeError> {
+        let chain = self.inheritance_chain(style_id)?;
+
+        // Inheritance: plain override, root first so a descendant wins.
+        let mut inherited: BTreeMap<String, (Range, Layer)> = BTreeMap::new();
+        for (style, layer) in chain.iter().rev() {
+            for (key, range) in &style.targets {
+                inherited.insert(key.clone(), (range.clone(), *layer));
+            }
+        }
+
+        // Layering: intersection, broad to narrow.
+        let mut targets = self.constraints.clone();
+        for (key, (range, layer)) in inherited {
+            targets.apply(&key, range, layer)?;
+        }
+
+        let mut offsets = BTreeMap::new();
+        if let Some(id) = material_id {
+            let (prior, layer) = self
+                .material(id)
+                .ok_or_else(|| KnowledgeError::UnknownMaterial(id.to_string()))?;
+            // Composition, not layering: see `narrow_to`. A prior that leans
+            // outside the style is normal and resolves to the overlap.
+            for (key, range) in &prior.targets {
+                targets.narrow_to(key, range.clone(), layer)?;
+            }
+            for (key, value) in &prior.offsets {
+                offsets.insert(key.clone(), Attributed::new(*value, layer));
+            }
+        }
+
+        Ok(Resolution {
+            style: style_id.to_string(),
+            material: material_id.map(str::to_string),
+            targets,
+            offsets,
+        })
+    }
+
+    /// The style and its ancestors, nearest first. Iterative with a budget, so a
+    /// cycle is reported rather than overflowing the stack.
+    fn inheritance_chain(
+        &self,
+        style_id: &str,
+    ) -> Result<Vec<(&StyleEntry, Layer)>, KnowledgeError> {
+        let mut chain = Vec::new();
+        let mut current = Some(style_id.to_string());
+        let budget = self.layers.iter().map(|l| l.styles.len()).sum::<usize>() + 1;
+
+        for _ in 0..budget {
+            let Some(id) = current.take() else {
+                return Ok(chain);
+            };
+            let Some((style, layer)) = self.style(&id) else {
+                // The first lookup is the caller's identifier; any later one is
+                // a broken `inherits`, and the two deserve different messages.
+                return Err(match chain.last() {
+                    None => KnowledgeError::UnknownStyle(id),
+                    Some((child, _)) => KnowledgeError::UnknownParent {
+                        child: child.id.clone(),
+                        parent: id,
+                    },
+                });
+            };
+            chain.push((style, layer));
+            current = style.inherits.clone();
+        }
+
+        Err(KnowledgeError::InheritanceCycle(style_id.to_string()))
+    }
+
+    fn style(&self, id: &str) -> Option<(&StyleEntry, Layer)> {
+        self.layers
+            .iter()
+            .find_map(|l| l.styles.iter().find(|s| s.id == id).map(|s| (s, l.layer)))
+    }
+
+    fn material(&self, id: &str) -> Option<(&MaterialPrior, Layer)> {
+        self.layers.iter().find_map(|l| {
+            l.material_priors
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| (m, l.layer))
+        })
+    }
+
+    /// How far to move a variable when no skill response covers it. A point
+    /// value, not a range, so the highest layer that names it simply wins.
+    pub fn default_step(&self, variable: &str) -> Option<Attributed<crate::units::Quantity>> {
+        self.layers
+            .iter()
+            .rev()
+            .find_map(|l| l.default_steps.get(variable).map(|q| Attributed::new(*q, l.layer)))
+    }
+
+    /// The effective hard constraint, already intersected across every layer.
+    pub fn constraint(&self, variable: &str) -> Option<&Attributed<Range>> {
+        self.constraints.get(variable)
+    }
+
+    /// Whether a variable expresses taste rather than process. The engine must
+    /// never try to correct a process fault by changing one. Base only, so a
+    /// vendor cannot move a process variable out of the engine's reach.
+    pub fn is_preference(&self, variable: &str) -> bool {
+        self.layers
+            .first()
+            .is_some_and(|b| b.preference_variables.iter().any(|v| v.0 == variable))
+    }
+
+    /// Every style the machine can be asked for, across all layers.
+    pub fn style_ids(&self) -> Vec<&str> {
+        let mut ids: Vec<&str> = self
+            .layers
+            .iter()
+            .flat_map(|l| l.styles.iter().map(|s| s.id.as_str()))
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    pub fn layers(&self) -> &[KnowledgeLayer] {
+        &self.layers
+    }
 }

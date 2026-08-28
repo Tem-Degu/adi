@@ -1,0 +1,113 @@
+# The skill for the fictional REF-1. Pairs with neutral-machine.yaml.
+#
+# Exists so the planner in adi-core can be tested without depending on a real
+# domain profile. Every entry here is chosen to exercise one rule:
+#
+#   two tools moving the same variable   ranking by confidence
+#   a declared per_unit of zero          a tool that cannot be selected
+#   a response for an operator-only tool authority beats the skill
+#   a response for a vendor tool         how a vendor tool becomes selectable
+#   retention with a remedy tool         the purge requirement
+
+skill_version: "1.0"
+skill_id: "skill/REF-1/1.0"
+
+applies_to:
+  vendor: "Example Devices"
+  model: "REF-1"
+  firmware_range: { min: "1.0.0", max: "1.9.99" }
+
+responses:
+  # Signed: increasing the position number shortens the cycle. Direction is
+  # carried in the sign rather than in words so it cannot be misread.
+  - tool: "adi.example.actuator.set_position"
+    parameter: "position"
+    variable: "cycle_time"
+    per_unit: -1.4
+    unit: s
+    valid_range: { min: 8.0, max: 45.0 }
+    confidence: 0.75
+
+  # The same variable, less confidently. The planner must rank this second.
+  - tool: "adi.example.input.by_mass"
+    parameter: "mass"
+    variable: "cycle_time"
+    per_unit: 1.1
+    unit: s
+    valid_range: { min: 7.0, max: 12.0 }
+    confidence: 0.6
+
+  # Declared as having no measurable effect. A manufacturer is entitled to say
+  # so, and the engine must not select it: dividing by this response to size a
+  # correction has no answer.
+  - tool: "adi.example.additive.dispense"
+    parameter: "volume"
+    variable: "cycle_time"
+    per_unit: 0.0
+    unit: s
+    confidence: 0.9
+
+  # The engine may not invoke this tool, whatever this entry claims. A skill
+  # describes behaviour; it does not grant authority.
+  - tool: "adi.example.manual.service"
+    parameter: "level"
+    variable: "cycle_time"
+    per_unit: -5.0
+    unit: s
+    confidence: 0.99
+
+  - tool: "adi.example.process.start"
+    parameter: "stop_at_volume"
+    variable: "output_ratio"
+    per_unit: 0.02
+    unit: none
+    confidence: 0.95
+
+  # Two tools can add the additive. This one touches nothing else.
+  - tool: "x.example.aux.additive"
+    parameter: "amount"
+    variable: "additive_volume"
+    per_unit: 1.0
+    unit: ml
+    confidence: 0.95
+
+  # This one can too, but it also moves container_contents, which is process
+  # rather than taste. A request about taste must not be served with it.
+  - tool: "adi.example.additive.dispense"
+    parameter: "volume"
+    variable: "additive_volume"
+    per_unit: 1.0
+    unit: ml
+    confidence: 0.8
+
+  # A vendor tool outside the registry. This single entry is what turns it from
+  # callable into selectable. See ADI-P 8.2.
+  - tool: "x.example.aux.actuate"
+    parameter: "level"
+    variable: "aux_level"
+    per_unit: 1.0
+    unit: g
+    confidence: 0.9
+
+dynamics:
+  - tool: "adi.example.actuator.set_position"
+    retention:
+      mass: { value: 0.8, unit: g }
+      remedy_tool: "adi.example.actuator.purge"
+    hysteresis:
+      steps: 2.0
+      direction: "low_to_high"
+
+operating:
+  reliable_ranges:
+    - variable: "process_temperature"
+      min: 88.0
+      max: 94.0
+      unit: c
+      note_id: "upper_limit"
+  recovery:
+    between_cycles: { value: 25.0, unit: s }
+
+notes:
+  - id: "upper_limit"
+    text: "Above 94 the machine cannot hold setpoint across consecutive cycles."

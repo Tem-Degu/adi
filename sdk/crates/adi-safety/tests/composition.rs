@@ -28,9 +28,9 @@ fn dispense(ml: f64, id: &str) -> Invocation {
         .with_number("volume", Quantity::new(ml, Unit::Ml))
 }
 
-fn run_process(grams: f64, id: &str) -> Invocation {
+fn run_process(ml: f64, id: &str) -> Invocation {
     Invocation::new(SemanticId::from("adi.example.process.start"), id)
-        .with_number("stop_at_mass", Quantity::new(grams, Unit::G))
+        .with_number("stop_at_volume", Quantity::new(ml, Unit::Ml))
 }
 
 #[test]
@@ -197,4 +197,29 @@ fn undeclared_tool_is_refused() {
     let call = Invocation::new(SemanticId::from("x.nobody.invented.this"), "a");
     let violation = guard.check(&call, &state).expect_err("tool does not exist");
     assert!(matches!(violation, SafetyViolation::UnknownTool(_)));
+}
+
+/// Regression test for a bug found by cross-implementation testing.
+///
+/// The C SDK refuses to add a quantity to an accumulator denominated in a
+/// different unit. This crate did not: it added the raw `f64` and ignored the
+/// unit entirely, so grams could be summed into a millilitre total. The two
+/// implementations disagreed about whether an action was legal, which is
+/// exactly the divergence that would surface in the field as an engine
+/// permitting something the appliance refuses.
+#[test]
+fn an_accumulator_refuses_a_foreign_unit() {
+    let declaration = fixture();
+    let guard = Guard::new(&declaration);
+    let state = SafetyState::new();
+
+    // container_capacity is declared in millilitres. Offer it grams.
+    let call = Invocation::new(SemanticId::from("adi.example.additive.dispense"), "a")
+        .with_text("substance", "a")
+        .with_number("volume", Quantity::new(50.0, Unit::G));
+
+    let violation = guard
+        .check(&call, &state)
+        .expect_err("grams must not accumulate into a millilitre total");
+    assert!(matches!(violation, SafetyViolation::UnitMismatch { .. }));
 }
