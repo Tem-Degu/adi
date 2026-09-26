@@ -354,6 +354,36 @@ int adip_encode_signals(const adip_sample_t *samples, uint8_t count,
     return (int)w.pos;
 }
 
+int adip_encode_event(uint16_t event, uint32_t t_ms, const char *code,
+                      uint8_t severity, uint8_t *out, size_t out_len)
+{
+    adip_cbor_w_t w;
+
+    if (out == NULL || code == NULL) {
+        return (int)ADIP_ERR_ARG;
+    }
+
+    w.buf = out;
+    w.len = out_len;
+    w.pos = 0;
+
+    if (!adip_cbor_put_map(&w, 5u) ||
+        !adip_cbor_put_uint(&w, KEY_KIND) ||
+        !adip_cbor_put_uint(&w, ADIP_KIND_EVENT) ||
+        !adip_cbor_put_uint(&w, 1u) ||
+        !adip_cbor_put_uint(&w, (uint64_t)event) ||
+        !adip_cbor_put_uint(&w, 2u) ||
+        !adip_cbor_put_uint(&w, (uint64_t)t_ms) ||
+        !adip_cbor_put_uint(&w, 3u) ||
+        !adip_cbor_put_text(&w, code) ||
+        !adip_cbor_put_uint(&w, 4u) ||
+        !adip_cbor_put_uint(&w, (uint64_t)severity)) {
+        return (int)ADIP_ERR_NO_SPACE;
+    }
+
+    return (int)w.pos;
+}
+
 int adip_encode_heartbeat(bool busy, bool faulted, uint8_t *out, size_t out_len)
 {
     adip_cbor_w_t w;

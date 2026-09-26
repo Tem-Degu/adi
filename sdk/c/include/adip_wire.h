@@ -172,6 +172,10 @@ bool adip_peek_kind(const uint8_t *payload, size_t len, uint8_t *kind);
 int adip_encode_signals(const adip_sample_t *samples, uint8_t count,
                         uint8_t *out, size_t out_len);
 
+/* Encode one event. PROTOCOL.md 10.2.5. */
+int adip_encode_event(uint16_t event, uint32_t t_ms, const char *code,
+                      uint8_t severity, uint8_t *out, size_t out_len);
+
 /* Encode the reply to a heartbeat. PROTOCOL.md 10.2.5. */
 int adip_encode_heartbeat(bool busy, bool faulted, uint8_t *out, size_t out_len);
 

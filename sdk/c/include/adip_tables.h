@@ -87,6 +87,19 @@ typedef struct {
     adip_num_t  range_max;
 } adip_signal_t;
 
+/* ------------------------------------------------------------------- event */
+
+/*
+ * An asynchronous notification the appliance may raise. PROTOCOL.md 4.5.
+ *
+ * Only the identifier is generated. An event's payload is declared per event
+ * and is not interpreted on the device, which emits a code and a severity and
+ * leaves the meaning to the engine.
+ */
+typedef struct {
+    const char *id;
+} adip_event_t;
+
 /* ------------------------------------------------------- envelope: static */
 
 /* A hard limit on a named parameter, enforced regardless of the tool. */
@@ -202,6 +215,8 @@ typedef struct {
     uint16_t                   variable_count;
     const adip_signal_t       *signals;
     uint16_t                   signal_count;
+    const adip_event_t        *events;
+    uint16_t                   event_count;
     const adip_precondition_t *preconditions;
     uint8_t                    precondition_count;
     const adip_interlock_t    *interlocks;

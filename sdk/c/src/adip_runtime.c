@@ -180,6 +180,37 @@ adip_status_t adip_flush_signals(adip_ctx_t *ctx)
     return st;
 }
 
+/* ------------------------------------------------------------------- events */
+
+adip_status_t adip_emit_event(adip_ctx_t *ctx, uint16_t event,
+                              const char *code, uint8_t severity)
+{
+    uint8_t payload[ADIP_TX_SIZE];
+    int len;
+    int framed;
+
+    if (ctx == NULL || ctx->dev == NULL || code == NULL) {
+        return ADIP_ERR_ARG;
+    }
+    if (event >= ctx->dev->event_count) {
+        return ADIP_ERR_ARG;
+    }
+
+    len = adip_encode_event(event, adip_port_millis(), code, severity,
+                            payload, sizeof(payload));
+    if (len <= 0) {
+        return ADIP_ERR_NO_SPACE;
+    }
+
+    framed = adip_frame_wrap(payload, (size_t)len, ctx->tx, sizeof(ctx->tx));
+    if (framed <= 0) {
+        return ADIP_ERR_NO_SPACE;
+    }
+
+    (void)adip_port_write(ctx->tx, (size_t)framed);
+    return ADIP_OK;
+}
+
 /* -------------------------------------------------------------------- setup */
 
 adip_status_t adip_init(adip_ctx_t *ctx, const adip_device_t *dev,

@@ -81,6 +81,51 @@ static const adip_param_t params_ADI_EXAMPLE_ADDITIVE_DISPENSE[] = {
     },
 };
 
+static const adip_param_t params_ADI_EXAMPLE_ACTUATOR_PURGE[] = {
+    {
+        .name = "mass",
+        .kind = ADIP_PARAM_NUMBER,
+        .flags = 0,
+        .monotonic = ADIP_MONOTONIC_UNSET,
+        .enum_count = 0,
+        .min = { 0, 0, ADIP_UNIT_G },
+        .max = { 5, 0, ADIP_UNIT_G },
+        .resolution = { 1, -1, ADIP_UNIT_G },
+        .dflt = { 0, 0, ADIP_UNIT_NONE },
+        .enum_values = NULL,
+    },
+};
+
+static const adip_param_t params_ADI_EXAMPLE_MANUAL_SERVICE[] = {
+    {
+        .name = "level",
+        .kind = ADIP_PARAM_INTEGER,
+        .flags = 0,
+        .monotonic = ADIP_MONOTONIC_UNSET,
+        .enum_count = 0,
+        .min = { 0, 0, ADIP_UNIT_STEP },
+        .max = { 10, 0, ADIP_UNIT_STEP },
+        .resolution = { 1, 0, ADIP_UNIT_STEP },
+        .dflt = { 0, 0, ADIP_UNIT_NONE },
+        .enum_values = NULL,
+    },
+};
+
+static const adip_param_t params_X_EXAMPLE_AUX_ADDITIVE[] = {
+    {
+        .name = "amount",
+        .kind = ADIP_PARAM_NUMBER,
+        .flags = 0,
+        .monotonic = ADIP_MONOTONIC_UNSET,
+        .enum_count = 0,
+        .min = { 0, 0, ADIP_UNIT_ML },
+        .max = { 60, 0, ADIP_UNIT_ML },
+        .resolution = { 1, 0, ADIP_UNIT_ML },
+        .dflt = { 0, 0, ADIP_UNIT_NONE },
+        .enum_values = NULL,
+    },
+};
+
 static const adip_param_t params_X_EXAMPLE_AUX_ACTUATE[] = {
     {
         .name = "level",
@@ -103,6 +148,9 @@ static const char *const variables[] = {
     "output_volume",
     "container_contents",
     "container_state",
+    "retained_mass",
+    "service_state",
+    "additive_volume",
     "aux_level",
 };
 
@@ -111,7 +159,10 @@ static const uint16_t effects_ADI_EXAMPLE_INPUT_BY_MASS[] = { 1 };
 static const uint16_t effects_ADI_EXAMPLE_PROCESS_START[] = { 2 };
 static const uint16_t effects_ADI_EXAMPLE_ADDITIVE_DISPENSE[] = { 3 };
 static const uint16_t effects_ADI_EXAMPLE_CONTAINER_EMPTY[] = { 4 };
-static const uint16_t effects_X_EXAMPLE_AUX_ACTUATE[] = { 5 };
+static const uint16_t effects_ADI_EXAMPLE_ACTUATOR_PURGE[] = { 5 };
+static const uint16_t effects_ADI_EXAMPLE_MANUAL_SERVICE[] = { 6 };
+static const uint16_t effects_X_EXAMPLE_AUX_ADDITIVE[] = { 7 };
+static const uint16_t effects_X_EXAMPLE_AUX_ACTUATE[] = { 8 };
 
 static const adip_tool_t tools[] = {
     {
@@ -175,6 +226,42 @@ static const adip_tool_t tools[] = {
         .duration_ms_max = 0,
     },
     {
+        .id = "adi.example.actuator.purge",
+        .name = "purge",
+        .params = params_ADI_EXAMPLE_ACTUATOR_PURGE,
+        .param_count = 1,
+        .flags = ADIP_TOOL_F_AUTH_ENGINE | ADIP_TOOL_F_AUTH_OPERATOR,
+        .precondition_mask = 0x00000001u,
+        .effects = effects_ADI_EXAMPLE_ACTUATOR_PURGE,
+        .effect_count = 1,
+        .duration_ms_typ = 0,
+        .duration_ms_max = 0,
+    },
+    {
+        .id = "adi.example.manual.service",
+        .name = "service",
+        .params = params_ADI_EXAMPLE_MANUAL_SERVICE,
+        .param_count = 1,
+        .flags = ADIP_TOOL_F_AUTH_OPERATOR,
+        .precondition_mask = 0x00000000u,
+        .effects = effects_ADI_EXAMPLE_MANUAL_SERVICE,
+        .effect_count = 1,
+        .duration_ms_typ = 0,
+        .duration_ms_max = 0,
+    },
+    {
+        .id = "x.example.aux.additive",
+        .name = "additive",
+        .params = params_X_EXAMPLE_AUX_ADDITIVE,
+        .param_count = 1,
+        .flags = ADIP_TOOL_F_AUTH_ENGINE | ADIP_TOOL_F_AUTH_OPERATOR,
+        .precondition_mask = 0x00000001u,
+        .effects = effects_X_EXAMPLE_AUX_ADDITIVE,
+        .effect_count = 1,
+        .duration_ms_typ = 0,
+        .duration_ms_max = 0,
+    },
+    {
         .id = "x.example.aux.actuate",
         .name = "auxiliary",
         .params = params_X_EXAMPLE_AUX_ACTUATE,
@@ -207,6 +294,11 @@ static const adip_signal_t signals[] = {
         .range_min = { 0, 0, ADIP_UNIT_NONE },
         .range_max = { 0, 0, ADIP_UNIT_NONE },
     },
+};
+
+static const adip_event_t events[] = {
+    { .id = "adi.example.event.fault" },
+    { .id = "adi.example.event.threshold_crossed" },
 };
 
 static const adip_precondition_t preconditions[] = {
@@ -307,11 +399,13 @@ const adip_device_t adip_device_neutral = {
     .control_timeout_ms = 2000,
     .max_concurrent = 1,
     .tools = tools,
-    .tool_count = 6,
+    .tool_count = 9,
     .variables = variables,
-    .variable_count = 6,
+    .variable_count = 9,
     .signals = signals,
     .signal_count = 2,
+    .events = events,
+    .event_count = 2,
     .preconditions = preconditions,
     .precondition_count = 4,
     .interlocks = interlocks,

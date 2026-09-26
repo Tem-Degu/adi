@@ -262,6 +262,23 @@ adip_status_t adip_publish(adip_ctx_t *ctx, uint16_t signal,
  */
 adip_status_t adip_flush_signals(adip_ctx_t *ctx);
 
+/* -------------------------------------------------------------------- events */
+
+/*
+ * Raise a declared event. PROTOCOL.md 4.5.
+ *
+ * `severity` is 0 warning, 1 error, 2 critical. The event index is checked
+ * against the declaration; the code is the firmware's own string and is not
+ * interpreted here.
+ *
+ * Section 4.5 requires a fault event before or with entry to a safe state.
+ * The library does not raise it, because only the firmware knows what failed
+ * and how badly. Raise it from adip_port_safe_state, which is called at
+ * exactly that moment and is the one place that knows.
+ */
+adip_status_t adip_emit_event(adip_ctx_t *ctx, uint16_t event,
+                              const char *code, uint8_t severity);
+
 /* Firmware tells the library what the machine's state is. */
 void adip_set_interlock(adip_ctx_t *ctx, uint8_t interlock, bool open);
 void adip_set_precondition(adip_ctx_t *ctx, uint8_t precondition, bool satisfied);

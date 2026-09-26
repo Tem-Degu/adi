@@ -138,6 +138,20 @@ tools:
     effects: ["aux_level"]
     reversible: false
 
+events:
+  # PROTOCOL.md 4.5 requires a fault event before or with entry to a safe
+  # state, so a conforming machine declares one. Severity is the enum from
+  # 4.5; the engine decides what a given code means, not the device.
+  - id: "adi.example.event.fault"
+    payload:
+      code: { type: string }
+      severity: { type: enum, values: ["warning", "error", "critical"] }
+      recoverable: { type: boolean }
+
+  - id: "adi.example.event.threshold_crossed"
+    payload:
+      elapsed_s: { type: number, unit: s }
+
 envelope:
   enforced_by: both
   independent_of_engine: true

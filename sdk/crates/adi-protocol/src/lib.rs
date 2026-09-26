@@ -15,7 +15,7 @@ pub mod knowledge;
 pub mod skill;
 pub mod units;
 
-pub use declaration::{Declaration, ConformanceLevel, Tool, Signal, Parameter};
+pub use declaration::{Declaration, ConformanceLevel, Tool, Signal, Parameter, Event, EventField};
 pub use ids::{SemanticId, VariableId};
 pub use intent::{Intent, IntentError, IntentKind, Reference, TargetSpec};
 pub use invocation::{Invocation, Outcome, RejectReason};

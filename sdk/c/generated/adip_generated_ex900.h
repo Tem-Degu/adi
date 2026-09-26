@@ -18,6 +18,7 @@ extern "C" {
 /* Sizing constants, so the caller can allocate statically. */
 #define ADIP_EX900_TOOL_COUNT         8
 #define ADIP_EX900_SIGNAL_COUNT       4
+#define ADIP_EX900_EVENT_COUNT        2
 #define ADIP_EX900_PRECONDITION_COUNT 5
 #define ADIP_EX900_INTERLOCK_COUNT    3
 #define ADIP_EX900_INVARIANT_COUNT    2

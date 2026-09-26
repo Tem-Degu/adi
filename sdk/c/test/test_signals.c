@@ -327,6 +327,67 @@ static void test_publishing_is_independent_of_control(void)
     CHECK(!adip_busy(&ctx), "and it does not make the machine busy");
 }
 
+/* --------------------------------------------------------------- events */
+
+/*
+ * PROTOCOL.md 4.5 requires a fault event before or with entry to a safe
+ * state. The library drives the safe state and cannot know what failed, so
+ * the firmware raises it; what the library owes is the means.
+ */
+static void test_an_event_reaches_the_wire(void)
+{
+    const uint8_t *payload;
+    size_t payload_len;
+    size_t used;
+    adip_cbor_t c;
+    uint64_t map_count;
+    uint64_t i;
+    uint64_t key;
+    uint8_t  kind = 0;
+    uint64_t index = 99;
+    uint64_t severity = 99;
+    const char *code = NULL;
+    size_t code_len = 0;
+
+    printf("an event reaches the wire\n");
+    reset_all();
+    now_ms = 4242u;
+
+    CHECK(adip_emit_event(&ctx, 0u, "overheated", 2u) == ADIP_OK,
+          "a declared event is raised");
+    CHECK(write_calls == 1, "and sent");
+
+    CHECK(adip_frame_find(last_frame, last_len, &payload, &payload_len,
+                          &used) == ADIP_OK, "the frame is well formed");
+    c.buf = payload; c.len = payload_len; c.pos = 0;
+    CHECK(adip_cbor_map(&c, &map_count), "and is a map");
+
+    for (i = 0; i < map_count; i++) {
+        if (!adip_cbor_uint(&c, &key)) { break; }
+        if (key == 0u) { uint64_t v; (void)adip_cbor_uint(&c, &v); kind = (uint8_t)v; }
+        else if (key == 1u) { (void)adip_cbor_uint(&c, &index); }
+        else if (key == 3u) { (void)adip_cbor_text(&c, &code, &code_len); }
+        else if (key == 4u) { (void)adip_cbor_uint(&c, &severity); }
+        else { (void)adip_cbor_skip(&c); }
+    }
+
+    CHECK(kind == ADIP_KIND_EVENT, "tagged as an event");
+    CHECK(index == 0u, "naming the declared event");
+    CHECK(severity == 2u, "at the severity given");
+    CHECK(code_len == 10u && memcmp(code, "overheated", 10) == 0,
+          "carrying the firmware's own code");
+}
+
+static void test_an_undeclared_event_is_refused(void)
+{
+    printf("an undeclared event is refused\n");
+    reset_all();
+
+    CHECK(adip_emit_event(&ctx, 99u, "nonsense", 1u) == ADIP_ERR_ARG,
+          "an event index the declaration does not have");
+    CHECK(write_calls == 0, "sends nothing");
+}
+
 int main(void)
 {
     printf("libadip signal tests\n\n");
@@ -338,6 +399,8 @@ int main(void)
     test_flush_sends_a_partial_batch();
     test_a_failed_write_does_not_hold_samples();
     test_publishing_is_independent_of_control();
+    test_an_event_reaches_the_wire();
+    test_an_undeclared_event_is_refused();
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

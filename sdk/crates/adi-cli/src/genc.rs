@@ -235,6 +235,7 @@ pub fn generate(declaration: &Declaration, basename: &str) -> Result<Generated, 
         .unwrap();
     writeln!(h, "#define ADIP_{ns}_TOOL_COUNT         {}", declaration.tools.len()).unwrap();
     writeln!(h, "#define ADIP_{ns}_SIGNAL_COUNT       {}", declaration.signals.len()).unwrap();
+    writeln!(h, "#define ADIP_{ns}_EVENT_COUNT        {}", declaration.events.len()).unwrap();
     writeln!(h, "#define ADIP_{ns}_PRECONDITION_COUNT {}", preconditions.len()).unwrap();
     writeln!(h, "#define ADIP_{ns}_INTERLOCK_COUNT    {}", env.interlocks.len()).unwrap();
     writeln!(h, "#define ADIP_{ns}_INVARIANT_COUNT    {}", env.invariants.len()).unwrap();
@@ -625,6 +626,18 @@ pub fn generate(declaration: &Declaration, basename: &str) -> Result<Generated, 
         writeln!(c).unwrap();
     }
 
+    // Events. Only the identifier is generated: a payload is declared per event
+    // and is not interpreted on the device. PROTOCOL.md 4.5.
+    if !declaration.events.is_empty() {
+        writeln!(c, "static const adip_event_t events[] = {{").unwrap();
+        for e in &declaration.events {
+            writeln!(c, "    {{ .id = {} }},", cstr(Some(&e.id.0))).unwrap();
+        }
+        writeln!(c, "}};").unwrap();
+        writeln!(c).unwrap();
+    }
+
+
     // Preconditions and interlocks.
     if !preconditions.is_empty() {
         writeln!(c, "static const adip_precondition_t preconditions[] = {{").unwrap();
@@ -989,6 +1002,13 @@ pub fn generate(declaration: &Declaration, basename: &str) -> Result<Generated, 
     )
     .unwrap();
     writeln!(c, "    .signal_count = {},", declaration.signals.len()).unwrap();
+    writeln!(
+        c,
+        "    .events = {},",
+        if declaration.events.is_empty() { "NULL" } else { "events" }
+    )
+    .unwrap();
+    writeln!(c, "    .event_count = {},", declaration.events.len()).unwrap();
     writeln!(
         c,
         "    .preconditions = {},",

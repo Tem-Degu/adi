@@ -111,6 +111,17 @@ tools:
     effects: ["sugar_mass"]
     reversible: false
 
+events:
+  - id: "adi.espresso.event.first_drip"
+    payload:
+      elapsed_s: { type: number, unit: s }
+
+  - id: "adi.espresso.event.fault"
+    payload:
+      code: { type: string }
+      severity: { type: enum, values: ["warning", "error", "critical"] }
+      recoverable: { type: boolean }
+
 envelope:
   enforced_by: both
   independent_of_engine: true

@@ -215,7 +215,37 @@ impl Parameter {
 pub struct Event {
     pub id: SemanticId,
     #[serde(default)]
-    pub payload: BTreeMap<String, Parameter>,
+    pub payload: BTreeMap<String, EventField>,
+}
+
+/// A field in an event payload.
+///
+/// Deliberately not `Parameter`. ADI-P 4.2 lists the types a *tool* parameter
+/// may take, and `string` and `boolean` are not among them, because every
+/// numeric parameter must carry a unit, a range and a resolution and neither
+/// of those can. An event reports what happened rather than requesting an
+/// action, so it carries codes and flags that no tool may accept.
+///
+/// The fault event of 4.5 is the case that forced the distinction: it reports
+/// a `code` and whether the condition is `recoverable`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EventField {
+    Number {
+        unit: Unit,
+        #[serde(default)]
+        range: Option<Range>,
+    },
+    Integer {
+        unit: Unit,
+        #[serde(default)]
+        range: Option<Range>,
+    },
+    Enum {
+        values: Vec<String>,
+    },
+    String,
+    Boolean,
 }
 
 /// Escape hatch only. ADI-P 8.3. Most sequencing should emerge from reasoning

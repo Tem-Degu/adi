@@ -285,6 +285,11 @@ static const adip_signal_t signals[] = {
     },
 };
 
+static const adip_event_t events[] = {
+    { .id = "adi.espresso.event.first_drip" },
+    { .id = "adi.espresso.event.fault" },
+};
+
 static const adip_precondition_t preconditions[] = {
     { .expr = "state == idle" },
     { .expr = "state == ready" },
@@ -413,6 +418,8 @@ const adip_device_t adip_device_ex900 = {
     .variable_count = 8,
     .signals = signals,
     .signal_count = 4,
+    .events = events,
+    .event_count = 2,
     .preconditions = preconditions,
     .precondition_count = 5,
     .interlocks = interlocks,
