@@ -117,8 +117,16 @@ static adip_reason_t decode_args(const adip_tool_t *tool, adip_cbor_t *c,
             arg->num = ADIP_NUM_ZERO;
         } else if (param->kind == ADIP_PARAM_NUMBER ||
                    param->kind == ADIP_PARAM_INTEGER) {
-            /* The unit comes from the declaration, never from the wire. */
-            if (!adip_cbor_num(c, param->min.unit, &arg->num)) {
+            /*
+             * A quantity carries its unit, PROTOCOL.md 10.2.3, so the unit
+             * checked in adip_validate is the one the engine meant rather
+             * than the one the declaration assumed. Reading the magnitude
+             * alone made that check compare a value against the thing it had
+             * just been stamped from, so it could never fail, and an engine
+             * that computed in the wrong quantity sent a number that was
+             * merely a number.
+             */
+            if (!adip_cbor_quantity(c, &arg->num)) {
                 return ADIP_REASON_MALFORMED;
             }
             arg->is_text = 0u;

@@ -292,6 +292,96 @@ bool adip_cbor_skip(adip_cbor_t *c)
 
 /* ------------------------------------------------------------------ writing */
 
+/*
+ * Read [unit, number]. PROTOCOL.md 10.2.3.
+ *
+ * The unit is refused rather than stamped when it is not one this version
+ * defines, because a decoder that silently accepts an unknown unit has
+ * accepted a number whose meaning it does not know.
+ */
+bool adip_cbor_quantity(adip_cbor_t *c, adip_num_t *out)
+{
+    uint8_t mt;
+    uint64_t count;
+    uint64_t unit;
+
+    if (c == NULL || out == NULL) {
+        return false;
+    }
+
+    if (!adip_cbor_head(c, &mt, &count)) {
+        return false;
+    }
+    if (mt != MT_ARRAY || count != 2u) {
+        return false;
+    }
+
+    if (!adip_cbor_uint(c, &unit) || unit >= (uint64_t)ADIP_UNIT__COUNT) {
+        return false;
+    }
+
+    return adip_cbor_num(c, (uint8_t)unit, out);
+}
+
+bool adip_cbor_put_int(adip_cbor_w_t *w, int64_t v)
+{
+    if (v < 0) {
+        /* CBOR negative integers encode -1 - n. */
+        return adip_cbor_put_head(w, 1u, (uint64_t)(-1 - v));
+    }
+    return adip_cbor_put_head(w, 0u, (uint64_t)v);
+}
+
+bool adip_cbor_put_text(adip_cbor_w_t *w, const char *s)
+{
+    size_t n;
+    size_t i;
+
+    if (w == NULL || s == NULL) {
+        return false;
+    }
+
+    /* Counted rather than measured with strlen, so this file keeps the
+     * string.h dependency sdk/c/DESIGN.md section 2 documents: memcpy and
+     * memcmp, nothing more. */
+    n = 0;
+    while (s[n] != '\0') {
+        n++;
+    }
+
+    if (!adip_cbor_put_head(w, 3u, (uint64_t)n)) {
+        return false;
+    }
+    if (w->pos + n > w->len) {
+        return false;
+    }
+    for (i = 0; i < n; i++) {
+        w->buf[w->pos++] = (uint8_t)s[i];
+    }
+    return true;
+}
+
+bool adip_cbor_put_array(adip_cbor_w_t *w, uint64_t count)
+{
+    return adip_cbor_put_head(w, 4u, count);
+}
+
+bool adip_cbor_put_num(adip_cbor_w_t *w, adip_num_t v)
+{
+    /* Tag 4, then the two element array [exponent, mantissa]. */
+    return adip_cbor_put_head(w, 6u, 4u) &&
+           adip_cbor_put_array(w, 2u) &&
+           adip_cbor_put_int(w, (int64_t)v.exponent) &&
+           adip_cbor_put_int(w, (int64_t)v.mantissa);
+}
+
+bool adip_cbor_put_quantity(adip_cbor_w_t *w, adip_num_t v)
+{
+    return adip_cbor_put_array(w, 2u) &&
+           adip_cbor_put_uint(w, (uint64_t)v.unit) &&
+           adip_cbor_put_num(w, v);
+}
+
 bool adip_cbor_put_bool(adip_cbor_w_t *w, bool v)
 {
     return adip_cbor_put_head(w, 7u, v ? 21u : 20u);

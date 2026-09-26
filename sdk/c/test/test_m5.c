@@ -129,6 +129,33 @@ static void b_decimal(builder_t *b, int32_t m, int8_t e)
     b_head(b, 6u, 4u); b_head(b, 4u, 2u); b_int(b, e); b_int(b, m);
 }
 
+static void b_quantity(builder_t *b, uint8_t unit, int32_t m, int8_t e)
+{
+    b_head(b, 4u, 2u);      /* [unit, number] */
+    b_uint(b, unit);
+    b_decimal(b, m, e);
+}
+
+/* The unit a parameter is declared in, so a fixture states what the
+ * declaration says rather than repeating it by hand. PROTOCOL.md 10.2.3. */
+static uint8_t unit_for(const char *tool_id, const char *param)
+{
+    const adip_tool_t *t;
+    uint8_t i;
+
+    t = adip_find_tool_n(&adip_device_neutral, tool_id, strlen(tool_id));
+    if (t == NULL) {
+        return (uint8_t)ADIP_UNIT_NONE;
+    }
+    for (i = 0; i < t->param_count; i++) {
+        if (strcmp(t->params[i].name, param) == 0) {
+            return t->params[i].min.unit;
+        }
+    }
+    return (uint8_t)ADIP_UNIT_NONE;
+}
+
+
 static size_t make_call(uint8_t *out, size_t out_len, const char *tool,
                         uint32_t id, const char *arg, int32_t m, int8_t e)
 {
@@ -142,7 +169,7 @@ static size_t make_call(uint8_t *out, size_t out_len, const char *tool,
     b_uint(&b, 3u);
     b_head(&b, 5u, 1u);
     b_text(&b, arg);
-    b_decimal(&b, m, e);
+    b_quantity(&b, unit_for(tool, arg), m, e);
     n = adip_frame_wrap(b.buf, b.pos, out, out_len);
     return (n > 0) ? (size_t)n : 0u;
 }

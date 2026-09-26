@@ -96,6 +96,33 @@ static void b_decimal(builder_t *b, int32_t mantissa, int8_t exponent)
     b_int(b, mantissa);
 }
 
+static void b_quantity(builder_t *b, uint8_t unit, int32_t m, int8_t e)
+{
+    b_head(b, 4u, 2u);      /* [unit, number] */
+    b_uint(b, unit);
+    b_decimal(b, m, e);
+}
+
+/* The unit a parameter is declared in, so a fixture states what the
+ * declaration says rather than repeating it by hand. PROTOCOL.md 10.2.3. */
+static uint8_t unit_for(const char *tool_id, const char *param)
+{
+    const adip_tool_t *t;
+    uint8_t i;
+
+    t = adip_find_tool_n(&adip_device_neutral, tool_id, strlen(tool_id));
+    if (t == NULL) {
+        return (uint8_t)ADIP_UNIT_NONE;
+    }
+    for (i = 0; i < t->param_count; i++) {
+        if (strcmp(t->params[i].name, param) == 0) {
+            return t->params[i].min.unit;
+        }
+    }
+    return (uint8_t)ADIP_UNIT_NONE;
+}
+
+
 /* Build: { 1: tool, 2: id, 3: { name: <number> } } */
 static void build_num_call(builder_t *b, const char *tool, uint32_t id,
                            const char *arg, int32_t mant, int8_t exp)
@@ -108,7 +135,7 @@ static void build_num_call(builder_t *b, const char *tool, uint32_t id,
     b_uint(b, 3u);
     b_map(b, 1u);
     b_text(b, arg);
-    b_decimal(b, mant, exp);
+    b_quantity(b, unit_for(tool, arg), mant, exp);
 }
 
 /* ------------------------------------------------------------------ framing */
@@ -245,7 +272,9 @@ static void test_decoding(void)
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
-        b.buf[b.pos++] = 0xfbu; /* float64 */
+        b_head(&b, 4u, 2u);                 /* a well formed quantity ... */
+        b_uint(&b, unit_for("adi.example.input.by_mass", "mass"));
+        b.buf[b.pos++] = 0xfbu;             /* ... carrying a float64 */
         memset(b.buf + b.pos, 0, 8);
         b.pos += 8;
         r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
@@ -263,7 +292,7 @@ static void test_decoding(void)
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
-        b_decimal(&b, 90, -1);
+        b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 90, -1);
         r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
         CHECK_REASON(r, ADIP_REASON_NONE, "an unknown key is skipped");
         CHECK(inv.invocation_id == 7u, "the rest still decodes");
@@ -279,7 +308,7 @@ static void test_decoding(void)
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
-        b_decimal(&b, 90, -1);
+        b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 90, -1);
         r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
         CHECK_REASON(r, ADIP_REASON_MALFORMED, "a message with no kind is refused");
     }
@@ -295,9 +324,39 @@ static void test_decoding(void)
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
-        b_decimal(&b, 90, -1);
+        b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 90, -1);
         r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
         CHECK_REASON(r, ADIP_REASON_MALFORMED, "the wrong kind is refused");
+    }
+
+    /* A unit this version does not define is refused rather than carried. */
+    {
+        b.pos = 0;
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
+        b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
+        b_uint(&b, 2u); b_uint(&b, 1u);
+        b_uint(&b, 3u);
+        b_map(&b, 1u);
+        b_text(&b, "mass");
+        b_quantity(&b, 200u, 90, -1);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_MALFORMED, "an undefined unit is refused");
+    }
+
+    /* A bare magnitude with no unit is no longer a quantity. */
+    {
+        b.pos = 0;
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
+        b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
+        b_uint(&b, 2u); b_uint(&b, 1u);
+        b_uint(&b, 3u);
+        b_map(&b, 1u);
+        b_text(&b, "mass");
+        b_decimal(&b, 90, -1);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_MALFORMED, "a unitless number is refused");
     }
 
     /* A message with no kind is not a control message. PROTOCOL.md 10.2.4. */
@@ -309,7 +368,7 @@ static void test_decoding(void)
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
-        b_decimal(&b, 90, -1);
+        b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 90, -1);
         r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
         CHECK_REASON(r, ADIP_REASON_MALFORMED, "a message with no kind is refused");
     }
@@ -325,7 +384,7 @@ static void test_decoding(void)
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
-        b_decimal(&b, 90, -1);
+        b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 90, -1);
         r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
         CHECK_REASON(r, ADIP_REASON_MALFORMED, "an outbound kind is refused inbound");
     }
@@ -338,7 +397,7 @@ static void test_decoding(void)
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
-        b_decimal(&b, 90, -1);
+        b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 90, -1);
         b_uint(&b, 2u); b_uint(&b, 5u);
         b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
         r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
@@ -461,7 +520,7 @@ static void test_validation(void)
         b_uint(&b, 3u);
         b_map(&b, 2u);
         b_text(&b, "substance"); b_text(&b, "a");
-        b_text(&b, "volume");    b_decimal(&b, 50, 0);
+        b_text(&b, "volume");    b_quantity(&b, unit_for("adi.example.additive.dispense", "volume"), 50, 0);
         CHECK(adip_decode_invocation(dev, b.buf, b.pos, &inv) ==
                   ADIP_REASON_NONE, "enum call decodes");
         CHECK_REASON(adip_validate(dev, &inv, 0u, all_preconditions),
@@ -475,11 +534,35 @@ static void test_validation(void)
         b_uint(&b, 3u);
         b_map(&b, 2u);
         b_text(&b, "substance"); b_text(&b, "z");
-        b_text(&b, "volume");    b_decimal(&b, 50, 0);
+        b_text(&b, "volume");    b_quantity(&b, unit_for("adi.example.additive.dispense", "volume"), 50, 0);
         (void)adip_decode_invocation(dev, b.buf, b.pos, &inv);
         CHECK_REASON(adip_validate(dev, &inv, 0u, all_preconditions),
                      ADIP_REASON_OUT_OF_RANGE,
                      "an undeclared enum value is refused");
+    }
+
+    /*
+     * A value in range, in the wrong unit.
+     *
+     * 9.0 is inside the 6.0 to 14.0 the declaration allows for `mass`, so no
+     * range check can object. Only the unit says the engine computed a volume
+     * and sent it to a mass parameter. PROTOCOL.md 10.2.3.
+     */
+    {
+        b.pos = 0;
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
+        b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
+        b_uint(&b, 2u); b_uint(&b, 1u);
+        b_uint(&b, 3u);
+        b_map(&b, 1u);
+        b_text(&b, "mass");
+        b_quantity(&b, (uint8_t)ADIP_UNIT_ML, 90, -1);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_NONE, "a wrong unit still decodes");
+        CHECK_REASON(adip_validate(dev, &inv, 0u, all_preconditions),
+                     ADIP_REASON_UNIT_MISMATCH,
+                     "millilitres into a mass parameter are refused");
     }
 
     /* A duplicated parameter is ambiguous and is refused rather than resolved
@@ -492,8 +575,8 @@ static void test_validation(void)
         b_uint(&b, 2u); b_uint(&b, 1u);
         b_uint(&b, 3u);
         b_map(&b, 2u);
-        b_text(&b, "mass"); b_decimal(&b, 90, -1);
-        b_text(&b, "mass"); b_decimal(&b, 120, -1);
+        b_text(&b, "mass"); b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 90, -1);
+        b_text(&b, "mass"); b_quantity(&b, unit_for("adi.example.input.by_mass", "mass"), 120, -1);
         (void)adip_decode_invocation(dev, b.buf, b.pos, &inv);
         CHECK_REASON(adip_validate(dev, &inv, 0u, all_preconditions),
                      ADIP_REASON_MALFORMED, "a duplicated argument is refused");
