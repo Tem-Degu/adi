@@ -223,7 +223,7 @@ Targets, to be measured rather than assumed:
 
 | | Target |
 |---|---|
-| Flash, runtime | under 12 KB |
+| Flash, runtime | under 16 KB |
 | RAM, excluding generated tables | under 2 KB |
 | Generated tables | flash, scales with tool count |
 | Stack, worst case | under 512 bytes, statically provable |
@@ -232,6 +232,27 @@ Targets, to be measured rather than assumed:
 If the runtime does not fit an MCU comfortably, the design has failed, because
 the engine already needs an applications processor and the whole point of the
 device side is that it does not.
+
+**The flash figure was 12 KB until the outbound half was built**, and is raised
+here rather than met by squeezing, for two reasons worth stating.
+
+The old number described a smaller library. It was set when this SDK could only
+receive: an invocation in, an acknowledgement out, and no way to report a
+measurement, raise an event or answer a heartbeat. A library that also talks is
+doing about twice the work, and holding it to a figure chosen before half its
+job existed would mean trimming safety-relevant code to honour a constraint we
+invented.
+
+The measurement is not the target. Every figure in section 9 is x86-64 and
+labelled indicative for good reason: this is branch-heavy integer code with no
+floating point, and Thumb-2 typically emits it 25 to 30 percent smaller. 12052 B
+here is likely 8 to 9 KB on a Cortex-M, which was comfortable under the old
+number and remains so. That stays a projection until M6 puts it on a board, and
+M6 is where this budget gets confirmed or corrected against a real target rather
+than a host.
+
+16 KB keeps the claim that matters: this belongs on the cheap side of an
+appliance, not on an applications processor.
 
 ## 9. Build order
 

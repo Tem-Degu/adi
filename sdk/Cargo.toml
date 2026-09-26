@@ -6,6 +6,7 @@ members = [
     "crates/adi-core",
     "crates/adi-decision",
     "crates/adi-language",
+    "crates/adi-wire",
     "crates/adi-domain-espresso",
     "crates/adi-cli",
 ]
@@ -23,6 +24,7 @@ adi-safety = { path = "crates/adi-safety" }
 adi-core = { path = "crates/adi-core" }
 adi-decision = { path = "crates/adi-decision" }
 adi-language = { path = "crates/adi-language" }
+adi-wire = { path = "crates/adi-wire" }
 adi-domain-espresso = { path = "crates/adi-domain-espresso" }
 
 serde = { version = "1", features = ["derive"] }

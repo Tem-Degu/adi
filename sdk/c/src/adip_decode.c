@@ -423,9 +423,14 @@ int adip_encode_response(uint32_t invocation_id, adip_outcome_t outcome,
     w.len = out_len;
     w.pos = 0;
 
-    entries = (reason == ADIP_REASON_NONE) ? 2u : 3u;
+    /* The kind, then id and outcome, then the reason when there is one.
+     * PROTOCOL.md 10.2.4 requires key 0 on every control message, and a
+     * response was the one this library still sent without it. */
+    entries = (reason == ADIP_REASON_NONE) ? 3u : 4u;
 
     if (!adip_cbor_put_map(&w, entries) ||
+        !adip_cbor_put_uint(&w, KEY_KIND) ||
+        !adip_cbor_put_uint(&w, ADIP_KIND_RESPONSE) ||
         !adip_cbor_put_uint(&w, RKEY_ID) ||
         !adip_cbor_put_uint(&w, invocation_id) ||
         !adip_cbor_put_uint(&w, RKEY_OUTCOME) ||

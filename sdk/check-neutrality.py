@@ -20,6 +20,7 @@ NEUTRAL_CRATES = [
     "crates/adi-core",
     "crates/adi-decision",
     "crates/adi-language",
+    "crates/adi-wire",
 ]
 
 # Vocabulary belonging to a specific domain rather than to the abstraction.

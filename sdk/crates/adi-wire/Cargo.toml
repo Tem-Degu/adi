@@ -1,0 +1,12 @@
+[package]
+name = "adi-wire"
+description = "ADI-P 10.2 message encoding. The engine side of the wire libadip speaks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-protocol = { workspace = true }
+thiserror = { workspace = true }
