@@ -84,6 +84,102 @@ static void reject(adip_ctx_t *ctx, uint32_t id, adip_reason_t reason)
     send_response(ctx, id, ADIP_OUTCOME_REJECTED, reason);
 }
 
+/* ------------------------------------------------------------------ signals */
+
+void adip_set_signal_buffer(adip_ctx_t *ctx, adip_sample_t *buf, uint8_t count)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    ctx->samples = buf;
+    ctx->sample_cap = (count > ADIP_MAX_BATCH) ? (uint8_t)ADIP_MAX_BATCH : count;
+    ctx->sample_count = 0u;
+}
+
+static adip_status_t send_samples(adip_ctx_t *ctx, const adip_sample_t *s,
+                                  uint8_t n)
+{
+    uint8_t payload[ADIP_TX_SIZE];
+    int len;
+    int framed;
+
+    len = adip_encode_signals(s, n, payload, sizeof(payload));
+    if (len <= 0) {
+        return ADIP_ERR_NO_SPACE;
+    }
+
+    framed = adip_frame_wrap(payload, (size_t)len, ctx->tx, sizeof(ctx->tx));
+    if (framed <= 0) {
+        return ADIP_ERR_NO_SPACE;
+    }
+
+    (void)adip_port_write(ctx->tx, (size_t)framed);
+    return ADIP_OK;
+}
+
+adip_status_t adip_publish(adip_ctx_t *ctx, uint16_t signal,
+                           adip_num_t value, uint32_t t_ms)
+{
+    adip_sample_t one;
+
+    if (ctx == NULL || ctx->dev == NULL) {
+        return ADIP_ERR_ARG;
+    }
+
+    /* The declaration is the authority on both counts. */
+    if (signal >= ctx->dev->signal_count) {
+        return ADIP_ERR_ARG;
+    }
+
+    /*
+     * A signal published in the wrong quantity is the mirror of an invocation
+     * carrying one: the same defect, seen from the appliance's side. Refusing
+     * it here keeps a firmware bug from reaching the engine as a plausible
+     * looking number.
+     */
+    if (value.unit != ctx->dev->signals[signal].unit) {
+        return ADIP_ERR_ARG;
+    }
+
+    if (ctx->samples == NULL || ctx->sample_cap == 0u) {
+        /* No buffer: correct, just chattier. */
+        one.signal = signal;
+        one.value = value;
+        one.t_ms = t_ms;
+        return send_samples(ctx, &one, 1u);
+    }
+
+    ctx->samples[ctx->sample_count] = (adip_sample_t){ signal, value, t_ms };
+    ctx->sample_count++;
+
+    if (ctx->sample_count >= ctx->sample_cap) {
+        return adip_flush_signals(ctx);
+    }
+    return ADIP_OK;
+}
+
+adip_status_t adip_flush_signals(adip_ctx_t *ctx)
+{
+    adip_status_t st;
+
+    if (ctx == NULL) {
+        return ADIP_ERR_ARG;
+    }
+    if (ctx->sample_count == 0u) {
+        return ADIP_OK;
+    }
+
+    st = send_samples(ctx, ctx->samples, ctx->sample_count);
+
+    /*
+     * Cleared whether or not the write succeeded. Holding samples for a
+     * transport that is not taking them would grow a backlog of measurements
+     * that were true a while ago, and stale telemetry is worse than a gap.
+     */
+    ctx->sample_count = 0u;
+    return st;
+}
+
 /* -------------------------------------------------------------------- setup */
 
 adip_status_t adip_init(adip_ctx_t *ctx, const adip_device_t *dev,

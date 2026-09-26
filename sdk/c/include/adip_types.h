@@ -218,6 +218,21 @@ typedef enum {
     ADIP_CONFORMANCE_AUTONOMOUS    = 2
 } adip_conformance_t;
 
+/* ------------------------------------------------------------------ signals */
+
+/*
+ * One measurement, waiting to be sent.
+ *
+ * `t_ms` is the appliance's own clock. The engine is told to treat these as
+ * relative, because two devices share no epoch and pretending otherwise would
+ * put a made up absolute time into a decision record.
+ */
+typedef struct {
+    uint16_t   signal;
+    adip_num_t value;
+    uint32_t   t_ms;
+} adip_sample_t;
+
 #ifdef __cplusplus
 }
 #endif

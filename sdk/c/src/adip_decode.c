@@ -319,6 +319,41 @@ bool adip_peek_kind(const uint8_t *payload, size_t len, uint8_t *kind)
     return false;
 }
 
+int adip_encode_signals(const adip_sample_t *samples, uint8_t count,
+                        uint8_t *out, size_t out_len)
+{
+    adip_cbor_w_t w;
+    uint8_t i;
+    const adip_sample_t *s = samples;
+
+    if (out == NULL || samples == NULL || count == 0u) {
+        return (int)ADIP_ERR_ARG;
+    }
+
+    w.buf = out;
+    w.len = out_len;
+    w.pos = 0;
+
+    if (!adip_cbor_put_map(&w, 2u) ||
+        !adip_cbor_put_uint(&w, KEY_KIND) ||
+        !adip_cbor_put_uint(&w, ADIP_KIND_SIGNALS) ||
+        !adip_cbor_put_uint(&w, 1u) ||
+        !adip_cbor_put_array(&w, (uint64_t)count)) {
+        return (int)ADIP_ERR_NO_SPACE;
+    }
+
+    for (i = 0; i < count; i++) {
+        if (!adip_cbor_put_array(&w, 3u) ||
+            !adip_cbor_put_uint(&w, (uint64_t)s[i].signal) ||
+            !adip_cbor_put_quantity(&w, s[i].value) ||
+            !adip_cbor_put_uint(&w, (uint64_t)s[i].t_ms)) {
+            return (int)ADIP_ERR_NO_SPACE;
+        }
+    }
+
+    return (int)w.pos;
+}
+
 int adip_encode_heartbeat(bool busy, bool faulted, uint8_t *out, size_t out_len)
 {
     adip_cbor_w_t w;

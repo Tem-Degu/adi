@@ -44,6 +44,7 @@ T2 = test/test_m2.c
 T3 = test/test_m3.c
 T4 = test/test_m4.c
 T5 = test/test_m5.c
+T6 = test/test_signals.c
 
 BUILD = build
 OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
@@ -51,7 +52,7 @@ OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 .PHONY: all test clean size regen
 
 TESTS = $(BUILD)/test_m1 $(BUILD)/test_m2 $(BUILD)/test_m3 $(BUILD)/test_m4 \
-        $(BUILD)/test_m5
+        $(BUILD)/test_m5 $(BUILD)/test_signals
 
 all: $(TESTS)
 
@@ -73,12 +74,16 @@ $(BUILD)/test_m4: $(SRC) $(NEUTRAL) $(T4) | $(BUILD)
 $(BUILD)/test_m5: $(SRC) $(NEUTRAL) $(T5) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(NEUTRAL) $(T5)
 
+$(BUILD)/test_signals: $(SRC) $(NEUTRAL) $(T6) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $(SRC) $(NEUTRAL) $(T6)
+
 test: $(TESTS)
 	./$(BUILD)/test_m1
 	./$(BUILD)/test_m2
 	./$(BUILD)/test_m3
 	./$(BUILD)/test_m4
 	./$(BUILD)/test_m5
+	./$(BUILD)/test_signals
 
 # Regenerate the tables from the declarations. Run after editing either.
 regen:

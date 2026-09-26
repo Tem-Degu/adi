@@ -32,9 +32,19 @@ extern "C" {
  */
 #define ADIP_RX_MIN (ADIP_MAX_FRAME + ADIP_FRAME_HEADER + ADIP_FRAME_TRAILER)
 
-/* Responses are small and fixed in shape, so the context carries its own
- * transmit buffer rather than asking the caller for a second one. */
-#define ADIP_TX_SIZE 48
+/*
+ * The context carries its own transmit buffer rather than asking the caller
+ * for a second one. Sized for a full signal batch, which is the largest thing
+ * this library sends; a response needs well under fifty bytes.
+ */
+#define ADIP_TX_SIZE 256
+
+/*
+ * Samples per signal frame. PROTOCOL.md 10.1 asks that signal frames batch to
+ * keep the notification rate under 50 Hz, so a 20 Hz mass signal becomes a
+ * frame every few hundred milliseconds rather than twenty a second.
+ */
+#define ADIP_MAX_BATCH 8
 
 /*
  * Capacity of the stateful envelope, held in the context.
@@ -157,6 +167,14 @@ typedef struct {
     void    *user;
 
     /*
+     * Pending signal samples. The caller owns the storage, as with rx, so a
+     * device that publishes nothing pays no RAM for the ability.
+     */
+    adip_sample_t *samples;
+    uint8_t        sample_cap;
+    uint8_t        sample_count;
+
+    /*
      * Counters. An out-of-range invocation means the engine is defective, and
      * PROTOCOL.md 9.2 says the appliance SHOULD log it. Counting is the
      * smallest honest form of that, and it is how a manufacturer notices a
@@ -214,6 +232,35 @@ adip_status_t adip_poll(adip_ctx_t *ctx);
  */
 adip_status_t adip_complete(adip_ctx_t *ctx, uint32_t invocation_id,
                             adip_outcome_t outcome, adip_reason_t reason);
+
+/*
+ * Give the library somewhere to accumulate samples. Optional: without it
+ * adip_publish sends each measurement on its own, which is correct but chatty.
+ *
+ * `buf` must outlive the context. At most ADIP_MAX_BATCH samples are used.
+ */
+void adip_set_signal_buffer(adip_ctx_t *ctx, adip_sample_t *buf, uint8_t count);
+
+/*
+ * Report a measurement.
+ *
+ * The signal index is checked against the declaration, and so is the unit: a
+ * value published in the wrong quantity is the same defect as an invocation
+ * carrying one, seen from the other side, and is refused rather than sent.
+ *
+ * Returns ADIP_ERR_ARG for an unknown signal or a unit the declaration does
+ * not name for it. Never blocks. Flushes by itself when the batch is full.
+ */
+adip_status_t adip_publish(adip_ctx_t *ctx, uint16_t signal,
+                           adip_num_t value, uint32_t t_ms);
+
+/*
+ * Send whatever samples are pending.
+ *
+ * Firmware calls this at whatever rate it wants frames to leave, typically
+ * once per control loop. A flush with nothing pending does nothing.
+ */
+adip_status_t adip_flush_signals(adip_ctx_t *ctx);
 
 /* Firmware tells the library what the machine's state is. */
 void adip_set_interlock(adip_ctx_t *ctx, uint8_t interlock, bool open);

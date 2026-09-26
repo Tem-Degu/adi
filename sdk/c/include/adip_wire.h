@@ -163,6 +163,15 @@ adip_reason_t adip_validate(const adip_device_t *dev,
  */
 bool adip_peek_kind(const uint8_t *payload, size_t len, uint8_t *kind);
 
+/*
+ * Encode a batch of samples as a signal frame. PROTOCOL.md 10.2.5.
+ *
+ * Declared here rather than in adip.h because it needs nothing from the
+ * context, which keeps it testable against expected bytes on its own.
+ */
+int adip_encode_signals(const adip_sample_t *samples, uint8_t count,
+                        uint8_t *out, size_t out_len);
+
 /* Encode the reply to a heartbeat. PROTOCOL.md 10.2.5. */
 int adip_encode_heartbeat(bool busy, bool faulted, uint8_t *out, size_t out_len);
 
