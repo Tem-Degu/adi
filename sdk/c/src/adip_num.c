@@ -134,10 +134,10 @@ bool adip_num_in_range(adip_num_t v, adip_num_t lo, adip_num_t hi)
 
 bool adip_num_on_resolution(adip_num_t v, adip_num_t lo, adip_num_t resolution)
 {
+    int target;
     int64_t sv;
     int64_t slo;
     int64_t sres;
-    int64_t sres_lo;
     int64_t delta;
 
     /* A resolution of zero means the parameter is continuous. */
@@ -145,24 +145,34 @@ bool adip_num_on_resolution(adip_num_t v, adip_num_t lo, adip_num_t resolution)
         return true;
     }
 
-    if (!adip_num_align(v, lo, &sv, &slo)) {
+    if (v.unit != lo.unit || v.unit != resolution.unit) {
         return false;
     }
 
     /*
-     * Align the resolution to the same scale as the offset. Both comparisons
-     * go through the same path so a mixed-exponent declaration behaves the
-     * same as a uniform one.
+     * All three on one scale, the finest of them.
+     *
+     * This previously aligned the value against the minimum, and the
+     * resolution against a separate zero, which left the difference and the
+     * step on different scales whenever the value used a coarser exponent
+     * than the resolution. 36 g against a minimum of 15 g and a step of 0.5 g
+     * gave 21 % 5, which is 1, and a perfectly reachable value was refused as
+     * out of range. It only ever worked because every fixture happened to
+     * write values at the resolution's own exponent.
      */
-    {
-        adip_num_t offset;
-        offset.mantissa = 0;
-        offset.exponent = (v.exponent < lo.exponent) ? v.exponent : lo.exponent;
-        offset.unit = v.unit;
+    target = v.exponent;
+    if (lo.exponent < target) {
+        target = lo.exponent;
+    }
+    if (resolution.exponent < target) {
+        target = resolution.exponent;
+    }
 
-        if (!adip_num_align(resolution, offset, &sres, &sres_lo)) {
-            return false;
-        }
+    if (!adip_scale((int64_t)v.mantissa, v.exponent - target, &sv) ||
+        !adip_scale((int64_t)lo.mantissa, lo.exponent - target, &slo) ||
+        !adip_scale((int64_t)resolution.mantissa,
+                    resolution.exponent - target, &sres)) {
+        return false;
     }
 
     if (sres == 0) {

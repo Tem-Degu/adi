@@ -214,11 +214,57 @@ static void test_tables(void)
     }
 }
 
+/*
+ * The same value written at different exponents must behave identically.
+ *
+ * 36.0 g is {36,0} or {360,-1} or {3600,-2}, all equally legal on the wire,
+ * and an engine picks whichever is shortest. The resolution check used to
+ * compare a difference taken at one scale against a step taken at another,
+ * so 36 g against a minimum of 15 g and a step of 0.5 g failed while 36.00 g
+ * passed. Found by the Rust encoder choosing the shorter form, which no
+ * fixture here had ever done.
+ */
+static void test_resolution_is_independent_of_exponent(void)
+{
+    adip_num_t lo  = ADIP_NUM(15, 0, ADIP_UNIT_G);
+    adip_num_t res = ADIP_NUM(5, -1, ADIP_UNIT_G);
+    adip_num_t forms[3];
+    int i;
+
+    printf("resolution is independent of exponent\n");
+
+    forms[0] = ADIP_NUM(36, 0, ADIP_UNIT_G);
+    forms[1] = ADIP_NUM(360, -1, ADIP_UNIT_G);
+    forms[2] = ADIP_NUM(3600, -2, ADIP_UNIT_G);
+
+    for (i = 0; i < 3; i++) {
+        CHECK(adip_num_on_resolution(forms[i], lo, res),
+              "36.0 g is reachable however it is written");
+    }
+
+    /* And a value genuinely off the step is refused in every form. */
+    CHECK(!adip_num_on_resolution(ADIP_NUM(363, -1, ADIP_UNIT_G), lo, res),
+          "36.3 g is not a multiple of 0.5 above 15");
+    CHECK(!adip_num_on_resolution(ADIP_NUM(3630, -2, ADIP_UNIT_G), lo, res),
+          "nor is it when written more finely");
+
+    /* A step coarser than the value's exponent, the mirror of the bug. */
+    {
+        adip_num_t step = ADIP_NUM(2, 0, ADIP_UNIT_G);
+        adip_num_t base = ADIP_NUM(0, 0, ADIP_UNIT_G);
+        CHECK(adip_num_on_resolution(ADIP_NUM(400, -2, ADIP_UNIT_G), base, step),
+              "4.00 g sits on a 2 g step");
+        CHECK(!adip_num_on_resolution(ADIP_NUM(300, -2, ADIP_UNIT_G), base, step),
+              "3.00 g does not");
+    }
+}
+
 int main(void)
 {
     printf("libadip M1 tests\n\n");
     test_numbers();
     test_tables();
+    test_resolution_is_independent_of_exponent();
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

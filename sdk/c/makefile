@@ -49,7 +49,7 @@ T6 = test/test_signals.c
 BUILD = build
 OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 
-.PHONY: all test clean size regen
+.PHONY: all test clean size regen example
 
 TESTS = $(BUILD)/test_m1 $(BUILD)/test_m2 $(BUILD)/test_m3 $(BUILD)/test_m4 \
         $(BUILD)/test_m5 $(BUILD)/test_signals
@@ -76,6 +76,17 @@ $(BUILD)/test_m5: $(SRC) $(NEUTRAL) $(T5) | $(BUILD)
 
 $(BUILD)/test_signals: $(SRC) $(NEUTRAL) $(T6) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(NEUTRAL) $(T6)
+
+EX900 = generated/adip_generated_ex900.c
+EXAMPLE = example/main.c
+
+# A complete appliance, for an engineer to copy and for the engine to talk to.
+# ADIP_ENABLE_FLOAT is for the shot simulation only. A device build never
+# defines it, and the protocol facing code in the example does not use it.
+$(BUILD)/example: $(SRC) $(EX900) $(EXAMPLE) | $(BUILD)
+	$(CC) $(CFLAGS) -DADIP_ENABLE_FLOAT -o $@ $(SRC) $(EX900) $(EXAMPLE)
+
+example: $(BUILD)/example
 
 test: $(TESTS)
 	./$(BUILD)/test_m1

@@ -137,13 +137,25 @@ adip_reason_t adip_check_stateful(const adip_ctx_t *ctx,
 
         if (inv_def->has_max != 0u) {
             adip_cmp_t c = adip_num_cmp(projected, inv_def->max);
-            if (c == ADIP_CMP_INCOMPARABLE || c == ADIP_CMP_GT) {
+            /*
+             * Incomparable is not "over the limit", and reporting it as one
+             * sends a manufacturer to look at a full cup when the real fault
+             * is a declaration adding grams to a millilitre total. The
+             * distinct code is the whole point of having one.
+             */
+            if (c == ADIP_CMP_INCOMPARABLE) {
+                return ADIP_REASON_UNIT_MISMATCH;
+            }
+            if (c == ADIP_CMP_GT) {
                 return ADIP_REASON_INVARIANT_VIOLATION;
             }
         }
         if (inv_def->has_min != 0u) {
             adip_cmp_t c = adip_num_cmp(projected, inv_def->min);
-            if (c == ADIP_CMP_INCOMPARABLE || c == ADIP_CMP_LT) {
+            if (c == ADIP_CMP_INCOMPARABLE) {
+                return ADIP_REASON_UNIT_MISMATCH;
+            }
+            if (c == ADIP_CMP_LT) {
                 return ADIP_REASON_INVARIANT_VIOLATION;
             }
         }
@@ -196,7 +208,12 @@ adip_reason_t adip_check_stateful(const adip_ctx_t *ctx,
         }
 
         c = adip_num_cmp(want, ctx->resource_left[i]);
-        if (c == ADIP_CMP_INCOMPARABLE || c == ADIP_CMP_GT) {
+        if (c == ADIP_CMP_INCOMPARABLE) {
+            /* A reservoir in millilitres cannot be drawn down by a mass. That
+             * is a declaration fault, not an empty tank. */
+            return ADIP_REASON_UNIT_MISMATCH;
+        }
+        if (c == ADIP_CMP_GT) {
             return ADIP_REASON_RESOURCE_EXHAUSTED;
         }
     }

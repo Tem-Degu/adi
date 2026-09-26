@@ -21,9 +21,9 @@ extern "C" {
 #define ADIP_EX900_EVENT_COUNT        2
 #define ADIP_EX900_PRECONDITION_COUNT 5
 #define ADIP_EX900_INTERLOCK_COUNT    3
-#define ADIP_EX900_INVARIANT_COUNT    2
+#define ADIP_EX900_INVARIANT_COUNT    3
 #define ADIP_EX900_RATE_LIMIT_COUNT   1
-#define ADIP_EX900_RESOURCE_COUNT     1
+#define ADIP_EX900_RESOURCE_COUNT     2
 #define ADIP_EX900_MAX_PARAMS         2
 
 /* Tool indices. Stable for a given declaration_id. */

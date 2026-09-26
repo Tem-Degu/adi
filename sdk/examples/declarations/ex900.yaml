@@ -138,12 +138,30 @@ envelope:
   # Stateful constraints. Without these, three individually valid dispense
   # calls overflow the cup, and D2 refuses to initialise.
   invariants:
-    - id: "cup_capacity"
+    # Two invariants rather than one, because a cup fills with things measured
+    # differently and the protocol will not convert between them.
+    #
+    # This was one invariant in millilitres accumulating both a volume and
+    # brew.start's stop_at_mass, which is grams. The appliance refused every
+    # brew with INVARIANT_VIOLATION, correctly: adding grams to a millilitre
+    # total needs a density the declaration never states, and guessing one is
+    # how a cup overflows while every individual check passes.
+    #
+    # Converting would need coffee's density. Declaring what each mechanism
+    # actually limits needs nothing.
+    - id: "cup_volume"
       quantity: "cup_contents"
       max: 320.0
       unit: ml
       accumulates:
         "adi.espresso.additive.dispense": "volume"
+      reset_on: ["adi.espresso.puck.eject"]
+
+    - id: "cup_yield"
+      quantity: "yield_mass"
+      max: 120.0
+      unit: g
+      accumulates:
         "adi.espresso.brew.start": "stop_at_mass"
       reset_on: ["adi.espresso.puck.eject"]
 
@@ -162,12 +180,21 @@ envelope:
       max_invocations: 12
       window_s: 600.0
 
+  # Two reservoirs, for the same reason the invariants are split: this machine
+  # meters brew water by mass, on its own scale, and additives by volume. One
+  # resource in millilitres drawn down by a mass in grams needs a density the
+  # declaration never states, and the appliance refuses it rather than guess.
   resources:
     - id: "water_reservoir"
-      unit: ml
+      unit: g
       capacity: 1800.0
       consumed_by:
         "adi.espresso.brew.start": "stop_at_mass"
+
+    - id: "additive_reservoir"
+      unit: ml
+      capacity: 1000.0
+      consumed_by:
         "adi.espresso.additive.dispense": "volume"
 
   failsafe:

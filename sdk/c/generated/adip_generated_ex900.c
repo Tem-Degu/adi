@@ -330,11 +330,15 @@ static const adip_hard_limit_t limits[] = {
     },
 };
 
-static const adip_accum_t accum_CUP_CAPACITY[] = {
+static const adip_accum_t accum_CUP_VOLUME[] = {
     { .tool = 5, .param = 1 },
+};
+static const uint16_t reset_CUP_VOLUME[] = { 6 };
+
+static const adip_accum_t accum_CUP_YIELD[] = {
     { .tool = 4, .param = 0 },
 };
-static const uint16_t reset_CUP_CAPACITY[] = { 6 };
+static const uint16_t reset_CUP_YIELD[] = { 6 };
 
 static const adip_accum_t accum_SWEETENER_PER_DRINK[] = {
     { .tool = 7, .param = 0 },
@@ -343,15 +347,27 @@ static const uint16_t reset_SWEETENER_PER_DRINK[] = { 6 };
 
 static const adip_invariant_t invariants[] = {
     {
-        .id = "cup_capacity",
+        .id = "cup_volume",
         .quantity = "cup_contents",
         .min = { 0, 0, ADIP_UNIT_NONE },
         .max = { 320, 0, ADIP_UNIT_ML },
         .has_min = 0,
         .has_max = 1,
-        .accumulates = accum_CUP_CAPACITY,
-        .accum_count = 2,
-        .reset_on = reset_CUP_CAPACITY,
+        .accumulates = accum_CUP_VOLUME,
+        .accum_count = 1,
+        .reset_on = reset_CUP_VOLUME,
+        .reset_count = 1,
+    },
+    {
+        .id = "cup_yield",
+        .quantity = "yield_mass",
+        .min = { 0, 0, ADIP_UNIT_NONE },
+        .max = { 120, 0, ADIP_UNIT_G },
+        .has_min = 0,
+        .has_max = 1,
+        .accumulates = accum_CUP_YIELD,
+        .accum_count = 1,
+        .reset_on = reset_CUP_YIELD,
         .reset_count = 1,
     },
     {
@@ -384,18 +400,28 @@ static const adip_rate_limit_t rate_limits[] = {
 };
 
 static const adip_accum_t consume_WATER_RESERVOIR[] = {
-    { .tool = 5, .param = 1 },
     { .tool = 4, .param = 0 },
+};
+static const adip_accum_t consume_ADDITIVE_RESERVOIR[] = {
+    { .tool = 5, .param = 1 },
 };
 
 static const adip_resource_t resources[] = {
     {
         .id = "water_reservoir",
-        .unit = ADIP_UNIT_ML,
-        .capacity = { 1800, 0, ADIP_UNIT_ML },
+        .unit = ADIP_UNIT_G,
+        .capacity = { 1800, 0, ADIP_UNIT_G },
         .has_capacity = 1,
         .consumed_by = consume_WATER_RESERVOIR,
-        .consume_count = 2,
+        .consume_count = 1,
+    },
+    {
+        .id = "additive_reservoir",
+        .unit = ADIP_UNIT_ML,
+        .capacity = { 1000, 0, ADIP_UNIT_ML },
+        .has_capacity = 1,
+        .consumed_by = consume_ADDITIVE_RESERVOIR,
+        .consume_count = 1,
     },
 };
 
@@ -427,11 +453,11 @@ const adip_device_t adip_device_ex900 = {
     .limits = limits,
     .limit_count = 2,
     .invariants = invariants,
-    .invariant_count = 2,
+    .invariant_count = 3,
     .rate_limits = rate_limits,
     .rate_limit_count = 1,
     .resources = resources,
-    .resource_count = 1,
+    .resource_count = 2,
     .failsafe = {
         .max_time_to_safe_ms = 500,
         .on_control_timeout = ADIP_FAILSAFE_ABORT_TO_SAFE,
