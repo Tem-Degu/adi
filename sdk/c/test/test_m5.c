@@ -135,13 +135,26 @@ static size_t make_call(uint8_t *out, size_t out_len, const char *tool,
     builder_t b;
     int n;
     b.pos = 0;
-    b_head(&b, 5u, 3u);
+    b_head(&b, 5u, 4u);
+    b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
     b_uint(&b, 1u); b_text(&b, tool);
     b_uint(&b, 2u); b_uint(&b, id);
     b_uint(&b, 3u);
     b_head(&b, 5u, 1u);
     b_text(&b, arg);
     b_decimal(&b, m, e);
+    n = adip_frame_wrap(b.buf, b.pos, out, out_len);
+    return (n > 0) ? (size_t)n : 0u;
+}
+
+/* A heartbeat, as the engine actually sends one. PROTOCOL.md 10.2.5. */
+static size_t make_heartbeat(uint8_t *out, size_t out_len)
+{
+    builder_t b;
+    int n;
+    b.pos = 0;
+    b_head(&b, 5u, 1u);
+    b_uint(&b, 0u); b_uint(&b, ADIP_KIND_HEARTBEAT);
     n = adip_frame_wrap(b.buf, b.pos, out, out_len);
     return (n > 0) ? (size_t)n : 0u;
 }
@@ -304,7 +317,11 @@ static void test_duration_overrun(void)
         int i;
         for (i = 0; i < 45; i++) {   /* 67.5 s, comfortably past 60 s */
             now_ms += 1500u;
-            ctx.link_ms = now_ms;    /* the engine is still heartbeating */
+            {   /* the engine is still heartbeating, for real */
+                uint8_t hb[32];
+                size_t hn = make_heartbeat(hb, sizeof(hb));
+                run(hb, hn);
+            }
             (void)adip_poll(&ctx);
         }
     }
@@ -313,6 +330,106 @@ static void test_duration_overrun(void)
     CHECK(ctx.stat_duration_aborts == 1u, "counted as a duration abort");
     CHECK(ctx.stat_link_timeouts == 0u, "and not as a link timeout");
     CHECK(safe_state_calls == 1, "the safe state was driven");
+}
+
+/*
+ * The failsafe must not fire during a long operation that the engine is still
+ * attending to.
+ *
+ * This is the case that had no message. control_timeout_ms is 2000 and the
+ * process tool may run far longer, so without a heartbeat every non-reversible
+ * operation aborted itself two seconds in. Both halves were individually
+ * correct and the pair could not complete a cycle.
+ */
+static void test_heartbeat_holds_the_failsafe_off(void)
+{
+    uint8_t hb[32];
+    size_t n;
+    int i;
+
+    printf("heartbeat holds the failsafe off\n");
+    reset_all();
+
+    start_process(1u);
+    CHECK(adip_busy(&ctx), "a long operation is running");
+
+    n = make_heartbeat(hb, sizeof(hb));
+    CHECK(n > 0, "a heartbeat frame is built");
+
+    /* Ten seconds, five times the control timeout, with the engine sending
+     * nothing but heartbeats because it has nothing else to say. */
+    for (i = 0; i < 10; i++) {
+        now_ms += 1000u;
+        run(hb, n);
+    }
+
+    CHECK(adip_busy(&ctx), "the operation is still running after 10 s");
+    CHECK(safe_state_calls == 0, "the safe state was never driven");
+    CHECK(!adip_faulted(&ctx), "and the machine did not fault");
+    CHECK(ctx.stat_link_timeouts == 0u, "no link timeout was counted");
+
+    /* The reply carries the two flags, so the engine learns the machine is
+     * busy without having to provoke a rejection. */
+    CHECK(sent_count > 0, "the appliance replied to the heartbeat");
+
+    /* Stop heartbeating and the failsafe returns. */
+    now_ms += 3000u;
+    (void)adip_poll(&ctx);
+    CHECK(safe_state_calls == 1, "silence still fires the failsafe");
+    CHECK(ctx.stat_link_timeouts == 1u, "counted as a link timeout");
+}
+
+/*
+ * A heartbeat is answered whatever the machine is doing. An engine that only
+ * heard back when the appliance was idle could not tell a busy machine from a
+ * dead one, which is the question it is asking.
+ */
+static void test_heartbeat_is_answered_when_busy_and_when_faulted(void)
+{
+    uint8_t hb[32];
+    size_t n;
+
+    printf("heartbeat is answered in every state\n");
+    reset_all();
+    n = make_heartbeat(hb, sizeof(hb));
+
+    run(hb, n);
+    CHECK(ctx.stat_malformed == 0u, "an idle machine answers");
+
+    start_process(2u);
+    run(hb, n);
+    CHECK(adip_busy(&ctx), "still busy");
+    CHECK(ctx.stat_malformed == 0u, "a busy machine answers too");
+    CHECK(ctx.stat_rejected == 0u, "and does not reject it as BUSY");
+
+    /* Drive it into fault, then ask again. */
+    now_ms += 5000u;
+    (void)adip_poll(&ctx);
+    CHECK(adip_faulted(&ctx), "faulted");
+    run(hb, n);
+    CHECK(ctx.stat_malformed == 0u, "a faulted machine answers as well");
+}
+
+/* An outbound kind arriving inbound is an echo, not an instruction. */
+static void test_outbound_kinds_are_refused_inbound(void)
+{
+    uint8_t frame[64];
+    builder_t b;
+    int n;
+    uint32_t before;
+
+    printf("outbound kinds refused inbound\n");
+    reset_all();
+    before = ctx.stat_malformed;
+
+    b.pos = 0;
+    b_head(&b, 5u, 1u);
+    b_uint(&b, 0u); b_uint(&b, ADIP_KIND_SIGNALS);
+    n = adip_frame_wrap(b.buf, b.pos, frame, sizeof(frame));
+    run(frame, (size_t)n);
+
+    CHECK(ctx.stat_malformed == before + 1u, "a signal frame inbound is refused");
+    CHECK(!adip_busy(&ctx), "and nothing was started");
 }
 
 static void test_reply_deadline(void)
@@ -408,6 +525,9 @@ int main(void)
     test_reversible_is_stopped_but_does_not_fault();
     test_fault_gate();
     test_duration_overrun();
+    test_heartbeat_holds_the_failsafe_off();
+    test_heartbeat_is_answered_when_busy_and_when_faulted();
+    test_outbound_kinds_are_refused_inbound();
     test_reply_deadline();
     test_noise_does_not_keep_the_link_alive();
     test_timer_wrap();

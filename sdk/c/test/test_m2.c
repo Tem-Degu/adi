@@ -101,7 +101,8 @@ static void build_num_call(builder_t *b, const char *tool, uint32_t id,
                            const char *arg, int32_t mant, int8_t exp)
 {
     b->pos = 0;
-    b_map(b, 3u);
+    b_map(b, 4u);
+    b_uint(b, 0u); b_uint(b, ADIP_KIND_INVOCATION);
     b_uint(b, 1u); b_text(b, tool);
     b_uint(b, 2u); b_uint(b, id);
     b_uint(b, 3u);
@@ -237,7 +238,8 @@ static void test_decoding(void)
      * accepting one would reintroduce the ambiguity scaled integers remove. */
     {
         b.pos = 0;
-        b_map(&b, 3u);
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
         b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
         b_uint(&b, 2u); b_uint(&b, 1u);
         b_uint(&b, 3u);
@@ -253,7 +255,8 @@ static void test_decoding(void)
     /* Unknown keys are tolerated, per PROTOCOL.md 11. */
     {
         b.pos = 0;
-        b_map(&b, 4u);
+        b_map(&b, 5u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
         b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
         b_uint(&b, 2u); b_uint(&b, 7u);
         b_uint(&b, 99u); b_text(&b, "from a newer engine");
@@ -266,10 +269,72 @@ static void test_decoding(void)
         CHECK(inv.invocation_id == 7u, "the rest still decodes");
     }
 
-    /* Key order must not matter. */
+    /* A control message without a kind is not a control message.
+     * PROTOCOL.md 10.2.4. */
     {
         b.pos = 0;
         b_map(&b, 3u);
+        b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
+        b_uint(&b, 2u); b_uint(&b, 1u);
+        b_uint(&b, 3u);
+        b_map(&b, 1u);
+        b_text(&b, "mass");
+        b_decimal(&b, 90, -1);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_MALFORMED, "a message with no kind is refused");
+    }
+
+    /* A kind this decoder does not route here is refused rather than assumed
+     * to be an invocation. */
+    {
+        b.pos = 0;
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_SIGNALS);
+        b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
+        b_uint(&b, 2u); b_uint(&b, 1u);
+        b_uint(&b, 3u);
+        b_map(&b, 1u);
+        b_text(&b, "mass");
+        b_decimal(&b, 90, -1);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_MALFORMED, "the wrong kind is refused");
+    }
+
+    /* A message with no kind is not a control message. PROTOCOL.md 10.2.4. */
+    {
+        b.pos = 0;
+        b_map(&b, 3u);
+        b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
+        b_uint(&b, 2u); b_uint(&b, 1u);
+        b_uint(&b, 3u);
+        b_map(&b, 1u);
+        b_text(&b, "mass");
+        b_decimal(&b, 90, -1);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_MALFORMED, "a message with no kind is refused");
+    }
+
+    /* A kind this decoder does not implement is refused rather than assumed
+     * to be an invocation. */
+    {
+        b.pos = 0;
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_SIGNALS);
+        b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
+        b_uint(&b, 2u); b_uint(&b, 1u);
+        b_uint(&b, 3u);
+        b_map(&b, 1u);
+        b_text(&b, "mass");
+        b_decimal(&b, 90, -1);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_MALFORMED, "an outbound kind is refused inbound");
+    }
+
+    /* Key order must not matter. */
+    {
+        b.pos = 0;
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
         b_uint(&b, 3u);
         b_map(&b, 1u);
         b_text(&b, "mass");
@@ -331,7 +396,8 @@ static void test_validation(void)
     /* A missing required argument. */
     {
         b.pos = 0;
-        b_map(&b, 2u);
+        b_map(&b, 3u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
         b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
         b_uint(&b, 2u); b_uint(&b, 1u);
         (void)adip_decode_invocation(dev, b.buf, b.pos, &inv);
@@ -388,7 +454,8 @@ static void test_validation(void)
     /* Enum values are checked against the declared set. */
     {
         b.pos = 0;
-        b_map(&b, 3u);
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
         b_uint(&b, 1u); b_text(&b, "adi.example.additive.dispense");
         b_uint(&b, 2u); b_uint(&b, 1u);
         b_uint(&b, 3u);
@@ -401,7 +468,8 @@ static void test_validation(void)
                      ADIP_REASON_NONE, "a declared enum value is accepted");
 
         b.pos = 0;
-        b_map(&b, 3u);
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
         b_uint(&b, 1u); b_text(&b, "adi.example.additive.dispense");
         b_uint(&b, 2u); b_uint(&b, 1u);
         b_uint(&b, 3u);
@@ -418,7 +486,8 @@ static void test_validation(void)
      * by last-one-wins. */
     {
         b.pos = 0;
-        b_map(&b, 3u);
+        b_map(&b, 4u);
+        b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
         b_uint(&b, 1u); b_text(&b, "adi.example.input.by_mass");
         b_uint(&b, 2u); b_uint(&b, 1u);
         b_uint(&b, 3u);

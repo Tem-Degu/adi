@@ -26,6 +26,7 @@
 #include <string.h>
 
 /* Invocation map keys. */
+#define KEY_KIND 0u
 #define KEY_TOOL 1u
 #define KEY_ID   2u
 #define KEY_ARGS 3u
@@ -146,6 +147,7 @@ adip_reason_t adip_decode_invocation(const adip_device_t *dev,
     const char *tool_id = NULL;
     size_t tool_id_len = 0;
     bool have_args = false;
+    bool have_kind = false;
     adip_reason_t r;
 
     if (dev == NULL || payload == NULL || out == NULL) {
@@ -178,6 +180,20 @@ adip_reason_t adip_decode_invocation(const adip_device_t *dev,
         }
 
         switch (key) {
+            case KEY_KIND: {
+                uint64_t v;
+                if (!adip_cbor_uint(&c, &v)) {
+                    return ADIP_REASON_MALFORMED;
+                }
+                /* Routing happens in adip_poll. Reaching here with any other
+                 * kind means the caller routed wrongly, which is a defect in
+                 * this library rather than in the message. */
+                if (v != ADIP_KIND_INVOCATION) {
+                    return ADIP_REASON_MALFORMED;
+                }
+                have_kind = true;
+                break;
+            }
             case KEY_TOOL:
                 if (!adip_cbor_text(&c, &tool_id, &tool_id_len)) {
                     return ADIP_REASON_MALFORMED;
@@ -206,6 +222,15 @@ adip_reason_t adip_decode_invocation(const adip_device_t *dev,
                 }
                 break;
         }
+    }
+
+    /*
+     * PROTOCOL.md 10.2.4: every control message carries its kind. Tolerating
+     * its absence would leave exactly one message this library could ever
+     * receive, which is where it started and why signals had nowhere to go.
+     */
+    if (!have_kind) {
+        return ADIP_REASON_MALFORMED;
     }
 
     if (tool_id == NULL) {
@@ -242,6 +267,73 @@ adip_reason_t adip_decode_invocation(const adip_device_t *dev,
     }
 
     return ADIP_REASON_NONE;
+}
+
+bool adip_peek_kind(const uint8_t *payload, size_t len, uint8_t *kind)
+{
+    adip_cbor_t c;
+    uint64_t count;
+    uint64_t i;
+    uint64_t key;
+
+    if (payload == NULL || kind == NULL) {
+        return false;
+    }
+
+    c.buf = payload;
+    c.len = len;
+    c.pos = 0;
+
+    if (!adip_cbor_map(&c, &count)) {
+        return false;
+    }
+    if (count > (uint64_t)len) {
+        return false;
+    }
+
+    for (i = 0; i < count; i++) {
+        if (!adip_cbor_uint(&c, &key)) {
+            return false;
+        }
+        if (key == KEY_KIND) {
+            uint64_t v;
+            if (!adip_cbor_uint(&c, &v) || v > 0xffu) {
+                return false;
+            }
+            *kind = (uint8_t)v;
+            return true;
+        }
+        if (!adip_cbor_skip(&c)) {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+int adip_encode_heartbeat(bool busy, bool faulted, uint8_t *out, size_t out_len)
+{
+    adip_cbor_w_t w;
+
+    if (out == NULL) {
+        return (int)ADIP_ERR_ARG;
+    }
+
+    w.buf = out;
+    w.len = out_len;
+    w.pos = 0;
+
+    if (!adip_cbor_put_map(&w, 3u) ||
+        !adip_cbor_put_uint(&w, KEY_KIND) ||
+        !adip_cbor_put_uint(&w, ADIP_KIND_HEARTBEAT) ||
+        !adip_cbor_put_uint(&w, 1u) ||
+        !adip_cbor_put_bool(&w, busy) ||
+        !adip_cbor_put_uint(&w, 2u) ||
+        !adip_cbor_put_bool(&w, faulted)) {
+        return (int)ADIP_ERR_NO_SPACE;
+    }
+
+    return (int)w.pos;
 }
 
 int adip_encode_response(uint32_t invocation_id, adip_outcome_t outcome,

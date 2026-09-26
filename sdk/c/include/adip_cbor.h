@@ -55,6 +55,8 @@ bool adip_cbor_skip(adip_cbor_t *c);
 bool adip_cbor_put_head(adip_cbor_w_t *w, uint8_t mt, uint64_t value);
 bool adip_cbor_put_uint(adip_cbor_w_t *w, uint64_t v);
 bool adip_cbor_put_map(adip_cbor_w_t *w, uint64_t count);
+/* CBOR simple values: major type 7, 20 is false and 21 is true. */
+bool adip_cbor_put_bool(adip_cbor_w_t *w, bool v);
 
 #ifdef __cplusplus
 }

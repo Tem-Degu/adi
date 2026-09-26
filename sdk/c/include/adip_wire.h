@@ -28,6 +28,22 @@
 extern "C" {
 #endif
 
+/* -------------------------------------------------------------- message kinds */
+
+/*
+ * Every control message is a CBOR map whose key 0 is its kind.
+ * PROTOCOL.md 10.2.4.
+ *
+ * Without a kind there is only one possible message, which is how this SDK
+ * started: every inbound frame was assumed to be an invocation. Signals,
+ * events and heartbeats all need to be told apart from it and from each other.
+ */
+#define ADIP_KIND_INVOCATION 1u
+#define ADIP_KIND_RESPONSE   2u
+#define ADIP_KIND_SIGNALS    3u
+#define ADIP_KIND_EVENT      4u
+#define ADIP_KIND_HEARTBEAT  5u
+
 /* ------------------------------------------------------------------ limits */
 
 /*
@@ -137,6 +153,18 @@ adip_reason_t adip_validate(const adip_device_t *dev,
                             uint32_t satisfied_preconditions);
 
 /* ------------------------------------------------------------------ replies */
+
+/*
+ * Read only the kind of a message, without decoding the rest.
+ *
+ * Routing has to happen before decoding, because decoding an invocation needs
+ * the declaration and a signal frame is not an invocation. Returns false when
+ * the payload is not a CBOR map or carries no key 0.
+ */
+bool adip_peek_kind(const uint8_t *payload, size_t len, uint8_t *kind);
+
+/* Encode the reply to a heartbeat. PROTOCOL.md 10.2.5. */
+int adip_encode_heartbeat(bool busy, bool faulted, uint8_t *out, size_t out_len);
 
 /* Encode a response. Returns bytes written, or a negative adip_status_t. */
 int adip_encode_response(uint32_t invocation_id, adip_outcome_t outcome,

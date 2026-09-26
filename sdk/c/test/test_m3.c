@@ -176,7 +176,8 @@ static size_t make_call(uint8_t *out, size_t out_len, const char *tool,
     int n;
 
     b.pos = 0;
-    b_head(&b, 5u, 3u);
+    b_head(&b, 5u, 4u);
+    b_uint(&b, 0u); b_uint(&b, ADIP_KIND_INVOCATION);
     b_uint(&b, 1u); b_text(&b, tool);
     b_uint(&b, 2u); b_uint(&b, id);
     b_uint(&b, 3u);

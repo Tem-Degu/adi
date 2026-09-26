@@ -292,6 +292,11 @@ bool adip_cbor_skip(adip_cbor_t *c)
 
 /* ------------------------------------------------------------------ writing */
 
+bool adip_cbor_put_bool(adip_cbor_w_t *w, bool v)
+{
+    return adip_cbor_put_head(w, 7u, v ? 21u : 20u);
+}
+
 bool adip_cbor_put_head(adip_cbor_w_t *w, uint8_t mt, uint64_t value)
 {
     uint8_t ai;

@@ -38,6 +38,34 @@ static void send_response(adip_ctx_t *ctx, uint32_t id, adip_outcome_t outcome,
     (void)adip_port_write(ctx->tx, (size_t)framed);
 }
 
+/*
+ * Answer a heartbeat.
+ *
+ * Deliberately unconditional: it is refused by nothing, not by BUSY and not by
+ * FAULT. A heartbeat asks whether the appliance is alive, and an appliance
+ * that is mid-operation or waiting for a person to clear a fault is alive and
+ * is exactly when the engine most needs to hear so. The two flags are how it
+ * finds out without having to provoke a rejection.
+ */
+static void send_heartbeat(adip_ctx_t *ctx)
+{
+    uint8_t payload[ADIP_TX_SIZE];
+    int n;
+    int framed;
+
+    n = adip_encode_heartbeat(ctx->busy, ctx->faulted, payload, sizeof(payload));
+    if (n <= 0) {
+        return;
+    }
+
+    framed = adip_frame_wrap(payload, (size_t)n, ctx->tx, sizeof(ctx->tx));
+    if (framed <= 0) {
+        return;
+    }
+
+    (void)adip_port_write(ctx->tx, (size_t)framed);
+}
+
 static void reject(adip_ctx_t *ctx, uint32_t id, adip_reason_t reason)
 {
     ctx->stat_rejected++;
@@ -289,6 +317,38 @@ static void dispatch(adip_ctx_t *ctx, const uint8_t *payload, size_t len)
     adip_action_t action;
     int tool_idx;
     uint32_t now_ms;
+    uint8_t kind;
+
+    /*
+     * 0. Route on kind, before decoding anything else. PROTOCOL.md 10.2.4.
+     *
+     * Decoding an invocation needs the declaration, and a heartbeat is not an
+     * invocation. Peeking at key 0 first is what lets one transport carry
+     * more than one kind of message.
+     *
+     * Liveness is already recorded by this point: adip_poll refreshes link_ms
+     * for any frame that passes its CRC, which is what makes a heartbeat hold
+     * the failsafe off during a long operation.
+     */
+    if (!adip_peek_kind(payload, len, &kind)) {
+        ctx->stat_malformed++;
+        return;
+    }
+
+    if (kind == ADIP_KIND_HEARTBEAT) {
+        send_heartbeat(ctx);
+        return;
+    }
+
+    /*
+     * Kinds 2, 3 and 4 travel appliance to engine only. One arriving here is
+     * either an echo or a confused peer, and acting on an echo of our own
+     * response is worse than ignoring it.
+     */
+    if (kind != ADIP_KIND_INVOCATION) {
+        ctx->stat_malformed++;
+        return;
+    }
 
     /*
      * Order matters, and this is the order.
