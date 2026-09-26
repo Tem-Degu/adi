@@ -329,8 +329,13 @@ This refusal is a normative requirement rather than a recommendation.
 ## 4. The capability declaration
 
 A conforming appliance MUST expose exactly one declaration document, retrievable
-before any tool is invoked. YAML is used here for readability. JSON is equally
-valid and is the recommended wire format.
+before any tool is invoked. YAML is used here for readability, and JSON is
+equally valid; a declaration is read once per session by the engine, never by
+the device, so its encoding is a matter of convenience.
+
+This does not apply to control messages. Invocations, responses, signals,
+events and heartbeats are CBOR and are specified in §10.2, because those cross
+the wire continuously and are decoded on the appliance.
 
 ### 4.1 Top-level structure
 
@@ -1143,6 +1148,24 @@ The appliance MUST respond `ACCEPTED` or `REJECTED` within 200ms.
 | `BUSY` | Another operation is in progress |
 | `NOT_AUTHORISED` | The engine may not invoke this tool |
 | `FAULT` | The appliance is in a fault state |
+| `INVARIANT_VIOLATION` | The call would breach a stateful invariant in context |
+| `RATE_LIMITED` | A declared rate limit or minimum interval was not respected |
+| `RESOURCE_EXHAUSTED` | A declared resource lacks what the call would consume |
+| `UNKNOWN_TOOL` | The named tool is not in the declaration |
+| `MALFORMED` | The message could not be decoded as a valid control message |
+| `UNIT_MISMATCH` | A parameter carried a unit the declaration does not name |
+
+The last six exist because the first seven are not sufficient to say what went
+wrong. `INVARIANT_VIOLATION`, `RATE_LIMITED` and `RESOURCE_EXHAUSTED` are the
+stateful envelope of §4.6 reporting itself, and collapsing them into
+`ENVELOPE_VIOLATION` would tell a manufacturer that a limit was hit without
+saying which kind, which is the first thing they need to know.
+`UNIT_MISMATCH` is separate from `OUT_OF_RANGE` because a value in range
+carrying the wrong unit is a different engine defect from a value out of range,
+and the two have different causes.
+
+An appliance MUST use the most specific applicable code. This list is closed;
+see §10.2 for the numbering the wire uses.
 
 An invocation carrying an out-of-range parameter indicates an engine defect. The
 appliance MUST reject it and SHOULD log it. This is how a manufacturer detects a
@@ -1350,6 +1373,169 @@ requirement 2 cannot be guaranteed over an uncontrolled network.
 Signal frames SHOULD batch to keep notification rate under 50Hz. Loss of
 notification for longer than `control_timeout_ms` during a non-reversible
 operation MUST trigger the failsafe.
+
+### 10.2 Message encoding
+
+Normative. Every binding carries the same messages; only the framing below is
+specific to stream transports.
+
+This section exists because an implementation cannot be written without it. The
+documents in §4 to §6 are read once per session and their encoding is a
+convenience. Control messages are decoded on the appliance, continuously, in
+safety-relevant code, and they are specified exactly.
+
+#### 10.2.1 Framing, for stream transports
+
+```
+  0xAD   len_hi   len_lo   <payload ...>   crc_hi   crc_lo
+```
+
+The sync byte lets a receiver resynchronise after corruption. The length is
+16-bit big-endian and counts payload bytes only. The CRC is CRC-16/CCITT-FALSE
+(polynomial 0x1021, initial value 0xFFFF, no final xor) over the payload only,
+big-endian.
+
+A payload MUST NOT exceed 512 bytes. A receiver MUST check the length before
+buffering any payload, so an oversized frame cannot exhaust memory.
+
+A receiver MUST NOT treat arriving bytes as evidence of liveness. Only a frame
+that passes its CRC is the peer talking. Noise on a line is not a heartbeat, and
+treating it as one would hold the failsafe of §4.6 off while the link was in
+fact dead.
+
+Bindings that already provide framing and integrity, such as BLE GATT, MAY carry
+the payload alone.
+
+#### 10.2.2 Numbers
+
+A number is a CBOR tag 4 decimal fraction, an array of exactly two integers,
+`[exponent, mantissa]`, denoting `mantissa * 10^exponent`. So 36.5 is
+`4([-1, 365])`.
+
+This form is used rather than a float because a range check against a safety
+limit must be exact. A binary float cannot represent 0.1, and a decoder MUST
+reject CBOR major type 7 floating point values rather than converting them.
+
+A bare CBOR integer MAY be accepted as a number with an exponent of zero.
+
+`mantissa` MUST fit in a signed 32-bit integer and `exponent` in a signed 8-bit
+integer. A decoder MUST reject anything wider rather than truncating.
+
+#### 10.2.3 Units
+
+Every numeric value crossing the wire carries its unit. The vocabulary of §4.2
+is closed and numbered:
+
+| | | | |
+|---|---|---|---|
+| 0 `none` | 1 `g` | 2 `g_per_s` | 3 `ml` |
+| 4 `ml_per_s` | 5 `c` | 6 `bar` | 7 `s` |
+| 8 `ms` | 9 `step` | 10 `kg_f` | 11 `pct` |
+
+A **quantity** is therefore a two-element CBOR array, the unit then the number:
+
+```
+[1, 4([-1, 365])]        36.5 g
+```
+
+The unit is transmitted even though the declaration already fixes it for every
+parameter, and the appliance MUST reject a quantity whose unit is not the one
+the declaration names, with `UNIT_MISMATCH`.
+
+The redundancy is deliberate and is the same argument as §4.6 requirement 2. A
+declaration-implied unit means an engine that computed a value in the wrong
+quantity sends a number that is merely a number, and the appliance's range check
+passes it whenever the magnitude happens to fit. Sending 36 millilitres into a
+parameter declared in grams is an engine defect, and an appliance that cannot
+see it cannot report it. Transmitting the unit costs two bytes and turns a
+silent class of fault into a rejection a manufacturer can count.
+
+#### 10.2.4 Message kinds
+
+Every control message is a CBOR map whose key `0` is the kind. A decoder MUST
+reject a message with no key `0`, and MUST reject a kind it does not implement,
+in both cases with `MALFORMED`.
+
+| Kind | Message | Direction |
+|---|---|---|
+| 1 | invocation | engine to appliance |
+| 2 | response | appliance to engine |
+| 3 | signal batch | appliance to engine |
+| 4 | event | appliance to engine |
+| 5 | heartbeat | engine to appliance, and its reply |
+
+An appliance MUST reject kinds 2, 3 and 4 arriving inbound, and an engine MUST
+reject kind 1 arriving inbound. Each is only ever sent in one direction, and
+accepting a reversed message would mean acting on an echo.
+
+Unknown keys within a recognised message MUST be ignored, so a minor version may
+add optional fields per §11.
+
+#### 10.2.5 The messages
+
+```
+invocation   { 0: 1, 1: <tool id, text>, 2: <invocation id, uint32>,
+                     3: { <parameter name>: <quantity | text> } }
+
+response     { 0: 2, 1: <invocation id>, 2: <outcome>,
+                     3: <reason>            omitted when the reason is NONE }
+
+signal batch { 0: 3, 1: [ [ <signal index>, <quantity>, <t_ms> ], ... ] }
+
+event        { 0: 4, 1: <event index>, 2: <t_ms>,
+                     3: <code, text>, 4: <severity> }
+
+heartbeat    { 0: 5 }                                    engine to appliance
+heartbeat    { 0: 5, 1: <busy, bool>, 2: <faulted, bool> }          the reply
+```
+
+`invocation id` is an unsigned 32-bit integer, chosen by the engine, unique
+within a session. It correlates a response with its request and nothing more; an
+engine's own audit identity is a separate matter and does not cross the wire.
+
+A **signal batch** carries one or more triples. Batching is in the wire format
+from the outset because §10.1 requires signal frames to batch, and a format
+without it would have to change to acquire it. `<signal index>` indexes the
+declaration's `signals` array. `t_ms` is the appliance's own monotonic
+millisecond clock, so an engine MUST treat these as relative and MUST NOT
+assume any epoch.
+
+An **event** indexes the declaration's `events` array. `severity` is 0 warning,
+1 error, 2 critical, matching §4.5.
+
+A **heartbeat** carries no body outbound. The reply's two flags exist so
+liveness is detectable in both directions: the appliance detects a dead engine
+through the timeout of §4.6 requirement 4, and without a reply the engine has no
+equivalent. They also tell it whether the machine is mid-operation or waiting
+for a person to clear a fault, which it otherwise learns only by being refused.
+
+An appliance MUST treat an arriving heartbeat as evidence of liveness, exactly
+as it treats any other valid frame, and MUST reply. An engine MUST send one at
+`session.heartbeat_interval_ms` whenever it has nothing else to send.
+
+Without it the failsafe of §4.6 requirement 4 fires during every operation
+longer than `control_timeout_ms`, because an engine that has issued a command
+and is awaiting its result has nothing to say, and silence is what the appliance
+is required to act on.
+
+#### 10.2.6 Outcomes and reasons
+
+Both are transmitted as unsigned integers, and the numbering is normative.
+
+| Outcome | | Reason | | Reason | |
+|---|---|---|---|---|---|
+| 1 | `ACCEPTED` | 0 | `NONE` | 7 | `FAULT` |
+| 2 | `RUNNING` | 1 | `OUT_OF_RANGE` | 8 | `INVARIANT_VIOLATION` |
+| 3 | `COMPLETED` | 2 | `ENVELOPE_VIOLATION` | 9 | `RATE_LIMITED` |
+| 4 | `ABORTED` | 3 | `PRECONDITION_FAILED` | 10 | `RESOURCE_EXHAUSTED` |
+| 5 | `REJECTED` | 4 | `INTERLOCK` | 11 | `UNKNOWN_TOOL` |
+| | | 5 | `BUSY` | 12 | `MALFORMED` |
+| | | 6 | `NOT_AUTHORISED` | 13 | `UNIT_MISMATCH` |
+
+Zero is not a valid outcome. A decoder MUST reject it, so a zeroed buffer cannot
+read as a meaningful message.
+
+See §9.2 for what each reason means and when to use it.
 
 ---
 

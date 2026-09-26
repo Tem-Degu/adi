@@ -34,6 +34,7 @@ BUILD-GUIDE.md
 # files that must never be published, so it must not be published either.
 CONTEXT.md
 TODO.md
+PLAN.md
 *.bak
 *~
 .DS_Store
