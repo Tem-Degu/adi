@@ -22,13 +22,13 @@ fn fixture() -> Declaration {
     serde_yaml::from_str(&text).expect("fixture should parse")
 }
 
-fn dispense(ml: f64, id: &str) -> Invocation {
+fn dispense(ml: f64, id: u32) -> Invocation {
     Invocation::new(SemanticId::from("adi.example.additive.dispense"), id)
         .with_text("substance", "a")
         .with_number("volume", Quantity::new(ml, Unit::Ml))
 }
 
-fn run_process(ml: f64, id: &str) -> Invocation {
+fn run_process(ml: f64, id: u32) -> Invocation {
     Invocation::new(SemanticId::from("adi.example.process.start"), id)
         .with_number("stop_at_volume", Quantity::new(ml, Unit::Ml))
 }
@@ -41,15 +41,15 @@ fn individually_valid_calls_breach_the_container_invariant() {
 
     // Capacity is 320 ml. Each call is well inside the tool's own 0 to 300
     // range, so no per-call check can object to any of them.
-    for (n, id) in ["a", "b"].iter().enumerate() {
-        let call = dispense(150.0, id);
+    for (n, id) in [1u32, 2].iter().enumerate() {
+        let call = dispense(150.0, *id);
         guard
             .check(&call, &state)
             .unwrap_or_else(|e| panic!("call {n} should pass: {e}"));
         guard.commit(&call, &mut state);
     }
 
-    let third = dispense(150.0, "c");
+    let third = dispense(150.0, 3);
     let violation = guard
         .check(&third, &state)
         .expect_err("450 into a 320 container must be refused");
@@ -75,12 +75,12 @@ fn emptying_the_container_resets_the_accumulator() {
     let guard = Guard::new(&declaration);
     let mut state = SafetyState::new();
 
-    let first = dispense(300.0, "a");
+    let first = dispense(300.0, 1);
     guard.check(&first, &state).expect("first fits");
     guard.commit(&first, &mut state);
     assert_eq!(state.accumulated("container_capacity"), 300.0);
 
-    let empty = Invocation::new(SemanticId::from("adi.example.container.empty"), "e");
+    let empty = Invocation::new(SemanticId::from("adi.example.container.empty"), 9);
     guard.commit(&empty, &mut state);
     assert_eq!(
         state.accumulated("container_capacity"),
@@ -88,7 +88,7 @@ fn emptying_the_container_resets_the_accumulator() {
         "an emptied container starts from zero"
     );
 
-    let next = dispense(300.0, "b");
+    let next = dispense(300.0, 2);
     guard.check(&next, &state).expect("there is room again");
 }
 
@@ -99,13 +99,13 @@ fn running_again_too_soon_is_rate_limited() {
     let mut state = SafetyState::new();
 
     state.advance_to(0.0);
-    let first = run_process(36.0, "a");
+    let first = run_process(36.0, 1);
     guard.check(&first, &state).expect("first run is fine");
     guard.commit(&first, &mut state);
 
     // The machine declares 25 s of recovery between runs.
     state.advance_to(10.0);
-    let second = run_process(36.0, "b");
+    let second = run_process(36.0, 2);
     let violation = guard
         .check(&second, &state)
         .expect_err("10 s is inside the declared recovery interval");
@@ -125,7 +125,7 @@ fn out_of_range_argument_is_refused() {
     let state = SafetyState::new();
 
     // The input tool accepts 6 to 14 g.
-    let call = Invocation::new(SemanticId::from("adi.example.input.by_mass"), "a")
+    let call = Invocation::new(SemanticId::from("adi.example.input.by_mass"), 1)
         .with_number("mass", Quantity::new(40.0, Unit::G));
     let violation = guard.check(&call, &state).expect_err("40 is out of range");
     assert_eq!(violation.reject_reason(), RejectReason::OutOfRange);
@@ -145,7 +145,7 @@ fn clamping_happens_before_sending_not_after_arrival() {
     // The appliance still rejects an unclamped value rather than silently
     // fixing it, so an engine defect stays visible. See PROTOCOL.md 4.6.
     let state = SafetyState::new();
-    let unclamped = Invocation::new(tool, "a").with_number("mass", Quantity::new(40.0, Unit::G));
+    let unclamped = Invocation::new(tool, 1).with_number("mass", Quantity::new(40.0, Unit::G));
     assert!(guard.check(&unclamped, &state).is_err());
 }
 
@@ -156,7 +156,7 @@ fn unit_mismatch_is_refused() {
     let state = SafetyState::new();
 
     // Right number, wrong unit. A declared range in grams must not accept ml.
-    let call = Invocation::new(SemanticId::from("adi.example.input.by_mass"), "a")
+    let call = Invocation::new(SemanticId::from("adi.example.input.by_mass"), 1)
         .with_number("mass", Quantity::new(10.0, Unit::Ml));
     let violation = guard.check(&call, &state).expect_err("units must match");
     assert!(matches!(violation, SafetyViolation::UnitMismatch { .. }));
@@ -170,7 +170,7 @@ fn open_interlock_blocks_its_tools() {
 
     guard.set_open_interlocks(vec!["supply_present".to_string()]);
     let violation = guard
-        .check(&run_process(36.0, "a"), &state)
+        .check(&run_process(36.0, 1), &state)
         .expect_err("no supply, no run");
     assert_eq!(violation.reject_reason(), RejectReason::Interlock);
 }
@@ -183,7 +183,7 @@ fn wildcard_interlock_blocks_everything() {
 
     guard.set_open_interlocks(vec!["service_door_closed".to_string()]);
     let violation = guard
-        .check(&dispense(50.0, "a"), &state)
+        .check(&dispense(50.0, 1), &state)
         .expect_err("an open service door blocks all tools");
     assert_eq!(violation.reject_reason(), RejectReason::Interlock);
 }
@@ -194,7 +194,7 @@ fn undeclared_tool_is_refused() {
     let guard = Guard::new(&declaration);
     let state = SafetyState::new();
 
-    let call = Invocation::new(SemanticId::from("x.nobody.invented.this"), "a");
+    let call = Invocation::new(SemanticId::from("x.nobody.invented.this"), 1);
     let violation = guard.check(&call, &state).expect_err("tool does not exist");
     assert!(matches!(violation, SafetyViolation::UnknownTool(_)));
 }
@@ -214,7 +214,7 @@ fn an_accumulator_refuses_a_foreign_unit() {
     let state = SafetyState::new();
 
     // container_capacity is declared in millilitres. Offer it grams.
-    let call = Invocation::new(SemanticId::from("adi.example.additive.dispense"), "a")
+    let call = Invocation::new(SemanticId::from("adi.example.additive.dispense"), 1)
         .with_text("substance", "a")
         .with_number("volume", Quantity::new(50.0, Unit::G));
 
