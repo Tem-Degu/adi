@@ -143,6 +143,17 @@ pub enum WireError {
     TooLong(usize),
 }
 
+/// Which kind a message is, without matching every arm.
+pub fn kind_of(message: &Message) -> Kind {
+    match message {
+        Message::Invocation { .. } => Kind::Invocation,
+        Message::Response { .. } => Kind::Response,
+        Message::Signals(_) => Kind::Signals,
+        Message::Event { .. } => Kind::Event,
+        Message::Heartbeat { .. } => Kind::Heartbeat,
+    }
+}
+
 /// Reserved map key holding the kind. ADI-P 10.2.4.
 const KEY_KIND: u64 = 0;
 

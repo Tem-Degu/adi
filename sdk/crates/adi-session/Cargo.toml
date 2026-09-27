@@ -1,0 +1,19 @@
+[package]
+name = "adi-session"
+description = "The engine loop: holds a connection, runs a cycle, and enforces the envelope before anything moves."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-protocol = { workspace = true }
+adi-safety = { workspace = true }
+adi-core = { workspace = true }
+adi-decision = { workspace = true }
+adi-wire = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = { workspace = true }

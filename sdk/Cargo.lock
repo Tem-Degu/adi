@@ -83,6 +83,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "adi-session"
+version = "0.1.0"
+dependencies = [
+ "adi-core",
+ "adi-decision",
+ "adi-protocol",
+ "adi-safety",
+ "adi-wire",
+ "serde_yaml",
+ "thiserror",
+]
+
+[[package]]
 name = "adi-wire"
 version = "0.1.0"
 dependencies = [
