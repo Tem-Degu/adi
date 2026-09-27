@@ -5,6 +5,7 @@
 
 mod conformance;
 mod genc;
+mod models;
 
 use std::path::PathBuf;
 
@@ -48,11 +49,37 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Report on the model files: what is configured, present and recognised.
+    ///
+    /// The SDK ships no weights. This reads the folder rather than describing
+    /// what should be in it.
+    Models {
+        #[command(subcommand)]
+        what: ModelsCommand,
+    },
     /// Run the conformance corpus.
     Conformance {
         #[arg(default_value = "conformance/espresso/cases")]
         dir: PathBuf,
+        /// Answers for cases carrying spoken words rather than structured
+        /// intent. Without one, such cases remain pending.
+        #[arg(long)]
+        interpreter: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum ModelsCommand {
+    /// What is configured, what is present, and what to obtain.
+    Check {
+        #[arg(long, short, default_value = "models/models.yaml")]
+        config: PathBuf,
+        /// Defaults to manifest.yaml beside the config.
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+    },
+    /// The checksum and size for a manifest entry.
+    Hash { path: PathBuf },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -61,7 +88,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Validate { path, skill } => validate(path, skill),
         Command::Capabilities { path, skill } => capabilities(path, skill),
         Command::GenerateC { path, out, name } => generate_c(path, out, name),
-        Command::Conformance { dir } => conformance(dir),
+        Command::Models { what } => match what {
+            ModelsCommand::Check { config, manifest } => models::check(config, manifest),
+            ModelsCommand::Hash { path } => models::hash(path),
+        },
+        Command::Conformance { dir, interpreter } => conformance(dir, interpreter),
     }
 }
 
@@ -191,8 +222,11 @@ fn generate_c(
     Ok(())
 }
 
-fn conformance(dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let failures = conformance::run(&dir)?;
+fn conformance(
+    dir: PathBuf,
+    interpreter: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let failures = conformance::run(&dir, interpreter.as_deref())?;
     if failures > 0 {
         // A conformance run that fails must fail the process, or it cannot be
         // wired into anyone's build.

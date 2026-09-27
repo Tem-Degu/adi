@@ -39,8 +39,8 @@ fn pending_cases_are_reported_and_do_not_fail_the_run() {
     assert!(ok);
     assert!(text.contains("PEND"), "a pending case should be visible:\n{text}");
     assert!(
-        text.contains("model backend"),
-        "the reason should be stated:\n{text}"
+        text.contains("interpreter"),
+        "the reason should name what is missing:\n{text}"
     );
 }
 
@@ -82,4 +82,24 @@ fn the_shipped_examples_validate() {
 
     let (ok, text) = run(&["validate", "../../examples/declarations/neutral-machine.yaml"]);
     assert!(ok, "the neutral fixture should validate:\n{text}");
+}
+
+/// The M1 gate. With an interpreter supplied, spoken words run the whole way
+/// to a selected tool and nothing is left pending.
+///
+/// The interpreter is scripted rather than a model. What this proves is that
+/// the path is complete, so that when a model is substituted a failure is
+/// attributable to the model rather than to everything around it.
+#[test]
+fn a_spoken_request_runs_end_to_end_with_an_interpreter() {
+    let (ok, text) = run(&[
+        "conformance",
+        "../../conformance/espresso/cases",
+        "--interpreter",
+        "../../conformance/espresso/interpreter.yaml",
+    ]);
+
+    assert!(ok, "the corpus should pass: {text}");
+    assert!(text.contains("0 pending"), "nothing pending: {text}");
+    assert!(!text.contains("FAIL"), "and nothing failing: {text}");
 }

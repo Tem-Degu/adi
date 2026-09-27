@@ -138,6 +138,11 @@ pub enum DecisionError {
     UndeclaredSelection(String),
     #[error("model returned a malformed selection: {0}")]
     MalformedSelection(String),
+    /// The backend could not be reached or did not answer. Distinct from
+    /// answering badly, which is MalformedSelection, and from there being no
+    /// backend at all, which is NoModelBackend and a configuration error.
+    #[error("the model backend failed: {0}")]
+    Backend(String),
     #[error("the plan is empty")]
     EmptyPlan,
     #[error("no goal was given, so there is nothing to plan")]
@@ -441,7 +446,13 @@ impl<C: ActionChooser> ActionSelector for ModelActionSelector<C> {
 /// A question is text going to a person. It reaches no actuation value, so the
 /// model has the same freedom here it has in understanding, and none of the
 /// checks below apply to it.
-#[derive(Debug, Clone)]
+/// Serialised as `{"intent": {...}}` or `{"clarify": {...}}`.
+///
+/// Externally tagged rather than internally, because `Intent` already carries a
+/// `kind` field and an internal tag would collide with it. This is the exact
+/// shape a model is constrained to produce; see `adi-models::schema`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Understood {
     /// The request was understood well enough to act on.
     Intent(Intent),

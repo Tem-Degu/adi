@@ -1,0 +1,23 @@
+# A model that is another program.
+#
+# The engine writes one JSON request per line on the program's standard input
+# and reads one JSON answer per line from its standard output. The answer is
+# the shape described by `adi-models::schema::UNDERSTOOD_SCHEMA`: either an
+# intent or a question.
+#
+# Nothing about the program is our concern. It may be a script, another
+# runtime, or a service reached by something else. It needs no dependency on
+# this SDK.
+#
+#   -> {"utterance":"half of last time","styles":[...],"remembered":[...]}
+#   <- {"intent":{"kind":"produce","targets":{"sugar_mass":{"of":"last","scale":0.5}}}}
+#
+# A program that cannot resolve a request answers with a question instead:
+#
+#   <- {"clarify":{"question":"Half of what?","because":"no variable named"}}
+
+seams:
+  interpreter:
+    backend: process
+    command: python3
+    args: ["my_interpreter.py"]

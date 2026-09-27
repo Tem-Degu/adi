@@ -1,0 +1,21 @@
+# Scripted answers for the conformance corpus.
+#
+# What a model would return for each spoken case, written by hand. This is not
+# a substitute for a model and does not measure one. It proves that the path
+# from words to a moving mechanism is complete and correct, so that when a
+# model is put behind this seam, a failure is attributable to the model rather
+# than to everything around it.
+#
+# Each answer is the exact shape a model is constrained to produce. See
+# `adi-models::schema::UNDERSTOOD_SCHEMA`.
+
+answers:
+  - say: "make it half as sweet as the last one"
+    intent:
+      kind: adjust
+      targets:
+        # The model states the relation. The engine holds the memory and does
+        # the arithmetic: a model asked to emit "4 g" would have to be trusted
+        # to remember correctly and to divide correctly, and would be wrong
+        # silently when it did not. ADI-P 9.4.
+        sugar_mass: { of: last, scale: 0.5 }

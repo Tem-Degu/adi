@@ -322,21 +322,51 @@ fn run_case(
     declaration: &Declaration,
     skill: Option<&Skill>,
     domain: &dyn Domain,
+    interpreter: Option<&dyn adi_decision::Interpreter>,
 ) -> Outcome {
     if let Some(reason) = &case.pending {
         return Outcome::Pending(reason.clone());
     }
-    // A case may carry `request` as the words a person said and `intent` as the
-    // structured form of them. Only the second is runnable: turning words into
-    // intent is the model's job, and no model backend exists. A case with words
-    // and no intent says so rather than appearing to pass.
-    if case.request.is_some() && case.intent.is_none() {
-        return Outcome::Pending(
-            "carries a spoken request but no `intent`, and parsing speech needs a \
-             model backend. Add the structured intent to run the rest of the path."
-                .to_string(),
-        );
-    }
+
+    // A case may carry `request` as the words a person said and `intent` as
+    // the structured form of them. Turning the first into the second is the
+    // model's job, so a case with words and no intent needs an interpreter.
+    // Without one it stays pending rather than appearing to pass.
+    let interpreted;
+    let effective_intent = match (&case.request, &case.intent) {
+        (_, Some(intent)) => Some(intent),
+        (Some(words), None) => {
+            let Some(interpreter) = interpreter else {
+                return Outcome::Pending(
+                    "carries spoken words but no `intent`. Supply an interpreter with --interpreter, or add the structured intent to the case."
+                        .to_string(),
+                );
+            };
+
+            let context = adi_decision::SelectionContext {
+                history: &[],
+                cycle: None,
+                memory: None,
+            };
+
+            match interpreter.interpret(words, &context) {
+                Ok(adi_decision::Understood::Intent(intent)) => {
+                    interpreted = intent;
+                    Some(&interpreted)
+                }
+                // Asking is an ordinary outcome for an interpreter, but a case
+                // expecting an action did not get one. That is a failure of
+                // this case rather than of the interpreter.
+                Ok(adi_decision::Understood::Clarify { question, because }) => {
+                    return Outcome::Fail(vec![format!(
+                        "the interpreter asked '{question}' rather than acting ({because})"
+                    )]);
+                }
+                Err(e) => return Outcome::Fail(vec![format!("interpreting '{words}': {e}")]),
+            }
+        }
+        (None, None) => None,
+    };
 
     let mut problems: Vec<String> = Vec::new();
 
@@ -347,7 +377,7 @@ fn run_case(
 
     domain.derive(&mut cycle);
 
-    if let Some(intent) = &case.intent {
+    if let Some(intent) = effective_intent {
         return run_request_case(case, declaration, skill, domain, intent, &cycle);
     }
 
@@ -527,7 +557,22 @@ fn run_case(
 /// Run every corpus file under `target`, which may be a file or a directory.
 ///
 /// Returns the number of failures, so a caller can set the exit code.
-pub fn run(target: &Path) -> Result<usize, String> {
+/// Run the corpus.
+///
+/// `interpreter_script` supplies answers for cases carrying spoken words
+/// rather than structured intent. Scripted rather than a model on purpose:
+/// this proves the path from words to a moving mechanism, so that when a model
+/// is substituted a failure is attributable to the model rather than to
+/// everything around it.
+pub fn run(target: &Path, interpreter_script: Option<&Path>) -> Result<usize, String> {
+    let interpreter: Option<Box<dyn adi_decision::Interpreter>> = match interpreter_script {
+        Some(path) => Some(Box::new(
+            adi_models::ScriptedInterpreter::load(path)
+                .map_err(|e| format!("{}: {e}", path.display()))?,
+        )),
+        None => None,
+    };
+
     let mut files: Vec<PathBuf> = Vec::new();
 
     if target.is_dir() {
@@ -578,7 +623,13 @@ pub fn run(target: &Path) -> Result<usize, String> {
         println!();
 
         for case in &corpus.cases {
-            match run_case(case, &declaration, skill.as_ref(), domain.as_ref()) {
+            match run_case(
+                case,
+                &declaration,
+                skill.as_ref(),
+                domain.as_ref(),
+                interpreter.as_deref(),
+            ) {
                 Outcome::Pass => {
                     total_pass += 1;
                     println!("  PASS  {}", case.id);

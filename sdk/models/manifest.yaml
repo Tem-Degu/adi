@@ -1,0 +1,92 @@
+# Recommended models.
+#
+# The SDK ships no weights. Obtain each file from the source given here, under
+# the licence given here, and place it in this folder. `adi models check`
+# reports what is present and what is missing.
+#
+# A model absent from this list still works. The list is how a file is
+# recognised in a decision record, not a restriction on what may be loaded.
+# ADI-P 9.3 requirement 5 requires that a decision be reconstructable, and
+# where a model contributed, being able to say which model is part of that.
+#
+# The hashes below are placeholders until each file has been obtained and
+# hashed on a machine here. A placeholder hash matches nothing, so a model is
+# recorded as unverified rather than falsely recognised. Fill them with
+# `adi models hash <file>`.
+
+models:
+  # ----------------------------------------------------------------- interpreter
+  #
+  # Apache 2.0, which is the least encumbered licence available for a model of
+  # this capability. Llama was considered and rejected: its licence requires
+  # permission from Meta above a usage threshold, and withholds multimodal
+  # rights from companies domiciled in the European Union. A manufacturer
+  # licensing this SDK should not inherit either condition.
+
+  - id: "qwen3-1.7b-instruct-q4_k_m"
+    seam: interpreter
+    file: "interpreter/qwen3-1.7b-instruct-q4_k_m.gguf"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    bytes: 1100000000
+    source: "https://huggingface.co/Qwen/Qwen3-1.7B-Instruct-GGUF"
+    licence: "Apache-2.0"
+    notes: >
+      The minimal tier. Sized so that a board in the class of a Raspberry Pi 5
+      can answer in seconds rather than tens of seconds. Multilingual, which
+      matters for an appliance sold outside one market.
+
+  - id: "qwen3-4b-instruct-q4_k_m"
+    seam: interpreter
+    file: "interpreter/qwen3-4b-instruct-q4_k_m.gguf"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    bytes: 2600000000
+    source: "https://huggingface.co/Qwen/Qwen3-4B-Instruct-GGUF"
+    licence: "Apache-2.0"
+    notes: >
+      The standard tier. Better instruction following, and materially slower on
+      a processor without an accelerator. Measure with `adi models bench`
+      before choosing it.
+
+  # ----------------------------------------------------------------- transcriber
+  #
+  # ADI-P 9.4.2 requires a transcript to carry a confidence, and treats one
+  # below the configured threshold as not heard. A backend that cannot report a
+  # confidence cannot serve this seam, whatever its accuracy.
+
+  - id: "moonshine-base-en"
+    seam: transcriber
+    file: "transcriber/moonshine-base.onnx"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    bytes: 62000000
+    source: "https://huggingface.co/UsefulSensors/moonshine-base"
+    licence: "MIT"
+    notes: >
+      English only. Built for this constraint rather than adapted to it, and
+      smaller than a Whisper model of comparable accuracy. Requires 16 kHz
+      audio.
+
+  - id: "whisper-base-en"
+    seam: transcriber
+    file: "transcriber/ggml-base.en.bin"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    bytes: 148000000
+    source: "https://huggingface.co/ggerganov/whisper.cpp"
+    licence: "MIT"
+    notes: >
+      The alternative where a language other than English is required, or where
+      an existing whisper.cpp deployment is being reused. Larger and slower for
+      comparable English accuracy.
+
+  # --------------------------------------------------------------------- speaker
+
+  - id: "piper-en-gb-alba-medium"
+    seam: speaker
+    file: "speaker/en_GB-alba-medium.onnx"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    bytes: 63000000
+    source: "https://huggingface.co/rhasspy/piper-voices"
+    licence: "MIT"
+    notes: >
+      One voice of many. Piper publishes over a hundred across more than thirty
+      languages, and the file named here is a default rather than a
+      requirement. Produces 22.05 kHz audio.

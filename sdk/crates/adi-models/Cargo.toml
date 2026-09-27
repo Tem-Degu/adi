@@ -1,0 +1,18 @@
+[package]
+name = "adi-models"
+description = "Model backends: configuration, provenance, and the seams filled by an external process."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-protocol = { workspace = true }
+adi-decision = { workspace = true }
+adi-language = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = "0.10"
+thiserror = { workspace = true }
