@@ -90,6 +90,7 @@ fn empty_cycle() -> Cycle {
         settings: BTreeMap::new(),
         measured: BTreeMap::new(),
         traces: Vec::new(),
+        events: Vec::new(),
         feedback: SubjectiveFeedback::default(),
     }
 }

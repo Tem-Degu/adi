@@ -27,6 +27,7 @@ fn cycle() -> Cycle {
         settings: BTreeMap::new(),
         measured: BTreeMap::new(),
         traces: vec![trace(&[(0.0, 0.0), (10.0, 12.0), (25.0, 30.0)], 0.2)],
+        events: Vec::new(),
         feedback: SubjectiveFeedback::default(),
     }
 }

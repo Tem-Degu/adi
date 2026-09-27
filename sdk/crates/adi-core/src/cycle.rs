@@ -64,7 +64,22 @@ pub struct Cycle {
     /// Measured outcomes.
     pub measured: BTreeMap<VariableId, Quantity>,
     pub traces: Vec<Trace>,
+    /// Discrete notifications the appliance raised during the cycle. ADI-P 4.5.
+    ///
+    /// Separate from traces because an event is a moment rather than a series,
+    /// and because some moments cannot be recovered from a series at all: a
+    /// profile can guess when flow began from a mass curve, and the appliance
+    /// knows.
+    pub events: Vec<ObservedEvent>,
     pub feedback: SubjectiveFeedback,
+}
+
+/// One event, as observed during a cycle.
+#[derive(Debug, Clone)]
+pub struct ObservedEvent {
+    pub id: SemanticId,
+    /// Seconds since the cycle began, on the same clock as a trace's samples.
+    pub at_s: f64,
 }
 
 impl Cycle {

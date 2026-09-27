@@ -30,6 +30,13 @@ pub mod signals {
     pub const DOSE_MASS: &str = "adi.espresso.signal.dose_mass";
 }
 
+pub mod events {
+    /// When flow begins. ADI-P 7.3 measures `shot_time` from here, and a mass
+    /// curve can only be used to estimate it.
+    pub const FIRST_DRIP: &str = "adi.espresso.event.first_drip";
+    pub const FAULT: &str = "adi.espresso.event.fault";
+}
+
 pub mod vars {
     pub const DOSE_MASS: &str = "dose_mass";
     pub const YIELD_MASS: &str = "yield_mass";

@@ -6,13 +6,13 @@
 //! considered. This ordering is why `Domain::diagnose` is code rather than a
 //! data table.
 
-use adi_core::cycle::Cycle;
+use adi_core::cycle::{Cycle, Trace};
 use adi_core::domain::Diagnosis;
 use adi_protocol::ids::{SemanticId, VariableId};
 use adi_protocol::knowledge::ResolvedTargets;
 use adi_protocol::units::{Quantity, Unit};
 
-use crate::registry::{signals, vars};
+use crate::registry::{events, signals, vars};
 
 /// Turn raw traces into modelled variables.
 pub fn derive(cycle: &mut Cycle) {
@@ -22,7 +22,7 @@ pub fn derive(cycle: &mut Cycle) {
     };
 
     let yield_mass = trace.final_value().unwrap_or(0.0);
-    let duration = trace.duration_s();
+    let duration = shot_time(cycle, trace);
     let flow = flow_series(&trace.samples);
     let peak = flow.iter().map(|(_, f)| *f).fold(0.0_f64, f64::max);
     let variance = flow_variance(&flow);
@@ -52,6 +52,42 @@ pub fn derive(cycle: &mut Cycle) {
             );
         }
     }
+}
+
+/// Shot time: first drip to stop. ADI-P 7.3.
+///
+/// Not the span of the trace, which is what this measured until now. A shot
+/// spends its first seconds saturating the puck with nothing in the cup, and
+/// counting that time makes every shot look longer than it ran. Several
+/// seconds against a 25 to 32 second target is not a rounding error: it biases
+/// every correction, and in the wrong direction, because a shot that looks
+/// slow gets a coarser grind when it needed none.
+///
+/// The appliance is asked first. `adi.espresso.event.first_drip` exists in the
+/// registry precisely because the machine can see flow begin and a mass curve
+/// can only be used to guess at it.
+fn shot_time(cycle: &Cycle, trace: &Trace) -> f64 {
+    let end = trace.samples.last().map(|(t, _)| *t).unwrap_or(0.0);
+    let start = first_drip(cycle, trace);
+    (end - start).max(0.0)
+}
+
+/// When flow began, from the appliance if it said and from the curve if not.
+fn first_drip(cycle: &Cycle, trace: &Trace) -> f64 {
+    let declared = SemanticId::from(events::FIRST_DRIP);
+    if let Some(event) = cycle.events.iter().find(|e| e.id == declared) {
+        return event.at_s;
+    }
+
+    // Detected: the first sample that rises above what the scale can resolve.
+    // This is what `accuracy` is mandatory for, and it is why guessing is only
+    // the fallback: at 20 Hz it is close, and on a coarse trace it is not.
+    trace
+        .samples
+        .iter()
+        .find(|(_, mass)| *mass > trace.accuracy_abs)
+        .map(|(t, _)| *t)
+        .unwrap_or(0.0)
 }
 
 /// First difference of the mass series. Real builds smooth this first: the

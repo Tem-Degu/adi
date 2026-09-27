@@ -19,7 +19,7 @@ pub mod plan;
 pub mod record;
 pub mod request;
 
-pub use cycle::{Cycle, SubjectiveFeedback, Trace};
+pub use cycle::{Cycle, ObservedEvent, SubjectiveFeedback, Trace};
 pub use domain::{Diagnosis, Domain};
 pub use plan::{Correction, Planner};
 pub use record::{DecisionRecord, SelectedBy, ValueProvenance, ValueSource};

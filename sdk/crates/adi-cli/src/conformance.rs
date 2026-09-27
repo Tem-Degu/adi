@@ -59,6 +59,16 @@ pub struct Case {
     #[serde(default)]
     pub feedback: Option<FeedbackLit>,
     pub expect: Expect,
+    /// Events the appliance reported during the cycle, such as when flow
+    /// began. Optional: without them a profile falls back to estimating.
+    #[serde(default)]
+    events: Vec<CaseEvent>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaseEvent {
+    id: adi_protocol::ids::SemanticId,
+    at_s: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,6 +196,18 @@ fn build_cycle(
         })
         .unwrap_or_default();
 
+    // A case may state when flow began, as an appliance would report it. When
+    // it does not, the profile estimates it from the curve, and a case that
+    // means to test the estimate says nothing here.
+    let events = case
+        .events
+        .iter()
+        .map(|e| adi_core::ObservedEvent {
+            id: e.id.clone(),
+            at_s: e.at_s,
+        })
+        .collect();
+
     Ok(Cycle {
         cycle_id: case.id.clone(),
         subject_id: None,
@@ -193,6 +215,7 @@ fn build_cycle(
         settings,
         measured: BTreeMap::new(),
         traces,
+        events,
         feedback,
     })
 }

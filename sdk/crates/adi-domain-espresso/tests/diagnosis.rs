@@ -40,6 +40,7 @@ fn cycle(samples: &[(f64, f64)], descriptors: &[&str], grind: f64) -> Cycle {
             accuracy_abs: 0.2,
             filtered: false,
         }],
+        events: Vec::new(),
         feedback: SubjectiveFeedback {
             descriptors: descriptors.iter().map(|s| s.to_string()).collect(),
             rating: None,
@@ -136,12 +137,15 @@ fn bitter_and_slow_is_over_extracted() {
 #[test]
 fn in_target_proposes_nothing() {
     let d = diagnose(
+        // A 28 second shot, which is 28 seconds of extraction after a four
+        // second pre-infusion, not a 28 second trace. ADI-P 7.3.
         &[
             (0.0, 0.0),
-            (7.0, 3.0),
-            (14.0, 10.0),
-            (21.0, 19.0),
-            (28.0, 27.0),
+            (4.0, 1.0),
+            (11.0, 7.0),
+            (18.0, 13.0),
+            (25.0, 20.0),
+            (32.0, 27.0),
         ],
         &["balanced"],
         21.0,
@@ -154,8 +158,9 @@ fn in_target_proposes_nothing() {
 #[test]
 fn derived_variables_are_computed() {
     let domain = Espresso::new();
+    // Flow begins at 4 s and stops at 32 s, so the shot ran for 28.
     let mut c = cycle(
-        &[(0.0, 0.0), (10.0, 8.0), (20.0, 16.0), (28.0, 27.0)],
+        &[(0.0, 0.0), (4.0, 1.0), (14.0, 8.0), (24.0, 16.0), (32.0, 27.0)],
         &["balanced"],
         21.0,
     );
@@ -164,6 +169,7 @@ fn derived_variables_are_computed() {
     let yielded = c.value(&VariableId::from(vars::YIELD_MASS)).unwrap();
     assert_eq!(yielded.value, 27.0);
 
+    // 32 s of trace, 4 s of it before anything reached the cup.
     let time = c.value(&VariableId::from(vars::SHOT_TIME)).unwrap();
     assert_eq!(time.value, 28.0);
 
@@ -239,4 +245,52 @@ fn no_skill_means_no_candidates() {
     assert!(planner
         .candidates(&VariableId::from(vars::SHOT_TIME))
         .is_empty());
+}
+
+/// ADI-P 7.3 measures shot time from first drip to stop, not across the whole
+/// trace. A shot spends its first seconds saturating the puck with nothing in
+/// the cup, and counting that makes every shot look longer than it ran.
+#[test]
+fn shot_time_runs_from_first_drip_not_from_the_start() {
+    use adi_core::{Cycle, ObservedEvent, SubjectiveFeedback};
+
+    let mut cycle = Cycle {
+        cycle_id: "t".into(),
+        subject_id: None,
+        operator_id: None,
+        settings: Default::default(),
+        measured: Default::default(),
+        traces: vec![adi_core::Trace {
+            signal: SemanticId::from("adi.espresso.signal.mass"),
+            // Nothing measurable for four seconds, then a normal extraction.
+            samples: vec![(0.0, 0.0), (4.0, 0.1), (12.0, 8.0), (20.0, 18.0), (32.0, 27.0)],
+            unit: Unit::G,
+            accuracy_abs: 0.2,
+            filtered: false,
+        }],
+        events: Vec::new(),
+        feedback: SubjectiveFeedback::default(),
+    };
+
+    // Estimated: the first sample above the scale's own accuracy is at 12 s,
+    // because 0.1 g is below what it can resolve.
+    adi_domain_espresso::rules::derive(&mut cycle);
+    let estimated = cycle.measured[&VariableId::from("shot_time")].value;
+    assert_eq!(estimated, 20.0, "32 s trace, flow seen at 12 s");
+
+    // Reported: the appliance saw flow begin at 4 s and said so, which is
+    // eight seconds it could see and the curve could not.
+    cycle.measured.clear();
+    cycle.events.push(ObservedEvent {
+        id: SemanticId::from("adi.espresso.event.first_drip"),
+        at_s: 4.0,
+    });
+    adi_domain_espresso::rules::derive(&mut cycle);
+    let reported = cycle.measured[&VariableId::from("shot_time")].value;
+    assert_eq!(reported, 28.0, "the appliance is believed over the estimate");
+
+    assert!(
+        reported > estimated,
+        "the whole point: an estimate from the curve can only ever start late"
+    );
 }

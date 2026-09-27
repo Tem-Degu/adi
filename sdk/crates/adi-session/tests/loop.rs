@@ -120,6 +120,7 @@ fn cycle(id: &str, position: f64) -> Cycle {
         settings,
         measured: BTreeMap::new(),
         traces: Vec::new(),
+        events: Vec::new(),
         feedback: SubjectiveFeedback::default(),
     }
 }

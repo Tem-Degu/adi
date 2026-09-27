@@ -18,7 +18,7 @@ cases:
       grind_setting: { value: 24,   unit: step }
     trace:
       signal: "adi.espresso.signal.mass"
-      samples: [[0,0],[5,2],[10,8],[15,15],[20,24],[22,30]]
+      samples: [[0,0],[4,1],[10,7],[16,14],[22,22],[26,30]]
     feedback:
       descriptors: ["sour"]
     expect:
@@ -35,7 +35,7 @@ cases:
       grind_setting: { value: 24,  unit: step }
     trace:
       signal: "adi.espresso.signal.mass"
-      samples: [[0,0],[5,1],[8,9],[10,10],[14,11],[16,22],[20,24],[21,31]]
+      samples: [[0,0],[4,1],[8,9],[11,10],[15,11],[19,22],[23,24],[25,31]]
     feedback:
       descriptors: ["sour", "bitter"]
     expect:
@@ -52,7 +52,7 @@ cases:
       grind_setting: { value: 18,  unit: step }
     trace:
       signal: "adi.espresso.signal.mass"
-      samples: [[0,0],[10,3],[20,11],[30,20],[38,26],[41,30]]
+      samples: [[0,0],[4,1],[14,7],[24,14],[34,21],[45,30]]
     feedback:
       descriptors: ["bitter"]
     expect:
@@ -67,9 +67,15 @@ cases:
     settings:
       dose_mass:     { value: 9.0, unit: g }
       grind_setting: { value: 21,  unit: step }
+    # The appliance saw flow begin and said so. The first weighable mass is
+    # not until 11 s, so a profile estimating from the curve alone would call
+    # this a 21 s shot and correct a shot that needed nothing. The event is
+    # what makes it a 28 s shot, which is what it is.
+    events:
+      - { id: "adi.espresso.event.first_drip", at_s: 4.0 }
     trace:
       signal: "adi.espresso.signal.mass"
-      samples: [[0,0],[7,3],[14,10],[21,19],[28,27]]
+      samples: [[0,0],[4,0.1],[11,7],[18,13],[25,20],[32,27]]
     feedback:
       descriptors: ["balanced"]
     expect:
@@ -115,7 +121,7 @@ cases:
       grind_setting: { value: 19,  unit: step }
     trace:
       signal: "adi.espresso.signal.mass"
-      samples: [[0,0],[8,2],[16,9],[24,18],[32,26],[36,31]]
+      samples: [[0,0],[4,1],[12,8],[20,15],[28,22],[36,28],[40,31]]
     feedback:
       descriptors: []
     expect:
@@ -132,7 +138,7 @@ cases:
       grind_setting: { value: 19,  unit: step }
     trace:
       signal: "adi.espresso.signal.mass"
-      samples: [[0,0],[8,2],[16,9],[24,18],[32,26],[36,31]]
+      samples: [[0,0],[4,1],[12,8],[20,15],[28,22],[36,28],[40,31]]
     feedback:
       descriptors: []
     expect:
@@ -148,9 +154,11 @@ cases:
     settings:
       dose_mass:     { value: 9.0, unit: g }
       grind_setting: { value: 21,  unit: step }
+    # No event here, so the profile estimates first drip from the curve. Same
+    # 28 s shot, reached the other way.
     trace:
       signal: "adi.espresso.signal.mass"
-      samples: [[0,0],[7,3],[14,10],[21,19],[28,27]]
+      samples: [[0,0],[4,1],[11,7],[18,13],[25,20],[32,27]]
     feedback:
       descriptors: ["balanced"]
     expect:
