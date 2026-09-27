@@ -59,6 +59,7 @@ dependencies = [
  "adi-core",
  "adi-decision",
  "adi-protocol",
+ "serde_yaml",
  "thiserror",
 ]
 

@@ -30,6 +30,7 @@ use adi_core::record::DecisionRecord;
 use adi_decision::{DecisionError, SelectionContext};
 
 pub mod audio;
+pub mod context;
 
 pub use audio::{Audio, Transcript};
 // Re-exported so the whole language layer is discoverable in one place, even

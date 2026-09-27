@@ -700,6 +700,21 @@ impl Knowledge {
         ids
     }
 
+    /// Every material the machine knows a prior for, across all layers.
+    ///
+    /// ADI-P 9.4.1 requires an interpreter be given the declared styles and
+    /// materials. A model that cannot name the material in front of it cannot
+    /// express a request that depends on it.
+    pub fn material_ids(&self) -> Vec<&str> {
+        let mut ids: Vec<&str> = self
+            .layers
+            .iter()
+            .flat_map(|l| l.material_priors.iter().map(|m| m.id.as_str()))
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
     pub fn layers(&self) -> &[KnowledgeLayer] {
         &self.layers
     }

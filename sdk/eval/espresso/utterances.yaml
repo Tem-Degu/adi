@@ -1,0 +1,186 @@
+# Interpreter evaluation corpus.
+#
+# What a person says, and what the interpreter should produce. Data rather than
+# Rust, for the same reason as the conformance corpus: this transfers unchanged
+# when the model changes, and comparing two models means running the same file
+# against both.
+#
+# This measures the interpreter seam only. It does not measure whether the
+# resulting plan is safe, which the engine and the appliance decide afterwards
+# and which the conformance corpus covers.
+#
+# Two kinds of case:
+#
+#   expect.intent   the request is resolvable and this is the intent
+#   expect.clarify  the request is not resolvable and asking is correct
+#
+# The second kind carries as much weight as the first. ADI-P 9.4.3 permits a
+# model to ask instead of answering, and a model that guesses at an ambiguous
+# request scores worse than one that asks, because on this path a guess becomes
+# a physical action.
+
+profile: "espresso/v1"
+declaration: "../../examples/declarations/ex900.yaml"
+
+cases:
+  # ------------------------------------------------------------ plain requests
+
+  - id: "a-plain-espresso"
+    say: "make me an espresso"
+    expect:
+      intent:
+        kind: produce
+        style: "adi.espresso.style.espresso"
+
+  - id: "a-named-style"
+    say: "I'd like a lungo please"
+    expect:
+      intent:
+        kind: produce
+        style: "adi.espresso.style.lungo"
+
+  - id: "a-style-by-description"
+    say: "something short and strong"
+    expect:
+      intent:
+        kind: produce
+        style: "adi.espresso.style.ristretto"
+
+  # -------------------------------------------------------- relative reference
+  #
+  # The case that drove the design of structured intent. The model states the
+  # relation; the engine holds the memory and does the arithmetic. A model
+  # asked to emit "4 g" would have to be trusted to remember correctly and to
+  # divide correctly, and would be wrong silently when it did not.
+
+  - id: "half-the-sugar-of-last-time"
+    say: "make me a coffee with half the sugar of last time"
+    expect:
+      intent:
+        kind: produce
+        targets:
+          sugar_mass: { of: last, scale: 0.5 }
+
+  - id: "the-same-as-before"
+    say: "same as the last one"
+    expect:
+      intent:
+        kind: produce
+        targets:
+          # Neither scale nor offset means "the same as then".
+          yield_mass: { of: last }
+
+  - id: "two-relative-targets"
+    say: "less sweet than last time and half the cup"
+    expect:
+      intent:
+        kind: produce
+        targets:
+          sugar_mass:  { of: last, scale: 0.5 }
+          yield_mass:  { of: last, scale: 0.5 }
+
+  - id: "none-at-all"
+    say: "no sugar this time"
+    expect:
+      intent:
+        kind: produce
+        targets:
+          # A scale of zero is valid and means none at all.
+          sugar_mass: { of: last, scale: 0.0 }
+
+  # ------------------------------------------------------------- absolute values
+
+  - id: "an-absolute-volume"
+    say: "a flat white with 120 ml of milk"
+    expect:
+      intent:
+        kind: produce
+        targets:
+          milk_volume: { value: 120, unit: ml }
+
+  - id: "an-absolute-temperature"
+    say: "brew it at 94 degrees"
+    expect:
+      intent:
+        kind: adjust
+        targets:
+          brew_temperature: { value: 94, unit: c }
+
+  # ---------------------------------------------------------------- adjustments
+
+  - id: "an-adjustment-not-a-drink"
+    say: "make the next one a bit longer"
+    expect:
+      intent:
+        kind: adjust
+        targets:
+          shot_time: { of: last, offset: { value: 3, unit: s } }
+
+  # ------------------------------------------------------- asking is the answer
+  #
+  # ADI-P 9.4.3. The alternative to asking is guessing, and a guess here is a
+  # physical action on a machine with a heating element.
+
+  - id: "an-ambiguous-reference"
+    say: "make it like the good one"
+    expect:
+      clarify:
+        because: "no cycle is identified, and none is marked good"
+
+  - id: "a-quantity-with-no-variable"
+    say: "make it half"
+    expect:
+      clarify:
+        because: "half of which quantity is not stated"
+
+  - id: "relative-with-nothing-to-relate-to"
+    say: "the same as last time"
+    memory: empty
+    expect:
+      clarify:
+        because: "nothing has been produced yet, so there is no last time"
+
+  - id: "an-undeclared-style"
+    say: "make me a cortado"
+    expect:
+      clarify:
+        because: "cortado is not a style this machine declares"
+
+  - id: "a-request-that-is-not-a-request"
+    say: "what did you do to the last one"
+    expect:
+      clarify:
+        because: "a question about a past decision, not an instruction"
+
+  # --------------------------------------------------- preference, not process
+  #
+  # ADI-P 9.4.4. A request naming only preference variables must not be served
+  # by a tool that also moves a process variable. The interpreter's part is to
+  # produce an intent naming only what was asked about; the engine refuses the
+  # rest.
+
+  - id: "a-preference-request-stays-a-preference-request"
+    say: "less sugar"
+    expect:
+      intent:
+        kind: adjust
+        targets:
+          sugar_mass: { of: last, scale: 0.5 }
+
+  # ------------------------------------------------------------------ robustness
+
+  - id: "a-transcript-with-a-filler"
+    say: "um, can I get, uh, an espresso"
+    expect:
+      intent:
+        kind: produce
+        style: "adi.espresso.style.espresso"
+
+  - id: "two-instructions-in-one-breath"
+    say: "an espresso, and make it hotter than last time"
+    expect:
+      intent:
+        kind: produce
+        style: "adi.espresso.style.espresso"
+        targets:
+          brew_temperature: { of: last, offset: { value: 2, unit: c } }

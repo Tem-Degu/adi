@@ -12,3 +12,6 @@ adi-protocol = { workspace = true }
 adi-core = { workspace = true }
 adi-decision = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = { workspace = true }
