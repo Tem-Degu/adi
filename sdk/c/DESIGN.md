@@ -168,32 +168,39 @@ compiled out entirely.
 
 ```c
 /* Setup. The caller owns all memory. */
-adip_status_t adip_init(adip_ctx_t *ctx,
-                        const adip_device_t *dev,     /* generated tables */
-                        uint8_t *scratch, size_t scratch_len,
-                        void *user);
+adip_status_t adip_init(adip_ctx_t *ctx, const adip_device_t *dev,
+                        uint8_t *rx, size_t rx_len, void *user);
 
 /* Transport in. Caller passes whatever arrived; partial frames are fine. */
 adip_status_t adip_feed(adip_ctx_t *ctx, const uint8_t *bytes, size_t len);
 
-/* Called from the main loop. Non-blocking. Dispatches at most one message,
-   services timeouts, and returns whether more work is pending. */
+/* Called from the main loop. Non-blocking. Routes one message, services
+   timeouts, and returns whether more work is pending. */
 adip_status_t adip_poll(adip_ctx_t *ctx);
 
 /* State the runtime needs from the firmware. */
-void adip_set_interlock(adip_ctx_t *ctx, uint16_t interlock, bool open);
-void adip_set_state(adip_ctx_t *ctx, uint16_t state);
-void adip_publish(adip_ctx_t *ctx, uint16_t signal, adip_num_t v, uint32_t t_ms);
+void adip_set_interlock(adip_ctx_t *ctx, uint8_t interlock, bool open);
+void adip_set_precondition(adip_ctx_t *ctx, uint8_t precondition, bool satisfied);
+void adip_set_resource(adip_ctx_t *ctx, uint8_t resource, adip_num_t remaining);
 
 /* Completing a long-running operation. */
-adip_status_t adip_complete(adip_ctx_t *ctx, uint32_t invocation,
+adip_status_t adip_complete(adip_ctx_t *ctx, uint32_t invocation_id,
                             adip_outcome_t outcome, adip_reason_t reason);
+
+/* Telling the engine what the machine observed. */
+void          adip_set_signal_buffer(adip_ctx_t *ctx, adip_sample_t *buf, uint8_t n);
+adip_status_t adip_publish(adip_ctx_t *ctx, uint16_t signal,
+                           adip_num_t value, uint32_t t_ms);
+adip_status_t adip_flush_signals(adip_ctx_t *ctx);
+adip_status_t adip_emit_event(adip_ctx_t *ctx, uint16_t event,
+                              const char *code, uint8_t severity);
 ```
 
 The manufacturer implements one dispatch function:
 
 ```c
-adip_action_t adip_on_invoke(uint16_t tool, const adip_args_t *args, void *user);
+adip_action_t adip_on_invoke(const adip_invocation_t *inv,
+                             adip_reason_t *reason, void *user);
 ```
 
 Returning `ADIP_ACTION_DONE` for something instantaneous, or
@@ -406,6 +413,30 @@ now takes `now_ms` too, the runtime reads the clock once and uses it for both
 calls, and `test_m1` and `test_m2` link `CORE` alone, which is what makes the
 claim checkable rather than merely stated.
 
+**M7. The outbound half. DONE.** Signals, events and the heartbeat, plus
+message kinds on every frame. Until this the library had exactly one outbound
+message, the response to an invocation, which carries an id, an outcome and a
+reason and no measured value of any kind. A machine running libadip could be
+commanded and could acknowledge, and could tell the engine nothing about what
+it observed, so Conformance Level 0 was not implementable and no closed loop
+could exist.
+
+The heartbeat is the part that was invisible from this side. `control_timeout_ms`
+is 2000 on the example machine and a brew may run a minute, so every
+non-reversible operation aborted itself two seconds in. The appliance was right
+to fire, the engine had nothing to send, and the protocol had no message for
+"still here". Both halves were individually correct and the pair could not brew
+a coffee.
+
+Quantities now carry their unit on the wire. The unit was previously stamped on
+at decode time from the declaration, which made `adip_validate`'s unit check
+compare a value against the thing it had just been stamped from. It could never
+fire, and its comment claimed it caught an engine sending grams where
+millilitres were declared.
+
+Footprint after M7: 12212 B text, 0 data, 0 bss. The budget was raised from 12
+to 16 KB in section 8, with the reasoning, rather than met by squeezing.
+
 **M6. Port and integrate.** Reference port for one real MCU, then run the
 conformance suite against a device rather than a simulator.
 
@@ -417,10 +448,27 @@ M1 to M5 need no hardware and are testable on a host.
 the value is in confirming that out-of-range rejects rather than clamps, that an
 open interlock blocks, that a malformed frame does not corrupt state.
 
-**Cross-implementation agreement.** The conformance corpus in
-`sdk/conformance/` drives both the Rust engine and this SDK, and the two must
-produce identical accept and reject decisions on identical input. Two
-independent implementations agreeing is much stronger evidence than either alone.
+**Cross-implementation agreement**, in three forms, because the weak ones were
+being mistaken for the strong one.
+
+*Mirrored cases.* `test_m4.c` reproduces `adi-safety`'s `composition.rs` case
+for case against the same fixture, by hand. This found the unit bug in
+`check_invariants` and is worth keeping, but it proves only that two people
+transcribed the same intent.
+
+*Byte level.* `adi-wire/tests/messages.rs` asserts the exact bytes of every
+message kind against sequences derived from PROTOCOL.md 10.2, matching what
+this SDK builds and emits. A round trip proves an implementation agrees with
+itself; both of these agreed with themselves for months while disagreeing with
+each other about the type of an invocation id and the set of reason codes.
+
+*Running.* `adi-cli/tests/loopback.rs` drives `example/` as a child process
+over a real wire. This is the only one that found defects neither side could
+find alone, including a resolution check that compared a difference taken at
+one scale against a step taken at another.
+
+The espresso conformance corpus drives the engine only. Running it across the
+wire is not yet possible and is not claimed.
 
 **Fuzzing the decoder.** The decoder is the only place untrusted bytes are
 handled, so it gets fuzzed. Any input must produce a rejection rather than a

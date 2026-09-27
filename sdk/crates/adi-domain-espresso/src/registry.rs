@@ -56,6 +56,7 @@ pub const FEEDBACK_VOCABULARY: &[&str] = &[
     "sour", "balanced", "bitter", "weak", "strong", "harsh", "thin", "sweet",
 ];
 
-/// Additives are preference variables, never extraction variables. The engine
-/// must not attempt to correct a taste fault by changing them. See ADI-P 7.1.
-pub const PREFERENCE_VARIABLES: &[&str] = &["milk_volume", "sugar_mass", "syrup_volume"];
+// Preference variables are NOT listed here. They live in
+// profiles/espresso/knowledge.yaml, which is the single source the engine
+// reads. A copy in code could only drift from it, and a stale copy of which
+// variables are preferences would let a taste request move the process.

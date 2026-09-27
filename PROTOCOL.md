@@ -1718,11 +1718,17 @@ notes:
 
 1. **Publish the declaration.** Mostly a description of hardware that already
    exists.
-2. **Implement the invocation handler:** validate, check preconditions, execute,
-   report. Most of the engineering effort sits here.
+2. **Implement the invocation handler:** execute and report. Validation,
+   precondition and interlock checking, unit checking, the stateful envelope
+   and the reply deadline are done for you by the reference SDK from tables
+   compiled out of your own declaration; what is left is driving the mechanism
+   and saying truthfully what happened. Most of the engineering effort sits
+   here, and it is mechanical rather than protocol work.
 3. **Expose the envelope.** Usually already present in firmware and needs
    declaring plus testing against the failsafe timing.
-4. **Stream signals** from sensors already fitted.
+4. **Stream signals** from sensors already fitted. An appliance that reports
+   nothing gives the engine nothing to reason about, and Level 0 is signals
+   with no tools at all.
 5. **Wire the physical override** to session abort.
 6. **Write the skill.** A day or two of measurement by someone who already knows
    the machine. This is the highest-leverage document a manufacturer produces,

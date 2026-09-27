@@ -143,31 +143,63 @@ Note the timeouts. Anything that moves must be able to give up.
 
 ### 10. Register the name
 
+You do not write a parser, a validator or a state machine. `libadip` does all
+of it from tables compiled out of your declaration, and hands you one function
+to fill in.
+
 ```c
-// The engine sends one message, for example:
-//   {"tool":"x.acme.tray.wipe","args":{"passes":1},"id":"a41"}
+#include "adip.h"
+#include "adip_generated_ex900.h"   /* generated from your declaration */
 
-void on_message(const Request *r) {
-    if (strcmp(r->tool, "x.acme.tray.wipe") != 0) return;
+adip_action_t adip_on_invoke(const adip_invocation_t *inv,
+                             adip_reason_t *reason, void *user)
+{
+    if (adip_tool_index(ctx.dev, inv->tool) != TOOL_TRAY_WIPE) {
+        return ADIP_ACTION_DONE;
+    }
 
-    if (!tray_present())               { reply(r, REJECTED, "INTERLOCK");     return; }
-    if (r->passes < 1 || r->passes > 3) { reply(r, REJECTED, "OUT_OF_RANGE"); return; }
-    if (machine_state != IDLE)          { reply(r, REJECTED, "PRECONDITION_FAILED"); return; }
-
-    reply(r, ACCEPTED, NULL);
-
-    int rc = wipe_tray(r->passes);
-    reply(r, rc == OK ? COMPLETED : ABORTED, rc == OK ? NULL : "timeout");
+    /* Start the movement and return. Do not wait for it. */
+    start_wipe(passes_from(inv));
+    return ADIP_ACTION_RUNNING;
 }
 ```
 
-Two rules that are easy to get wrong:
+By the time this is called, the library has already confirmed that the tool
+exists, that every argument is present and of the right type, that each value
+is inside the declared range and carries the declared unit, that no interlock
+blocks it, that your preconditions hold, and that the stateful envelope is not
+breached. It has also started the 200 ms reply clock and will answer for you.
 
-**Reply within 200 ms.** ACCEPTED or REJECTED, before you start moving.
+What is left is the part only your firmware knows: whether the hardware is
+actually able to do it right now.
 
-**Reject out-of-range values. Do not silently clamp them.** An out-of-range
-value means the engine is defective. If you quietly correct it, that fault stays
-invisible forever. Rejecting is how you detect a misbehaving engine in the field.
+Three rules that are easy to get wrong, and that the library cannot enforce
+for you.
+
+**Handlers must not block.** A six second tray wipe cannot stall the appliance's
+main loop. Start the movement, return `ADIP_ACTION_RUNNING`, and call
+`adip_complete()` when it finishes or fails. The whole API is shaped to make
+that the natural thing to write, and the 200 ms reply deadline is only
+reachable because of it.
+
+**Report the truth.** `ADIP_ACTION_DONE` means it happened. If you know only
+that a timer expired, you do not know that it happened. See step 3.
+
+**Publish what you measure.** `adip_publish()` sends a reading to the engine,
+batched for you. A machine that cannot report is a machine the engine cannot
+reason about: Conformance Level 0 is signals and no tools at all.
+
+The three port functions are the whole platform dependency:
+
+```c
+uint32_t adip_port_millis(void);                       /* a monotonic tick   */
+int      adip_port_write(const uint8_t *b, size_t n);  /* bytes out          */
+void     adip_port_safe_state(void);                   /* the failsafe       */
+```
+
+**A complete working example is in [`sdk/c/example/`](./sdk/c/example/)**: the
+three port functions, one handler, a main loop, and a machine that accepts
+commands, reports a measurement curve and raises events. Copy it.
 
 ### 11. Handle the failure paths
 
@@ -232,9 +264,13 @@ Field notes:
 - **`preconditions`** must list every state you require. The engine will not
   invoke a tool whose preconditions it cannot verify.
 
-You will notice the range appears both here and in your C. That duplication is
-deliberate. The engine checks so it never sends something wrong. Your firmware
-checks because it must never trust the engine.
+You will notice the range does not appear in your C at all. `adi generate-c`
+compiles this declaration into const tables that live in flash, so there is one
+source for every limit and nothing to drift.
+
+The checking is still duplicated, and deliberately: the engine checks so it
+never sends something wrong, and your firmware checks because it must never
+trust the engine. What is no longer duplicated is the number itself.
 
 ### 14. Add envelope entries if the tool can accumulate
 
@@ -358,10 +394,19 @@ Each stage works before you add the next. Do not wire everything and then debug.
 **19. The function alone.** On the bench, no engine. Does the mechanism complete
 and return home.
 
-**20. By hand over the wire.** Type the message into the serial port yourself.
-Does it accept, run, and report truthfully.
+**20. Against the reference engine, on a laptop.** The messages are CBOR, so
+they are not something you can type. Instead, build the worked example and let
+the engine drive your handler:
 
-**21. With the engine connected.**
+```sh
+cd sdk/c && make example
+cargo test -p adi-cli --test loopback
+```
+
+Point those at your declaration and your handler and you are testing your
+firmware against the same engine that will ship, before any board exists.
+
+**21. On the machine, with the engine connected.**
 
 **22. The failure paths.** These matter more than the happy path:
 
@@ -382,6 +427,9 @@ Does it accept, run, and report truthfully.
 - [ ] The actuator is driven through a switch, never from a pin
 - [ ] The firmware function has a timeout
 - [ ] `ACCEPTED` or `REJECTED` is returned within 200 ms
+      (`stat_worst_reply_ms` measures it rather than asserting it)
+- [ ] Handlers return rather than blocking, so the deadline stays reachable
+- [ ] Measurements are published, or the engine has nothing to reason about
 - [ ] Out-of-range values are rejected, never silently clamped
 - [ ] Every numeric parameter declares unit, range and resolution
 - [ ] `monotonic` is set on any direction-bearing mechanism
@@ -407,4 +455,10 @@ Does it accept, run, and report truthfully.
 No reasoning. No models. No domain knowledge. No integration with our build
 system, our language or our release schedule.
 
-You describe your machine. The engine does the thinking.
+No parser, no validator, no framing, no CRC, no range checking and no envelope
+bookkeeping either. `libadip` is freestanding C99 with no allocation and no
+floating point, it compiles your declaration into const tables, and it asks you
+for three port functions and one handler.
+
+You describe your machine and drive its mechanisms. The engine does the
+thinking, and the library does the protocol.
