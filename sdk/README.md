@@ -46,7 +46,7 @@ sdk/
 ├── conformance/
 │   ├── espresso/cases/       Input and expected-decision pairs.
 │   └── greenhouse/           Second profile. Data only, no product.
-│                             Exists to keep the abstraction honest.
+│                             Verifies the abstraction against a second domain.
 └── examples/                 Sample declarations, skills and knowledge.
 ```
 
@@ -73,10 +73,11 @@ Check with:
 python check-neutrality.py
 ```
 
-It strips comments before searching, so it flags real leaks and ignores
-explanatory prose. Run it before every commit that touches a neutral crate. It
-has caught a real leak as recently as the loopback tests, which had to move out
-of `adi-wire` because the example appliance they drive is an espresso machine.
+Comments are stripped before searching, so the check flags structural
+dependencies and ignores explanatory prose. Run it before any commit that
+touches a neutral crate. It is not advisory: the loopback tests were relocated
+out of `adi-wire` because the example appliance they drive is an espresso
+machine.
 
 ## Autonomy levels
 
@@ -225,31 +226,32 @@ explainer works without any model, producing text from the decision record.
 
 | | |
 |---|---|
-| Rust tests | 222 |
+| Rust tests | 266 |
 | C checks | 322 across six binaries |
-| Conformance | 8 passing, 1 pending |
+| Conformance | 9 passing |
 | Appliance footprint | 12212 B flash, 0 data, 0 bss, against a 16 KB budget |
 
-The specification is complete and the two implementations talk to each other
-over a real wire. A cycle runs end to end: observe, diagnose, plan, check the
-envelope, invoke, record, remember.
+The specification is complete. Both implementations exchange messages over a
+transport, and a cycle runs end to end: observe, diagnose, plan, check the
+safety envelope, invoke, record, remember.
 
-**What is not done**, so nobody has to discover it by reading:
+### Current limitations
 
 - **No model backends are linked.** The configuration, output schema,
-  provenance and process backend exist and are tested; the llama.cpp and ONNX
-  Runtime backends are not yet written. An external program can serve any seam
-  today through the `process` backend.
-- **The perception rules have never seen a real shot.** Every trace in the
-  corpus is hand-written. They are plausible, which is the condition under which
-  they are most likely to be quietly wrong.
-- **Diagnosis reads one variable.** The knowledge layer resolves ratio and
-  temperature targets correctly and `diagnose` ignores them.
-- **Nothing learns.** `Layer::User` is a variant nothing writes.
-- **No MCU port.** `libadip` is tested on a host. M6 in `c/DESIGN.md` needs a
-  board, and the footprint above is an x86-64 figure that Thumb-2 should
-  improve on.
-- **The decoder is not fuzzed** and there has been no MISRA pass.
+  provenance and process backend are implemented and tested. The in-process
+  llama.cpp and ONNX Runtime backends are not written. An external program can
+  serve any seam through the `process` backend.
+- **The espresso perception rules have not been validated against real
+  extractions.** Every trace in the conformance corpus is synthetic. Synthetic
+  traces are plausible by construction, which is the condition under which an
+  incorrect rule is least likely to be detected.
+- **Diagnosis considers one variable.** The knowledge layer resolves ratio and
+  temperature targets, and `diagnose` does not yet use them.
+- **No learning.** `Layer::User` is defined and nothing writes to it.
+- **No microcontroller port.** `libadip` is tested on a host. Milestone M6 in
+  [`c/DESIGN.md`](./c/DESIGN.md) requires a target board, and the footprint
+  above is an x86-64 measurement.
+- **The decoder has not been fuzzed**, and no MISRA review has been performed.
 
-`serde_yaml` 0.9 is unmaintained upstream. Nothing in the design depends on
-which YAML crate is used.
+`serde_yaml` 0.9 is unmaintained upstream. No part of the design depends on
+which YAML implementation is used.

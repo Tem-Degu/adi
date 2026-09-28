@@ -720,7 +720,7 @@ The engine treats a reliable range as a soft boundary. It may propose a value
 outside it when nothing else will solve the problem, and SHOULD tell the operator
 that it is doing so. It may never propose a value outside the envelope.
 
-Declaring honest operating limits makes a machine perform better, not worse. An
+Declaring accurate operating limits makes a machine perform better, not worse. An
 engine that knows the ceiling stops chasing it and solves the problem another
 way.
 

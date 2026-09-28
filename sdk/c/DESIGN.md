@@ -51,7 +51,7 @@ punning, explicit widths everywhere.
 
 **The device never parses a declaration.**
 
-This is worth stating plainly because the obvious design gets it wrong. A
+This is stated explicitly because the obvious design gets it wrong. A
 declaration is a YAML or JSON document, sometimes thousands of lines. Parsing
 that on a microcontroller would mean shipping a parser, allocating for the
 resulting tree, and spending flash on something that never changes between
@@ -241,7 +241,7 @@ the engine already needs an applications processor and the whole point of the
 device side is that it does not.
 
 **The flash figure was 12 KB until the outbound half was built**, and is raised
-here rather than met by squeezing, for two reasons worth stating.
+here rather than met by reducing the implementation, for two reasons.
 
 The old number described a smaller library. It was set when this SDK could only
 receive: an invocation in, an acknowledgement out, and no way to report a

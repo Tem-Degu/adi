@@ -445,7 +445,7 @@ firmware against the same engine that will ship, before any board exists.
 **If the engine should select the tool by itself**
 
 - [ ] A skill response names a modelled domain variable
-- [ ] `per_unit` is signed and `confidence` is honest
+- [ ] `per_unit` is signed, and `confidence` reflects measured certainty
 - [ ] Retention, settling or hysteresis are declared where they exist
 
 ---

@@ -64,7 +64,7 @@ adi-cli        Validator, code generator and development driver.
 
 All but the domain profile and the CLI are domain-neutral and must stay that
 way. `sdk/check-neutrality.py` enforces it, and `sdk/conformance/greenhouse/`
-exists to keep the abstraction honest against a domain with a very different
+exists to verify the abstraction against a domain with a very different
 shape.
 
 ## Build
@@ -79,49 +79,31 @@ cargo run -p adi-cli -- validate examples/declarations/ex900.yaml \
                                 --skill examples/declarations/ex900.skill.yaml
 ```
 
-## What is public
-
-Public: `PROTOCOL.md`, `HOW-TO-ADD-A-TOOL.md`, `ROADMAP.md`, `LICENSE`, this
-file, and the `sdk/` crates listed above.
-
-Not public, and excluded by [`.gitignore`](./.gitignore):
-
-- `Decks/` and `uae-investor-targets.txt`, which are fundraising material
-- `WHITEPAPER.md` and `BUILD-GUIDE.md`, which are superseded internal documents
-  that contradict the current work in several places
-
-Before publishing, verify the split:
-
-```sh
-git ls-files | grep -Ei 'investor|wefunder|deck|whitepaper|build-guide'
-```
-
-That must return nothing.
-
 ## Status
 
-The specification is complete, and the two implementations talk to each other
-over a real wire rather than agreeing on paper. A cycle runs end to end:
-observe, diagnose, plan, check the envelope, invoke, record, remember.
+The specification is complete. Both implementations exchange messages over a
+transport, and a cycle runs end to end: observe, diagnose, plan, check the
+safety envelope, invoke, record, remember.
 
 | | |
 |---|---|
-| Rust tests | 222 |
+| Rust tests | 266 |
 | C checks | 322 |
-| Conformance corpus | 8 passing, 1 pending |
+| Conformance corpus | 9 passing |
 | Appliance footprint | 12212 B flash, 0 data, 0 bss |
 
-Outstanding, stated plainly rather than left to be discovered:
+Current limitations:
 
-- **No model backends.** The four seams exist with working placeholders. The
-  one pending conformance case is the one that needs a real interpreter.
-- **The perception rules have never seen a real shot.** Every trace in the
-  corpus is hand-written.
-- **No hardware.** `libadip` is tested on a host; the port to a real
-  microcontroller needs a board. Trials on production machines and a first
-  manufacturer agreement follow from there.
+- **No model backends are linked.** The four model seams are defined and
+  tested, and an external program can serve any of them through the process
+  backend. The in-process llama.cpp and ONNX Runtime backends are not written.
+- **The espresso perception rules have not been validated against real
+  extractions.** Every trace in the conformance corpus is synthetic.
+- **No microcontroller port.** `libadip` is tested on a host. The footprint
+  above is an x86-64 measurement.
 
-See [`ROADMAP.md`](./ROADMAP.md) and `sdk/README.md` for the fuller list.
+See [`ROADMAP.md`](./ROADMAP.md) and [`sdk/README.md`](./sdk/README.md) for
+detail.
 
 ## Licence
 

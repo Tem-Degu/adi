@@ -2,8 +2,7 @@
 
 **StreetAI · Artificial Domain Intelligence**
 
-This is the authoritative build plan. It supersedes BUILD-GUIDE sections 2 and 5,
-which were written before the SDK and protocol strategy existed.
+The authoritative build plan for the project.
 
 ---
 
@@ -24,7 +23,7 @@ after espresso reuses the SDK unchanged and supplies only a profile.
 | **ADI-P** | The wire contract: capability declaration, skill, knowledge extensions, execution model. Specified in `PROTOCOL.md`. | Yes, except the registry | StreetAI |
 | **Domain profile** | Registry, knowledge base and diagnosis rules for one domain. | No, by definition | StreetAI, extended by manufacturers |
 
-**The rule that keeps this honest:** the word "shot" must never appear in
+**The rule that enforces this:** the word "shot" must never appear in
 `adi-core`, `adi-protocol`, `adi-safety` or `adi-decision`. Not in a type, a
 field, a variable or a comment. If it does, the abstraction has leaked.
 
@@ -102,7 +101,7 @@ what ships.
 
 ### P6. The coach, end to end
 Cycle in, diagnosis out, advice delivered, result stored, preference learned.
-Text interface. This is the Tier 1 product and the investor demo.
+Text interface. This is the first complete product tier.
 
 *Gate:* two-shot dial-in works on a real machine.
 
@@ -178,18 +177,22 @@ with ambitions.
 
 ---
 
-## Equipment
+## Hardware required for development
 
-**Buy now,** roughly $200 to $400 if a machine is already owned: Bluetooth scale,
-grinder with fine adjustment, bottomless portafilter, WDT tool and tamper,
-refractometer.
+Work on the espresso profile beyond P4 requires physical equipment, because the
+perception rules cannot be validated against synthetic traces.
 
-**Later, only if required:** a superautomatic if chasing full autonomy, a Decent
-DE1 only if a manufacturer specifically asks for profile control.
+Required from P5 onward: a Bluetooth scale reporting mass at 10 Hz or better, a
+grinder with fine adjustment, a bottomless portafilter, distribution and
+tamping tools, and a refractometer for extraction yield.
+
+Required only for specific work: a superautomatic machine for full closed-loop
+autonomy, and a profiling machine only where a manufacturer requires pressure
+or flow profile control.
 
 ---
 
-## Honest risk read
+## Confidence by phase
 
 | Phases | Confidence | Notes |
 |---|---|---|
@@ -199,6 +202,7 @@ DE1 only if a manufacturer specifically asks for profile control.
 | P9, P10 | Moderate | Mechanical fitting and embedded model work |
 | P11, P12 | Needs a hardware contractor and manufacturer access |
 
-The skills this plan requires span software, embedded, electronics, coffee
-science and business-to-business sales. P1 through P10 are carryable by one
-capable developer. P11 needs a contractor. P12 needs rooms with manufacturers.
+The uncertainty in P7 and P8 is not a software risk. Extraction is a noisy
+physical process, sample counts are small, and there is no ground truth for
+extraction yield without a refractometer. Phases P1 to P4 carry no physical
+dependency and are verified by the test suites and the conformance corpus.

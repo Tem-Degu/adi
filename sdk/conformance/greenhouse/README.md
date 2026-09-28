@@ -1,4 +1,4 @@
-# Greenhouse: the honesty test
+# Greenhouse: the neutrality test
 
 **This is not a product.** There is no hardware, no code and no plan to build
 one. It exists so the neutral crates cannot quietly become espresso-shaped.
