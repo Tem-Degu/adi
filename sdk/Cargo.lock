@@ -9,6 +9,7 @@ dependencies = [
  "adi-core",
  "adi-decision",
  "adi-domain-espresso",
+ "adi-language",
  "adi-models",
  "adi-protocol",
  "adi-safety",

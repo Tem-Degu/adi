@@ -24,13 +24,45 @@ use serde::Deserialize;
 use crate::ModelError;
 
 /// One scripted answer.
+///
+/// The two arms are named rather than flattened into `Understood`. Serde
+/// cannot flatten an externally tagged enum, and writing them out also makes
+/// the file legible to someone who has not read the Rust.
 #[derive(Debug, Clone, Deserialize)]
 struct Entry {
     /// The utterance this answers, matched case-insensitively after trimming.
     say: String,
-    /// What to return, in the same shape a model produces.
-    #[serde(flatten)]
-    answer: Understood,
+    #[serde(default)]
+    intent: Option<adi_protocol::Intent>,
+    #[serde(default)]
+    clarify: Option<Clarify>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Clarify {
+    question: String,
+    #[serde(default)]
+    because: String,
+}
+
+impl Entry {
+    fn answer(self) -> Result<(String, Understood), String> {
+        match (self.intent, self.clarify) {
+            (Some(intent), None) => Ok((self.say, Understood::Intent(intent))),
+            (None, Some(clarify)) => Ok((
+                self.say,
+                Understood::Clarify {
+                    question: clarify.question,
+                    because: clarify.because,
+                },
+            )),
+            (Some(_), Some(_)) => Err(format!(
+                "'{}' gives both an intent and a question; an answer is one or the other",
+                self.say
+            )),
+            (None, None) => Err(format!("'{}' gives neither an intent nor a question", self.say)),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,13 +83,15 @@ impl ScriptedInterpreter {
         let script: Script = serde_yaml::from_str(&text)
             .map_err(|e| ModelError::Malformed(path.display().to_string(), e.to_string()))?;
 
-        Ok(Self {
-            answers: script
-                .answers
-                .into_iter()
-                .map(|entry| (normalise(&entry.say), entry.answer))
-                .collect(),
-        })
+        let mut answers = BTreeMap::new();
+        for entry in script.answers {
+            let (say, answer) = entry
+                .answer()
+                .map_err(|e| ModelError::Malformed(path.display().to_string(), e))?;
+            answers.insert(normalise(&say), answer);
+        }
+
+        Ok(Self { answers })
     }
 
     /// Build one directly, for a test that would rather not carry a file.

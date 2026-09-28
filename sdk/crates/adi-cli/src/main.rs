@@ -5,6 +5,7 @@
 
 mod conformance;
 mod genc;
+mod bench;
 mod models;
 
 use std::path::PathBuf;
@@ -80,6 +81,16 @@ enum ModelsCommand {
     },
     /// The checksum and size for a manifest entry.
     Hash { path: PathBuf },
+    /// Measure an interpreter on this machine: how often it is right, and
+    /// what a request costs.
+    Bench {
+        #[arg(long, default_value = "eval/espresso/utterances.yaml")]
+        corpus: PathBuf,
+        /// Scripted answers, which measure the engine with the model time
+        /// removed.
+        #[arg(long)]
+        interpreter: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -91,6 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Models { what } => match what {
             ModelsCommand::Check { config, manifest } => models::check(config, manifest),
             ModelsCommand::Hash { path } => models::hash(path),
+            ModelsCommand::Bench { corpus, interpreter } => bench::bench(corpus, interpreter),
         },
         Command::Conformance { dir, interpreter } => conformance(dir, interpreter),
     }

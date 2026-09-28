@@ -1,0 +1,140 @@
+# Reference answers for the evaluation corpus.
+#
+# What a correct interpreter returns for each utterance, written by hand. Two
+# uses.
+#
+# As documentation: this is what a right answer looks like, in the exact shape
+# a model is constrained to produce.
+#
+# As a floor for measurement: `adi models bench --interpreter` against this
+# reports what a request costs with the model time removed, which is the number
+# a real backend is added to. It does not measure a model, and the command says
+# so in its own output.
+#
+# Generated from utterances.yaml so the two cannot drift.
+
+answers:
+  - say: "make me an espresso"
+    intent:
+      kind: produce
+      style: adi.espresso.style.espresso
+
+  - say: "I'd like a lungo please"
+    intent:
+      kind: produce
+      style: adi.espresso.style.lungo
+
+  - say: "something short and strong"
+    intent:
+      kind: produce
+      style: adi.espresso.style.ristretto
+
+  - say: "make me a coffee with half the sugar of last time"
+    intent:
+      kind: produce
+      targets:
+        sugar_mass:
+          of: last
+          scale: 0.5
+
+  - say: "same as the last one"
+    intent:
+      kind: produce
+      targets:
+        yield_mass:
+          of: last
+
+  - say: "less sweet than last time and half the cup"
+    intent:
+      kind: produce
+      targets:
+        sugar_mass:
+          of: last
+          scale: 0.5
+        yield_mass:
+          of: last
+          scale: 0.5
+
+  - say: "no sugar this time"
+    intent:
+      kind: produce
+      targets:
+        sugar_mass:
+          of: last
+          scale: 0.0
+
+  - say: "a flat white with 120 ml of milk"
+    intent:
+      kind: produce
+      targets:
+        milk_volume:
+          value: 120
+          unit: ml
+
+  - say: "brew it at 94 degrees"
+    intent:
+      kind: adjust
+      targets:
+        brew_temperature:
+          value: 94
+          unit: c
+
+  - say: "make the next one a bit longer"
+    intent:
+      kind: adjust
+      targets:
+        shot_time:
+          of: last
+          offset:
+            value: 3
+            unit: s
+
+  - say: "make it like the good one"
+    clarify:
+      because: no cycle is identified, and none is marked good
+      question: Could you say which one you mean?
+
+  - say: "make it half"
+    clarify:
+      because: half of which quantity is not stated
+      question: Could you say which one you mean?
+
+  - say: "the same as last time"
+    clarify:
+      because: nothing has been produced yet, so there is no last time
+      question: Could you say which one you mean?
+
+  - say: "make me a cortado"
+    clarify:
+      because: cortado is not a style this machine declares
+      question: Could you say which one you mean?
+
+  - say: "what did you do to the last one"
+    clarify:
+      because: a question about a past decision, not an instruction
+      question: Could you say which one you mean?
+
+  - say: "less sugar"
+    intent:
+      kind: adjust
+      targets:
+        sugar_mass:
+          of: last
+          scale: 0.5
+
+  - say: "um, can I get, uh, an espresso"
+    intent:
+      kind: produce
+      style: adi.espresso.style.espresso
+
+  - say: "an espresso, and make it hotter than last time"
+    intent:
+      kind: produce
+      style: adi.espresso.style.espresso
+      targets:
+        brew_temperature:
+          of: last
+          offset:
+            value: 2
+            unit: c
+

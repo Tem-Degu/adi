@@ -31,11 +31,17 @@ sdk/
 │   │                         explain, speak. Placeholders that run today.
 │   ├── adi-session/          The loop. Holds the link, sends the heartbeat,
 │   │                         runs a cycle, enforces the envelope.
+│   ├── adi-models/           Model configuration, provenance, output schema,
+│   │                         and the backend that runs an external program.
 │   ├── adi-domain-espresso/  First domain profile. Registry and rules.
 │   └── adi-cli/              Validator, generator and development driver.
 ├── c/                        libadip, the appliance SDK. See c/DESIGN.md.
 │   ├── example/              A complete working appliance, to copy.
 │   └── generated/            Tables compiled from a declaration.
+├── models/                   Where model weights go. Ships empty; see Models.
+├── eval/espresso/            Utterances and reference answers, for measuring
+│                             an interpreter with `adi models bench`.
+├── examples/interpreters/    A working model backend that is another program.
 ├── profiles/espresso/        Knowledge base as data.
 ├── conformance/
 │   ├── espresso/cases/       Input and expected-decision pairs.
@@ -47,8 +53,8 @@ sdk/
 ## The one rule
 
 **No domain vocabulary in the neutral crates**, meaning `adi-protocol`,
-`adi-wire`, `adi-safety`, `adi-core`, `adi-decision`, `adi-language` and
-`adi-session`.
+`adi-wire`, `adi-safety`, `adi-core`, `adi-decision`, `adi-language`,
+`adi-session` and `adi-models`.
 
 Precisely: no type, field, variant, function, constant or string literal in
 those crates may name anything specific to one domain. A cycle is a cycle. A
@@ -127,6 +133,94 @@ cargo test -p adi-cli --test loopback
 Without it they skip rather than fail, so `cargo test` does not require a C
 toolchain.
 
+## Models
+
+The SDK ships no model weights. They are obtained from the parties that publish
+them, under those parties' licences, and placed in `models/`. There is no
+downloader: this avoids redistributing third-party weights, keeps network code
+out of a product that does not otherwise require it, and makes substituting a
+different model the ordinary path rather than a special case.
+
+### Obtaining them
+
+```sh
+adi models check
+```
+
+This reads the folder and reports which seams are served, which files are
+present, whether each matches a published checksum, and for anything absent,
+the file to obtain and its source. It is generated from the folder rather than
+written down, so it cannot describe a state the machine is not in.
+
+`models/manifest.yaml` lists the recommended files with their sources,
+licences and checksums. `models/models.yaml` states which file serves which
+seam.
+
+### Recommended models
+
+| Seam | Model | Licence |
+|---|---|---|
+| Interpreter | Qwen 3 1.7B or 4B, GGUF | Apache-2.0 |
+| Transcriber | Moonshine base, or Whisper base | MIT |
+| Speaker | Piper | MIT |
+
+Llama models are not listed. The Llama licence requires permission from Meta
+above a usage threshold and withholds multimodal rights from companies
+domiciled in the European Union. A manufacturer licensing this SDK should not
+inherit either condition.
+
+### Selecting hardware
+
+Interpreter latency on a processor without an accelerator is the constraint
+that governs whether a voice interaction is usable, and published figures are
+measured on other hardware with other prompts.
+
+```sh
+adi models bench
+```
+
+This runs the evaluation corpus in `eval/espresso/` against the configured
+interpreter on the host it is invoked on, and reports how often the answer was
+correct and what each request cost. Run it before selecting a board.
+
+Three tiers are published as a default for anyone who does not wish to
+evaluate:
+
+| Tier | Board class | Interpreter |
+|---|---|---|
+| Minimal | Raspberry Pi 5, 8 GB | Qwen 3 1.7B Q4 |
+| Standard | RK3588 class | Qwen 3 4B Q4 |
+| Custom | Measured with `adi models bench` | Any |
+
+### Using a different model
+
+Three levels, in increasing order of effort.
+
+**Change the configuration.** Point `models/models.yaml` at a different file.
+A model absent from the manifest loads normally and is recorded as unverified,
+identified by its checksum. Verification exists so that a decision can be
+attributed to a specific model afterwards, as ADI-P 9.3 requirement 5 requires,
+not to restrict what may be loaded.
+
+**Use another program.** The `process` backend runs an external program and
+exchanges one JSON request and one JSON answer per line over its standard
+input and output. The program requires no dependency on this SDK and may be
+written in any language. See `examples/interpreters/reference.py` for a working
+implementation of the protocol and `models/models.example-process.yaml` for
+the configuration.
+
+**Implement the trait.** `adi-language` defines the four seams as traits. A
+manufacturer shipping at volume implements them directly against their own
+runtime.
+
+### Running without models
+
+An engine with an unserved seam is a supported configuration. It refuses the
+operations that seam provides and names the seam, rather than failing. The
+explainer works without any model, producing text from the decision record.
+
+---
+
 ## Status
 
 | | |
@@ -142,9 +236,10 @@ envelope, invoke, record, remember.
 
 **What is not done**, so nobody has to discover it by reading:
 
-- **No model backends.** The four seams in `adi-language` have working
-  placeholders and no real transcriber, interpreter or speaker behind them. The
-  one pending conformance case is the one that needs them.
+- **No model backends are linked.** The configuration, output schema,
+  provenance and process backend exist and are tested; the llama.cpp and ONNX
+  Runtime backends are not yet written. An external program can serve any seam
+  today through the `process` backend.
 - **The perception rules have never seen a real shot.** Every trace in the
   corpus is hand-written. They are plausible, which is the condition under which
   they are most likely to be quietly wrong.

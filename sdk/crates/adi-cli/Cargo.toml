@@ -15,6 +15,7 @@ path = "src/main.rs"
 adi-protocol = { workspace = true }
 adi-wire = { workspace = true }
 adi-models = { workspace = true }
+adi-language = { workspace = true }
 adi-safety = { workspace = true }
 adi-core = { workspace = true }
 adi-decision = { workspace = true }
