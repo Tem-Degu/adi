@@ -133,6 +133,7 @@ static const char *const variables[] = {
     "dose_mass",
     "brew_temperature",
     "yield_mass",
+    "shot_time",
     "cup_contents",
     "puck_state",
     "sugar_mass",
@@ -143,9 +144,10 @@ static const uint16_t effects_ADI_ESPRESSO_GRIND_PURGE[] = { 1 };
 static const uint16_t effects_ADI_ESPRESSO_DOSE_BY_MASS[] = { 2 };
 static const uint16_t effects_ADI_ESPRESSO_BREW_SET_TEMPERATURE[] = { 3 };
 static const uint16_t effects_ADI_ESPRESSO_BREW_START[] = { 4 };
-static const uint16_t effects_ADI_ESPRESSO_ADDITIVE_DISPENSE[] = { 5 };
-static const uint16_t effects_ADI_ESPRESSO_PUCK_EJECT[] = { 6 };
-static const uint16_t effects_X_EXAMPLE_ADDITIVE_SWEETENER_PUMP[] = { 7 };
+static const uint16_t effects_ADI_ESPRESSO_BREW_STOP[] = { 5, 4 };
+static const uint16_t effects_ADI_ESPRESSO_ADDITIVE_DISPENSE[] = { 6 };
+static const uint16_t effects_ADI_ESPRESSO_PUCK_EJECT[] = { 7 };
+static const uint16_t effects_X_EXAMPLE_ADDITIVE_SWEETENER_PUMP[] = { 8 };
 
 static const adip_tool_t tools[] = {
     {
@@ -207,6 +209,18 @@ static const adip_tool_t tools[] = {
         .effect_count = 1,
         .duration_ms_typ = 0,
         .duration_ms_max = 60000,
+    },
+    {
+        .id = "adi.espresso.brew.stop",
+        .name = "stop_brew",
+        .params = NULL,
+        .param_count = 0,
+        .flags = ADIP_TOOL_F_AUTH_ENGINE | ADIP_TOOL_F_AUTH_OPERATOR,
+        .precondition_mask = 0x00000000u,
+        .effects = effects_ADI_ESPRESSO_BREW_STOP,
+        .effect_count = 2,
+        .duration_ms_typ = 200,
+        .duration_ms_max = 500,
     },
     {
         .id = "adi.espresso.additive.dispense",
@@ -305,7 +319,7 @@ static const adip_interlock_t interlocks[] = {
     },
     {
         .id = "waste_bin_present",
-        .blocks_mask = 0x00000050u,
+        .blocks_mask = 0x00000090u,
     },
     {
         .id = "service_door_closed",
@@ -331,19 +345,19 @@ static const adip_hard_limit_t limits[] = {
 };
 
 static const adip_accum_t accum_CUP_VOLUME[] = {
-    { .tool = 5, .param = 1 },
+    { .tool = 6, .param = 1 },
 };
-static const uint16_t reset_CUP_VOLUME[] = { 6 };
+static const uint16_t reset_CUP_VOLUME[] = { 7 };
 
 static const adip_accum_t accum_CUP_YIELD[] = {
     { .tool = 4, .param = 0 },
 };
-static const uint16_t reset_CUP_YIELD[] = { 6 };
+static const uint16_t reset_CUP_YIELD[] = { 7 };
 
 static const adip_accum_t accum_SWEETENER_PER_DRINK[] = {
-    { .tool = 7, .param = 0 },
+    { .tool = 8, .param = 0 },
 };
-static const uint16_t reset_SWEETENER_PER_DRINK[] = { 6 };
+static const uint16_t reset_SWEETENER_PER_DRINK[] = { 7 };
 
 static const adip_invariant_t invariants[] = {
     {
@@ -403,7 +417,7 @@ static const adip_accum_t consume_WATER_RESERVOIR[] = {
     { .tool = 4, .param = 0 },
 };
 static const adip_accum_t consume_ADDITIVE_RESERVOIR[] = {
-    { .tool = 5, .param = 1 },
+    { .tool = 6, .param = 1 },
 };
 
 static const adip_resource_t resources[] = {
@@ -439,9 +453,9 @@ const adip_device_t adip_device_ex900 = {
     .control_timeout_ms = 2000,
     .max_concurrent = 1,
     .tools = tools,
-    .tool_count = 8,
+    .tool_count = 9,
     .variables = variables,
-    .variable_count = 8,
+    .variable_count = 9,
     .signals = signals,
     .signal_count = 4,
     .events = events,

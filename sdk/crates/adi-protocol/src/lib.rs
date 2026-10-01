@@ -147,6 +147,8 @@ pub enum ProtocolError {
     EnvelopeNotIndependent,
     #[error("conformance level {level:?} requires tool '{tool}'")]
     MissingRequiredTool { level: String, tool: String },
+    #[error("'{parameter}' on tool '{tool}' declares no resolution; ADI-P 4.2 requires one on every numeric parameter")]
+    MissingResolution { tool: String, parameter: String },
     #[error("procedure '{procedure}' fixes outcome variable '{variable}'")]
     OutcomeHardcoded { procedure: String, variable: String },
     #[error(transparent)]
@@ -181,6 +183,25 @@ impl Declaration {
                 return Err(ProtocolError::MalformedId(signal.id.0.clone()));
             }
         }
+
+        // ADI-P 4.2: every numeric parameter MUST declare a unit, a range and
+        // a resolution. The first two are required by the type and cannot be
+        // omitted; resolution is optional in the type because a continuous
+        // parameter has none, so the rule is enforced here instead.
+        //
+        // Without it the engine cannot snap a value to something the mechanism
+        // can reach, and a grinder with one-step detents is asked for 21.4.
+        for tool in &self.tools {
+            for (name, parameter) in &tool.parameters {
+                if let declaration::Parameter::Number { resolution: None, .. } = parameter {
+                    return Err(ProtocolError::MissingResolution {
+                        tool: tool.id.0.clone(),
+                        parameter: name.clone(),
+                    });
+                }
+            }
+        }
+
         Ok(())
     }
 

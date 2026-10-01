@@ -106,18 +106,35 @@ adip_ctx_t ctx;
 static uint8_t rx[ADIP_RX_MIN];
 static adip_sample_t batch[ADIP_MAX_BATCH];
 
-/* Tool indices, in declaration order. The generated header names the count;
- * a firmware that wants names can compare against the ids in the table. */
+/*
+ * Tool indices, in declaration order.
+ *
+ * These must match the order of `tools:` in the declaration, and nothing
+ * checks that they do. Adding a tool in the middle of the declaration shifts
+ * every index after it, and the handler then drives the wrong mechanism while
+ * compiling cleanly.
+ *
+ * This happened once already, when brew.stop was added. The firmware that
+ * cannot tolerate that risk should match on the identifier instead, as
+ * tool_named below does; the switch is kept here because an index comparison
+ * is cheaper and most firmware will want it.
+ */
 enum {
     TOOL_GRIND_SET = 0,
     TOOL_GRIND_PURGE,
     TOOL_DOSE,
     TOOL_SET_TEMP,
     TOOL_BREW_START,
+    TOOL_BREW_STOP,
     TOOL_DISPENSE,
     TOOL_EJECT,
-    TOOL_SWEETENER
+    TOOL_SWEETENER,
+    TOOL__COUNT
 };
+
+/* Fail the build if the declaration grows and this enum does not. */
+typedef char tool_count_matches_declaration[
+    (TOOL__COUNT == ADIP_EX900_TOOL_COUNT) ? 1 : -1];
 
 /*
  * Read one numeric argument by name.
@@ -198,6 +215,12 @@ adip_action_t adip_on_invoke(const adip_invocation_t *inv,
             brewing = true;
             brew_id = inv->invocation_id;
             return ADIP_ACTION_RUNNING;
+
+        case TOOL_BREW_STOP:
+            /* Stopping early is always permitted, so there is nothing to
+             * refuse. A real machine cuts the pump here. */
+            brewing = false;
+            return ADIP_ACTION_DONE;
 
         case TOOL_GRIND_PURGE:
         case TOOL_DISPENSE:

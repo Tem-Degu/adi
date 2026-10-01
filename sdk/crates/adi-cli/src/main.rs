@@ -155,6 +155,27 @@ fn validate(
         }
     }
 
+    // ADI-P 3.1 names the tools each conformance level requires. The names are
+    // domain-specific, so the list comes from the profile rather than from the
+    // neutral validator.
+    if declaration.domain_profile == adi_domain_espresso::registry::PROFILE_ID {
+        let mut missing = Vec::new();
+        for required in adi_domain_espresso::registry::required_tools(declaration.conformance_level)
+        {
+            if declaration.tool(&adi_protocol::SemanticId::from(*required)).is_none() {
+                missing.push(*required);
+            }
+        }
+        if !missing.is_empty() {
+            eprintln!(
+                "declaration: FAILED  conformance level {:?} requires {}",
+                declaration.conformance_level,
+                missing.join(", ")
+            );
+            std::process::exit(1);
+        }
+    }
+
     if !declaration.has_stateful_envelope() {
         println!(
             "note: no invariants or rate limits declared. \

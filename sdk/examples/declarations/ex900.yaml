@@ -88,6 +88,19 @@ tools:
     abortable: true
     hazard: ["hot_liquid", "pressure"]
 
+  # ADI-P 3.1 requires this from Level 1 upward. brew.start stops itself at the
+  # target mass, so this exists for the case the target does not cover: a
+  # person deciding mid-shot that the result is not worth finishing. Stopping
+  # early is always permitted, which is why it declares no preconditions.
+  - id: "adi.espresso.brew.stop"
+    name: "stop_brew"
+    parameters: {}
+    effects: ["shot_time", "yield_mass"]
+    duration_ms_typ: 200
+    duration_ms_max: 500
+    reversible: false
+    abortable: false
+
   - id: "adi.espresso.additive.dispense"
     parameters:
       substance: { type: enum, values: ["milk", "water"] }

@@ -30,6 +30,29 @@ pub mod signals {
     pub const DOSE_MASS: &str = "adi.espresso.signal.dose_mass";
 }
 
+/// Tools a declaration must expose at each conformance level. ADI-P 3.1.
+///
+/// Lives here rather than in the validator because the names are
+/// espresso-specific, and `adi-protocol` may not know them. A second domain
+/// supplies its own list.
+///
+/// Levels are cumulative, so a level includes everything below it.
+pub fn required_tools(level: adi_protocol::ConformanceLevel) -> &'static [&'static str] {
+    use adi_protocol::ConformanceLevel::*;
+    match level {
+        // At least one signal, checked separately: Level 0 exposes no tools
+        // with physical effect, so a required-tool list would be wrong.
+        Advisory => &[],
+        Parameterised => &[tools::BREW_START, tools::BREW_STOP],
+        Autonomous => &[
+            tools::BREW_START,
+            tools::BREW_STOP,
+            tools::GRIND_SET,
+            tools::DOSE_BY_MASS,
+        ],
+    }
+}
+
 pub mod events {
     /// When flow begins. ADI-P 7.3 measures `shot_time` from here, and a mass
     /// curve can only be used to estimate it.

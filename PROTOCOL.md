@@ -1565,6 +1565,23 @@ either. None of it requires anything from StreetAI.
 
 ## 12. Conformance checklist
 
+Some of this is machine-checkable and the rest is not, and the difference
+matters when planning the work.
+
+`adi validate` checks the declaration's structure: that every numeric
+parameter declares a unit, a range and a resolution, that every signal
+declares an accuracy and a sample rate, that identifiers are well formed and
+namespaced, that the envelope declares itself independent of the engine, and
+that the tools each conformance level requires are present.
+
+`adi conformance` checks engine behaviour against a corpus of recorded inputs
+and expected decisions.
+
+Everything physical is the manufacturer's to verify by test on the machine:
+failsafe timing, operator override, the reply deadline, dose accuracy, and
+whether completion is detected rather than assumed. No tool can confirm any
+of them.
+
 **All levels**
 
 - [ ] Declaration retrievable before any invocation, with a stable `declaration_id`
