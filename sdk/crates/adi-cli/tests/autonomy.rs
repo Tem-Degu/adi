@@ -186,8 +186,8 @@ fn d2_sizes_the_correction_differently_from_d0() {
 
 /// Whatever the model proposes is clamped to the declared range and snapped to
 /// the declared resolution before anything is sent. The grind parameter is
-/// declared in whole steps, so a proposal of 21.143 reaches the appliance as
-/// an integer.
+/// declared in whole steps between 0 and 60, so a fractional proposal
+/// reaches the appliance as an integer inside that range.
 #[test]
 fn a_proposed_value_is_snapped_to_the_declared_resolution() {
     let config = setup!();
@@ -202,9 +202,11 @@ fn a_proposed_value_is_snapped_to_the_declared_resolution() {
         value.round(),
         "the grind is declared in whole steps, got {value}:\n{out}"
     );
+    // The range ex900 declares for this parameter, so the assertion fails if
+    // a proposal escapes it rather than merely looking plausible.
     assert!(
-        (0.0..=240.0).contains(&value),
-        "and inside the declared range, got {value}"
+        (0.0..=60.0).contains(&value),
+        "and inside the declared range of 0 to 60, got {value}"
     );
 }
 

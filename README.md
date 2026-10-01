@@ -1,44 +1,129 @@
 # Artificial Domain Intelligence
 
-An embedded intelligence layer that appliance manufacturers integrate into their
-machines. The machine measures what it just produced, works out what went wrong,
-corrects itself, and takes instruction in plain speech. Everything runs on the
-device, with no internet connection, no account and no application.
+Artificial Domain Intelligence is an approach to making physical machines
+capable within the thing they are built to do. A machine measures what it just
+produced, determines what was wrong with it, corrects itself, and accepts
+spoken instruction from the person using it. It acts on the machine directly
+rather than offering advice for the person to carry out.
 
-It is bounded to one domain. A domain is the scope of what the machine is for.
-The narrow scope is what makes it small enough to run on appliance hardware,
-testable enough to certify, and cheap enough to ship.
+Everything runs on the device. No internet connection, no account, no
+companion application.
 
-The first domain is espresso.
+The intelligence is bounded to one domain, meaning the scope of what the
+machine exists to do. An espresso machine reasons about extraction. A
+greenhouse controller reasons about growth. Neither reasons about anything
+else. That boundary is what keeps the system small enough to run on appliance
+hardware, specific enough to be useful, and narrow enough that its behaviour
+can be tested and certified.
+
+This repository contains the protocol that defines the integration, and a
+working implementation of both sides of it. The first domain is espresso.
 
 ---
 
+## The problem it addresses
+
+An appliance has sensors and actuators and no understanding of what it is
+producing. A person operating it has the understanding and no direct access to
+the mechanism. The gap between them is closed by experience, and most people
+do not have it.
+
+Existing approaches close that gap in two ways, neither sufficient. Connected
+appliances move the decision to a server, which requires a network, an account
+and the manufacturer's continued participation. Assistants describe what the
+person should do, leaving the person to perform it.
+
+Artificial Domain Intelligence places the reasoning on the device, in the
+domain the machine already operates in, with the authority to act within
+limits the manufacturer sets.
+
 ## How it works
 
-An appliance declares what it can physically do: set the grind, dose by mass,
-start extraction, stop at a target weight, dispense milk, eject the puck. Each
-declared action carries its own range, its unit, its resolution and the
+An appliance declares what it can physically do. For an espresso machine that
+might be: set the grind, dose by mass, set the brew temperature, start
+extraction and stop at a target weight, dispense an additive, eject the puck.
+Each declared action states its range, its unit, its resolution, and the
 conditions under which it may be used.
 
-The intelligence acts only by invoking actions from that list. It cannot
-perform an action the manufacturer never built, cannot send a value outside a
-declared range, and cannot breach a limit the appliance enforces in its own
-firmware. This is the Safe Action Protocol: safety follows from the shape of
-the action surface rather than from the model behaving well.
+The intelligence acts only by invoking actions from that declaration. It
+cannot perform an action the manufacturer never built, cannot send a value
+outside a declared range, and cannot breach a limit the appliance enforces in
+its own firmware. This is the Safe Action Protocol, and its consequence is
+that safety is a property of the declared action surface rather than of a
+model behaving correctly.
 
-The engine observes what the machine produced, identifies what was wrong,
-plans a correction, checks the whole plan against a safety envelope, and
-records every value it used along with the layer it came from. A language
-model turns speech into a structured request and phrases an explanation
-afterwards. It does not choose which action to take at the lower autonomy
-levels, and the values it proposes at the highest level are clamped to the
-declared range and validated independently by the appliance.
+A complete cycle:
 
-A manufacturer describes their machine in two data files and implements the
-actions in their existing firmware, in their own language, on their own
-release schedule. They implement no reasoning, no models and no domain
-knowledge. An action they invent works the day they declare it, without a
-release from us.
+1. The machine reports what it measured during the operation.
+2. The engine derives meaning from those measurements and compares the result
+   against the target for what was asked for.
+3. Where the result is outside target, it identifies the likely cause.
+4. It plans a correction, sized from the manufacturer's own statement of how
+   each mechanism affects the result.
+5. It checks the whole plan against a safety envelope, including constraints
+   that only apply to sequences, such as a container that three individually
+   valid additions would overflow.
+6. It sends the invocation. The appliance validates it again, independently.
+7. It records every value that contributed to the decision, along with where
+   that value came from, and remembers the cycle for the next one.
+
+A language model turns speech into a structured request and phrases the
+explanation afterwards. Three autonomy levels determine how much of the
+decision it makes; see [Autonomy](#autonomy).
+
+## What a manufacturer provides
+
+Two data files and an implementation of the actions in their existing
+firmware, in whatever language and on whatever release schedule they already
+use.
+
+They implement no reasoning, no models and no domain knowledge. An action they
+invent works the day they declare it, without a release from this project.
+
+```yaml
+tools:
+  - id: "adi.espresso.grind.set_setting"
+    parameters:
+      setting:
+        type: integer
+        unit: step
+        min: 0
+        max: 60
+        resolution: 1
+    preconditions: ["state == idle"]
+    duration_ms_max: 6000
+    reversible: true
+```
+
+The appliance library compiles that declaration into constant tables and
+handles framing, decoding, validation, the safety envelope and the failsafe.
+The manufacturer implements three platform functions and one handler that
+drives the mechanism.
+
+## Autonomy
+
+Three levels, which are configuration rather than separate code paths.
+
+| Level | Which action | What value |
+|---|---|---|
+| D0 | engine | engine |
+| D1 | model, from the declared actions | engine |
+| **D2** (default) | model | model |
+
+The model turns speech into a structured request at every level, and explains
+afterwards at every level. What the level determines is who decides what to do
+about it.
+
+D2 is the default because a machine limited to what someone anticipated in
+advance cannot respond to a request nobody wrote down. The safety of a
+model-chosen value does not depend on the model being right: the engine clamps
+it to the declared range and snaps it to the declared resolution, the safety
+envelope checks the whole plan, and the appliance validates it independently.
+A wrong value produces a refused plan.
+
+D2 refuses to initialise against a declaration that states no sequence
+constraints, since that is precisely the case where individually valid actions
+combine into an invalid one.
 
 ## Architecture
 
@@ -46,8 +131,7 @@ Two halves, one protocol.
 
 **On the appliance**, a microcontroller runs `libadip`: framing, decoding,
 validation, the stateful envelope and the failsafe, driven by tables compiled
-from the manufacturer's own declaration. The manufacturer implements three
-port functions and one invocation handler.
+from the manufacturer's declaration.
 
 **On the module**, an applications processor runs the engine:
 
@@ -58,28 +142,17 @@ adi-safety     Safe Action Protocol. Envelope, invariants, rate limits.
 adi-core       The reasoning. Cycle, targets, diagnosis, correction.
 adi-decision   Autonomy levels D0, D1 and D2 behind one selector trait.
 adi-language   The four model seams: transcribe, interpret, explain, speak.
+adi-models     Model configuration, provenance, and external backends.
 adi-session    The loop. Link, heartbeat, cycle, envelope, record, memory.
 adi-domain-*   One domain profile. Registry, knowledge, diagnosis rules.
 adi-cli        Validator, code generator and development driver.
 ```
 
-All but the domain profile and the CLI are domain-neutral and must stay that
-way. `sdk/check-neutrality.py` enforces it, and `sdk/conformance/greenhouse/`
-exists to verify the abstraction against a domain with a very different
-shape.
-
-## What is in this repository
-
-The specification, both halves of the implementation, a worked example
-appliance, and the conformance corpus that holds them to the specification.
-
-| File | What it is |
-|---|---|
-| [`PROTOCOL.md`](./PROTOCOL.md) | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model and the espresso registry. |
-| [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | The practical path through the protocol for a firmware engineer: mechanism, driver, C handler, declaration, and the optional skill entry. |
-| [`ROADMAP.md`](./ROADMAP.md) | The build plan, in phases with gates. |
-| [`sdk/`](./sdk/) | The implementation. A domain-neutral engine plus espresso as the first profile. |
-| [`sdk/c/`](./sdk/c/) | **`libadip`**, the appliance SDK. Freestanding C99, no allocation, no floating point, around 12 KB of flash. This is the half that runs on the machine. |
+Every crate except the domain profile and the command line tool is
+domain-neutral and must remain so. `sdk/check-neutrality.py` enforces this,
+and `sdk/conformance/greenhouse/` tests the abstraction against a domain with
+a very different shape: cycles measured in weeks rather than seconds, feedback
+arriving long after the action, and operations that overlap.
 
 ## Running it
 
@@ -95,13 +168,23 @@ cargo run -p adi-cli -- run --level d0
 
 This starts the example appliance as a separate process, opens a session
 against it, and presents a prompt. Typing `cycle` observes a finished cycle:
-the profile diagnoses it, the engine plans a correction, the safety envelope
-checks the plan, and the appliance accepts the invocation.
 
-`--level d0` is the deterministic level, where the engine chooses both the
-action and the value, and no model is involved. The default is D2, where a
-model chooses both; it requires a model backend and refuses rather than
-running at a lower level than it reports.
+```
+> cycle
+  observing    an 18 s shot, described as sour
+  diagnosed    shot_time
+  chose        adi.espresso.grind.set_setting
+  sent         setting = 20 Step
+  accepted     by the appliance
+```
+
+The appliance is a real build of the C library running as a separate process.
+Every value crosses the same framing, checksum, decoding, range validation and
+safety envelope that would run on a machine.
+
+`--level d0` is the deterministic level and requires no model. The default is
+D2, which requires a model backend and refuses rather than running at a level
+below the one it reports.
 
 Speech and the model-driven levels need model files and a configuration flag.
 See [`sdk/README.md`](./sdk/README.md).
@@ -114,9 +197,15 @@ python check-neutrality.py
 cargo run -p adi-cli -- conformance conformance/espresso/cases --interpreter conformance/espresso/interpreter.yaml
 ```
 
-One corpus case carries a spoken request. Without `--interpreter` it is
-reported as pending rather than failing, since interpreting speech requires a
-model backend.
+## Documents
+
+| File | Contents |
+|---|---|
+| [`PROTOCOL.md`](./PROTOCOL.md) | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. |
+| [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | The path through the protocol for a firmware engineer: mechanism, driver, handler, declaration, and the optional skill entry. |
+| [`ROADMAP.md`](./ROADMAP.md) | The build plan, in phases. |
+| [`sdk/README.md`](./sdk/README.md) | The implementation: layout, build, model configuration and current limitations. |
+| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, around 12 KB of flash. |
 
 ## Status
 
@@ -137,9 +226,6 @@ Not yet done:
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic.
 - **No microcontroller port.** `libadip` is developed and tested on a host.
-
-See [`ROADMAP.md`](./ROADMAP.md) and [`sdk/README.md`](./sdk/README.md) for
-detail.
 
 ## Licence
 
