@@ -119,8 +119,8 @@ tools:
     preconditions: ["state == idle"]
     duration_ms_max: 6000
     reversible: true
-    # Optional. For a model choosing between two tools that serve the same
-    # purpose, and read by no engine logic.
+    # What the mechanism is, for a model choosing between two tools that
+    # serve the same outcome. Read by no engine logic.
     description: >
       Stepper-driven burr collar. Settles within two seconds, and retains
       roughly 0.4 g of grounds from the previous setting.
@@ -129,7 +129,16 @@ tools:
 `adi generate-c` compiles that into constant tables, so a limit exists in one
 place and nothing can drift from it.
 
-A `description` may influence which tool a model picks and never what value is
+A tool from the registry needs no `description`, because the profile supplies
+one: `adi.espresso.grind.set_setting` means the same on every machine that
+declares it. Write your own only where your mechanism differs from the usual, as
+above, and it takes precedence.
+
+**A tool of your own must carry one**, and `adi validate` refuses a declaration
+that omits it. Your identifier means nothing to anyone else, so a model offered
+`x.acme.aux.actuate_3` with a magnitude and a confidence cannot tell what it does.
+
+A description may influence which tool a model picks and never what value is
 sent, so one that is wrong or out of date cannot reach the actuator. Keep the
 numbers out of it: how far the mechanism moves an outcome belongs in step 5.
 

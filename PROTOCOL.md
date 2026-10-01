@@ -374,15 +374,19 @@ engine SHOULD cache declarations keyed on this value.
 
 ### 4.2 Parameter types
 
-A tool MAY carry a `description`: free text saying what the mechanism is and
-when to prefer it over another tool that serves the same variable.
+A `description` is free text saying what the mechanism is and when to prefer it
+over another tool serving the same variable. Two rules govern it.
 
-A tool in the registry (§7.1) needs none, because a registry identifier means
-the same on every machine that declares it and the profile supplies the
-description. A vendor tool (§8) for which the skill declares a response MUST
-carry one, and an engine MUST refuse a declaration that omits it: a vendor
-identifier means nothing outside the vendor, so a model offered it with a
-magnitude and a confidence has no way to tell what it does.
+A vendor tool (§8) for which the skill declares a response **MUST** carry one,
+and an engine MUST refuse a declaration that omits it. A vendor identifier means
+nothing outside the vendor, so a model offered one with a magnitude and a
+confidence has no way to tell what it does.
+
+A tool in the registry (§7.1) **MAY** carry one and need not, because a registry
+identifier means the same on every machine that declares it. A profile MUST
+supply a description for every tool in its registry, and an engine MUST prefer a
+description written on the tool over the profile's, since what is true of one
+manufacturer's mechanism is theirs to state.
 
 An engine MUST supply, with each candidate, the variables that candidate's tool
 changes besides the one it was offered for. Two tools serving one variable are

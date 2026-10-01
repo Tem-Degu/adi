@@ -174,17 +174,21 @@ one model resident answers both questions from it.
 Three files, and only the first is required.
 
 **The declaration** says what the machine can physically do. Each tool carries
-its parameters with units, ranges and resolutions, its preconditions, and
-optionally a `description`: prose for a model choosing between two tools that
-serve the same purpose. A description may influence which candidate is picked
-and may never affect which candidates exist or what value is sent, so one that
-is wrong, stale or promotional cannot reach the actuator.
+its parameters with units, ranges and resolutions, its preconditions, and a
+`description`: prose for a model choosing between two tools that serve the same
+purpose.
 
-A registry tool needs none, because the profile supplies it: an identifier in the
-registry means the same thing on every machine that declares it. A **vendor tool
-with a skill response must carry one**, and `adi validate` refuses a declaration
-that omits it. A model handed `x.acme.aux.actuate_3` with a magnitude and a
-confidence has no way to tell what it does.
+A registry tool need not write one, because the profile supplies it: an
+identifier in the registry means the same thing on every machine that declares
+it. Writing your own is worth it where your mechanism differs from the usual, and
+it takes precedence. A **vendor tool with a skill response must carry one**, and
+`adi validate` refuses a declaration that omits it, because a model handed
+`x.acme.aux.actuate_3` with a magnitude and a confidence has no way to tell what
+it does.
+
+A description may influence which candidate is picked and may never affect which
+candidates exist or what value is sent, so one that is wrong, stale or
+promotional cannot reach the actuator.
 
 **The skill** says how the machine behaves: how far one unit of a parameter
 moves an outcome, signed, with a confidence. This is what makes a tool
