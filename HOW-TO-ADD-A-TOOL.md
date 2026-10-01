@@ -1,6 +1,6 @@
 # How to add a tool
 
-**A guide for appliance firmware engineers · ADI-P 0.2 · StreetAI**
+**A guide for appliance firmware engineers. ADI-P 0.2.**
 
 This document explains how to make a mechanism on your machine callable by an
 Artificial Domain Intelligence engine. It is written for the engineer who will
@@ -26,8 +26,8 @@ Making one callable takes three things:
 Steps 1 and 2 are ordinary appliance engineering. **Step 3 is the only new work
 the protocol asks of you**, and it is not code.
 
-Nothing here requires a release from StreetAI. Publish a new declaration and the
-engine picks the tool up on its next connection.
+Nothing here requires a release from this project. Publish a new declaration
+and the engine picks the tool up on its next connection.
 
 ---
 
@@ -395,16 +395,23 @@ Each stage works before you add the next. Do not wire everything and then debug.
 and return home.
 
 **20. Against the reference engine, on a laptop.** The messages are CBOR, so
-they are not something you can type. Instead, build the worked example and let
-the engine drive your handler:
+they are not something you can type by hand. Build your firmware as a host
+binary and let the engine drive it:
 
 ```sh
 cd sdk/c && make example
-cargo test -p adi-cli --test loopback
+cd .. && cargo run -p adi-cli -- run --level d0 --appliance c/build/example                                      --declaration path/to/your-machine.yaml
 ```
 
-Point those at your declaration and your handler and you are testing your
-firmware against the same engine that will ship, before any board exists.
+`adi run` starts your binary, opens a session against it, and gives you a
+prompt. You are testing your handler against the same engine that will ship,
+before any board exists.
+
+The automated equivalent, if you want this in your own test suite:
+
+```sh
+cargo test -p adi-cli --test loopback
+```
 
 **21. On the machine, with the engine connected.**
 
@@ -452,8 +459,8 @@ firmware against the same engine that will ship, before any board exists.
 
 ## What you are not doing
 
-No reasoning. No models. No domain knowledge. No integration with our build
-system, our language or our release schedule.
+No reasoning. No models. No domain knowledge. No adoption of another build
+system, language or release schedule.
 
 No parser, no validator, no framing, no CRC, no range checking and no envelope
 bookkeeping either. `libadip` is freestanding C99 with no allocation and no

@@ -151,6 +151,25 @@ fn without_an_interpreter_a_spoken_request_says_so() {
     assert!(out.contains("closed"), "and still close cleanly:\n{out}");
 }
 
+/// A path written without a platform's executable suffix still resolves, so
+/// one documented command works on every platform.
+#[test]
+fn an_appliance_path_without_the_exe_suffix_resolves() {
+    require_appliance!();
+    let out = drive(
+        "quit
+",
+        &["--level", "d0", "--appliance", "c/build/example"],
+    );
+
+    assert!(
+        out.contains("autonomy"),
+        "the session should open from a suffixless path:
+{out}"
+    );
+    assert!(!out.contains("no appliance at"), "{out}");
+}
+
 #[test]
 fn a_missing_appliance_explains_how_to_build_it() {
     let out = drive("quit\n", &["--appliance", "no/such/appliance"]);

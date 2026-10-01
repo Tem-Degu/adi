@@ -43,7 +43,10 @@ pub fn run(
     // binary that was never going to be used.
     let requested = parse_level(level.as_deref())?;
 
-    let appliance_path = appliance_path.unwrap_or_else(default_appliance);
+    let appliance_path = appliance_path
+        .map(|given| resolve_executable(&given))
+        .unwrap_or_else(default_appliance);
+
     if !appliance_path.exists() {
         return Err(format!(
             "no appliance at {}\n\nBuild it first:\n    cd sdk/c && make example",
@@ -403,12 +406,24 @@ fn read(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
 }
 
 fn default_appliance() -> PathBuf {
-    let base = Path::new("c/build");
-    for name in ["example.exe", "example"] {
-        let candidate = base.join(name);
-        if candidate.exists() {
-            return candidate;
-        }
+    resolve_executable(Path::new("c/build/example"))
+}
+
+/// Accept a path written without a platform's executable suffix.
+///
+/// A path given in documentation or a script is written once and run on
+/// several platforms. `c/build/example` is the binary on Linux and macOS and
+/// `example.exe` on Windows, and refusing one because it was written as the
+/// other is a failure with no useful cause to report.
+fn resolve_executable(given: &Path) -> PathBuf {
+    if given.exists() {
+        return given.to_path_buf();
     }
-    base.join("example")
+
+    let with_exe = given.with_extension(std::env::consts::EXE_EXTENSION);
+    if with_exe.exists() {
+        return with_exe;
+    }
+
+    given.to_path_buf()
 }
