@@ -180,6 +180,12 @@ serve the same purpose. A description may influence which candidate is picked
 and may never affect which candidates exist or what value is sent, so one that
 is wrong, stale or promotional cannot reach the actuator.
 
+A registry tool needs none, because the profile supplies it: an identifier in the
+registry means the same thing on every machine that declares it. A **vendor tool
+with a skill response must carry one**, and `adi validate` refuses a declaration
+that omits it. A model handed `x.acme.aux.actuate_3` with a magnitude and a
+confidence has no way to tell what it does.
+
 **The skill** says how the machine behaves: how far one unit of a parameter
 moves an outcome, signed, with a confidence. This is what makes a tool
 *selectable* rather than merely callable.
@@ -381,6 +387,12 @@ silently. **Keeping the total within the context of the smallest model you
 target is your responsibility.** The engine applies its budget, discards notes
 before anything a request depends on, and prints a warning when it has to, so
 exceeding the capacity is visible rather than silent.
+
+Each candidate carries what its tool changes besides the outcome it was offered
+for, as `also_affects`. That is what separates two tools serving one outcome:
+changing the dose moves the strength as well, changing the grind does not, and
+the magnitudes alone do not say so. It also carries a `description`, which is the
+manufacturer's where they wrote one and the profile's for a registry tool.
 
 A chooser answers with an index into the candidate list the engine supplied, so
 it cannot name a tool the machine does not declare. `constraints` states the

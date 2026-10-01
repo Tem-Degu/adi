@@ -176,6 +176,42 @@ fn validate(
         }
     }
 
+    // A vendor tool the engine may select must say what it is for.
+    //
+    // A registry identifier means the same on every machine and the profile
+    // supplies its description. A vendor identifier means nothing to anyone: a
+    // model handed "x.acme.aux.actuate_3" with a magnitude and a confidence has
+    // no way to tell what it does, and on a machine with two tools serving one
+    // outcome it cannot choose between them on anything but the numbers.
+    if let Some(skill_path) = &skill_path {
+        let skill = load_skill(skill_path)?;
+        let mut undescribed = Vec::new();
+
+        for response in &skill.responses {
+            let Some(tool) = declaration.tool(&response.tool) else {
+                continue;
+            };
+            if tool.id.0.starts_with("x.") && tool.description.is_none() {
+                undescribed.push(tool.id.0.clone());
+            }
+        }
+
+        undescribed.dedup();
+        if !undescribed.is_empty() {
+            eprintln!(
+                "declaration: FAILED  these vendor tools are selectable and carry no description:"
+            );
+            for id in &undescribed {
+                eprintln!("    {id}");
+            }
+            eprintln!();
+            eprintln!("  A registry tool takes its description from the profile.");
+            eprintln!("  A vendor tool has none, so without one a model cannot");
+            eprintln!("  tell what it is for.");
+            std::process::exit(1);
+        }
+    }
+
     if !declaration.has_stateful_envelope() {
         println!(
             "note: no invariants or rate limits declared. \

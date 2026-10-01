@@ -126,6 +126,10 @@ tools:
   # Vendor tool. Outside the registry, so meaningless to the engine until the
   # skill declares a response for it.
   - id: "x.example.additive.sweetener_pump"
+    description: >
+      Peristaltic pump drawing from the syrup bottle. Doses by volume rather
+      than mass, so accuracy falls off below 2 ml. A preference: it changes what
+      the drink is and not how the coffee extracted.
     name: "sweetener"
     parameters:
       level: { type: integer, unit: g, min: 0, max: 20, resolution: 1 }

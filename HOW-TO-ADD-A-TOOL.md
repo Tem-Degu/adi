@@ -276,11 +276,19 @@ The checking is still duplicated, and deliberately: the engine checks so it
 never sends something wrong, and your firmware checks because it must never
 trust the engine. What is no longer duplicated is the number itself.
 
-### 13b. Describe it, if another tool could serve the same purpose
+### 13b. Describe it
 
-Optional, and worth doing only where a machine has two tools that move the same
-variable. The engine picks between them by confidence; a description tells a
-model what the numbers do not.
+Required for your own tools, and unnecessary for ours.
+
+A registry identifier such as `adi.espresso.grind.set_setting` means the same on
+every machine that declares it, so the profile supplies the description and you
+do not retype it. Your own identifier means nothing to anyone else: a model
+offered `x.acme.aux.actuate_3` with a magnitude and a confidence cannot tell what
+it does. `adi validate` refuses a vendor tool that the skill makes selectable and
+that carries no description.
+
+Write it anyway for one of ours where your mechanism differs from the usual,
+since what is true of your machine is yours to state and takes precedence.
 
 ```yaml
     description: >

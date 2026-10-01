@@ -95,7 +95,38 @@ impl<'a> Planner<'a> {
                     per_unit: response.per_unit,
                     confidence: response.confidence,
                     param_unit: range.unit,
-                    description: tool.description.clone(),
+                    // The manufacturer's own words where they wrote any,
+                    // otherwise the profile's for a registry tool. A vendor
+                    // tool has neither unless its author supplied one, which
+                    // validation requires of them.
+                    description: tool
+                        .description
+                        .clone()
+                        .or_else(|| self.domain.tool_description(&tool.id).map(str::to_string)),
+                    // Everything it touches except the variable it is offered
+                    // for, which the candidate already names.
+                    also_affects: {
+                        let mut others: Vec<VariableId> = tool
+                            .effects
+                            .iter()
+                            .filter(|v| *v != variable)
+                            .cloned()
+                            .collect();
+                        for interaction in skill.interactions.iter() {
+                            if tool.effects.contains(&interaction.changing) {
+                                others.extend(
+                                    interaction
+                                        .also_affects
+                                        .iter()
+                                        .filter(|v| *v != variable)
+                                        .cloned(),
+                                );
+                            }
+                        }
+                        others.sort();
+                        others.dedup();
+                        others
+                    },
                 });
             }
         }
@@ -379,11 +410,21 @@ pub struct Candidate {
     /// variable it moves. Grind position is in steps; it moves shot time in
     /// seconds.
     pub param_unit: crate::plan::Unit,
-    /// The manufacturer's description of the tool, where they wrote one.
+    /// The manufacturer's description of the tool, where they wrote one, or the
+    /// profile's for a registry tool.
     ///
     /// Carried so a model choosing between candidates can read it. Nothing in
     /// the engine reads it, and the declaration's documentation states why.
     pub description: Option<String>,
+    /// Variables this tool changes besides the one it was offered for.
+    ///
+    /// The engine computes this already, for the one-variable-at-a-time check,
+    /// and used to keep it to itself. It is what actually separates two tools
+    /// serving the same outcome: changing the dose moves the strength as well,
+    /// and changing the grind does not, so a request to lengthen a shot without
+    /// altering anything else has one right answer that the magnitudes and
+    /// confidences do not express.
+    pub also_affects: Vec<VariableId>,
 }
 
 pub use adi_protocol::units::Unit;

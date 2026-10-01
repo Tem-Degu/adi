@@ -53,6 +53,19 @@ pub trait Domain {
     /// this list is ignored rather than guessed at.
     fn variables(&self) -> &[VariableId];
 
+    /// What a registry tool is for, in words, where the profile says.
+    ///
+    /// A registry identifier means the same thing on every machine that declares
+    /// it, so the description belongs with the profile rather than being retyped
+    /// in each manufacturer's declaration. A description written on the tool
+    /// takes precedence, since what is true of one mechanism is that
+    /// manufacturer's to state, and a vendor tool has no entry here at all.
+    ///
+    /// Defaulted, so a profile that supplies none still compiles.
+    fn tool_description(&self, _tool: &adi_protocol::ids::SemanticId) -> Option<&str> {
+        None
+    }
+
     /// The knowledge this machine reasons from: the domain base plus whatever
     /// vendor, deployment and user layers were accepted.
     ///

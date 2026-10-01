@@ -377,6 +377,17 @@ engine SHOULD cache declarations keyed on this value.
 A tool MAY carry a `description`: free text saying what the mechanism is and
 when to prefer it over another tool that serves the same variable.
 
+A tool in the registry (§7.1) needs none, because a registry identifier means
+the same on every machine that declares it and the profile supplies the
+description. A vendor tool (§8) for which the skill declares a response MUST
+carry one, and an engine MUST refuse a declaration that omits it: a vendor
+identifier means nothing outside the vendor, so a model offered it with a
+magnitude and a confidence has no way to tell what it does.
+
+An engine MUST supply, with each candidate, the variables that candidate's tool
+changes besides the one it was offered for. Two tools serving one variable are
+separated by what else moves with them, and the magnitudes do not express it.
+
 A description is advisory. An engine MAY use it when choosing between
 candidates. It MUST NOT be used to determine which tools are candidates, which
 follows from `effects` and the skill, nor to determine any value sent, which is

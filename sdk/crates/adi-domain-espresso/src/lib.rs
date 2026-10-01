@@ -92,6 +92,10 @@ impl Domain for Espresso {
         &self.variables
     }
 
+    fn tool_description(&self, tool: &adi_protocol::ids::SemanticId) -> Option<&str> {
+        registry::description(tool.as_str())
+    }
+
     fn knowledge(&self) -> &Knowledge {
         &self.knowledge
     }

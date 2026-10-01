@@ -99,6 +99,12 @@ struct CandidateLine<'a> {
     /// is proposed is clamped and checked regardless.
     #[serde(skip_serializing_if = "Option::is_none")]
     description: &'a Option<String>,
+    /// What this tool changes besides the variable it is offered for.
+    ///
+    /// The thing that actually separates two tools serving one outcome. The
+    /// magnitudes say how far each moves it; this says what else moves with it.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    also_affects: Vec<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +215,7 @@ impl ProcessChooser {
                     unit: format!("{:?}", c.param_unit).to_lowercase(),
                     current: present(context, &c.parameter),
                     description: &c.description,
+                    also_affects: c.also_affects.iter().map(|v| v.as_str()).collect(),
                 })
                 .collect(),
             level: self.level,

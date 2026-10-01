@@ -412,6 +412,7 @@ fn a_zero_response_cannot_drive_the_mechanism_to_its_limit() {
         confidence: 0.9,
         param_unit: Unit::Step,
             description: None,
+            also_affects: Vec::new(),
     };
     assert!(matches!(
         p.plan(
@@ -572,4 +573,98 @@ fn snapping_to_resolution_is_not_recorded_as_a_limit() {
         "an ordinary correction must not be reported as being at a limit, got {:?}",
         correction.clamped_from
     );
+}
+
+/// A candidate carries what else its tool changes.
+///
+/// The magnitudes say how far each of two tools moves an outcome; this says what
+/// moves with it, which is what separates them when a person asked for one thing
+/// to change and not another. The engine computed it already for the
+/// one-variable-at-a-time check and kept it to itself.
+#[test]
+fn a_candidate_carries_what_else_its_tool_changes() {
+    let declaration = declaration();
+    let skill = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&declaration, Some(&skill), &domain);
+
+    let candidates = planner.candidates(&VariableId::from("cycle_time"));
+    assert!(!candidates.is_empty(), "the fixture should offer candidates");
+
+    // Whatever each tool declares in `effects`, minus the variable the
+    // candidate was offered for, must appear.
+    for candidate in &candidates {
+        let tool = declaration
+            .tool(&candidate.tool)
+            .expect("a candidate names a declared tool");
+
+        for effect in &tool.effects {
+            if *effect == candidate.variable {
+                continue;
+            }
+            assert!(
+                candidate.also_affects.contains(effect),
+                "{} declares it changes {}, which the candidate does not carry",
+                candidate.tool.as_str(),
+                effect.0
+            );
+        }
+        assert!(
+            !candidate.also_affects.contains(&candidate.variable),
+            "the variable it is offered for is named once, not twice"
+        );
+    }
+}
+
+/// A registry tool with no description written takes the profile's.
+///
+/// A registry identifier means the same on every machine, so the description
+/// belongs with the profile rather than being retyped in each declaration.
+#[test]
+fn a_tool_with_no_description_takes_the_profiles() {
+    struct Described(TestDomain);
+
+    impl Domain for Described {
+        fn profile_id(&self) -> &str {
+            self.0.profile_id()
+        }
+        fn variables(&self) -> &[VariableId] {
+            self.0.variables()
+        }
+        fn knowledge(&self) -> &adi_protocol::knowledge::Knowledge {
+            self.0.knowledge()
+        }
+        fn derive(&self, cycle: &mut adi_core::Cycle) {
+            self.0.derive(cycle)
+        }
+        fn diagnose(
+            &self,
+            cycle: &adi_core::Cycle,
+            targets: &adi_protocol::knowledge::ResolvedTargets,
+        ) -> adi_core::domain::Diagnosis {
+            self.0.diagnose(cycle, targets)
+        }
+        fn feedback_vocabulary(&self) -> &[&str] {
+            self.0.feedback_vocabulary()
+        }
+        fn tool_description(&self, _tool: &SemanticId) -> Option<&str> {
+            Some("what the profile says this is for")
+        }
+    }
+
+    let declaration = declaration();
+    let skill = skill();
+    let domain = Described(TestDomain::new());
+    let planner = Planner::new(&declaration, Some(&skill), &domain);
+
+    for candidate in planner.candidates(&VariableId::from("cycle_time")) {
+        let tool = declaration.tool(&candidate.tool).unwrap();
+        if tool.description.is_none() {
+            assert_eq!(
+                candidate.description.as_deref(),
+                Some("what the profile says this is for"),
+                "a tool with none of its own should take the profile's"
+            );
+        }
+    }
 }

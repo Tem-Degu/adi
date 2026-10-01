@@ -30,6 +30,52 @@ pub mod signals {
     pub const DOSE_MASS: &str = "adi.espresso.signal.dose_mass";
 }
 
+/// What each registry tool is for, in words.
+///
+/// From the PROTOCOL.md 7.1 table, which was prose no code read. Supplied by the
+/// profile rather than retyped by every manufacturer: a registry identifier
+/// means the same thing on every machine that declares it, so the description
+/// belongs with the identifier and not with one vendor's copy of it.
+///
+/// A manufacturer MAY still write their own on the tool, which takes precedence,
+/// because what is true of their mechanism is theirs to state. A vendor tool has
+/// no entry here and must carry its own.
+pub fn description(tool: &str) -> Option<&'static str> {
+    Some(match tool {
+        tools::GRIND_SET => {
+            "Sets grind fineness. Finer slows the flow and lengthens extraction.              The primary control over extraction rate."
+        }
+        tools::GRIND_PURGE => {
+            "Discards grounds retained in the grinder from a previous setting.              Worth doing after a large change, since retained grounds are at the              old setting."
+        }
+        tools::DOSE_BY_MASS => {
+            "Dispenses ground coffee by mass. Changes the strength of the result              as well as the extraction rate."
+        }
+        tools::TAMP => "Compresses the puck to an even bed before extraction.",
+        tools::BREW_SET_TEMP => {
+            "Sets brew water temperature. Higher extracts more, towards bitter;              lower extracts less, towards sour."
+        }
+        tools::BREW_LOAD_PROFILE => {
+            "Installs a pressure or flow profile for the next extraction."
+        }
+        tools::BREW_START => "Begins extraction.",
+        tools::BREW_STOP => {
+            "Ends extraction. Usually unnecessary where the start declared a              target mass, and the way to stop a shot that is not worth finishing."
+        }
+        tools::BREW_SET_LIVE_TARGET => {
+            "Adjusts the target part way through an extraction."
+        }
+        tools::PUCK_EJECT => "Discards the spent puck.",
+        tools::ADDITIVE_DISPENSE => {
+            "Dispenses milk, water or syrup. A preference rather than a process              control: it changes what the drink is, not how the coffee extracted."
+        }
+        tools::MAINTENANCE_FLUSH => {
+            "Flushes water through the group without coffee, to clear it and              bring it to temperature."
+        }
+        _ => return None,
+    })
+}
+
 /// Tools a declaration must expose at each conformance level. ADI-P 3.1.
 ///
 /// Lives here rather than in the validator because the names are

@@ -46,6 +46,7 @@ fn candidates() -> Vec<Candidate> {
             confidence: 0.75,
             param_unit: Unit::Step,
             description: None,
+            also_affects: Vec::new(),
         },
         Candidate {
             tool: SemanticId::from("adi.example.input.by_mass"),
@@ -55,6 +56,7 @@ fn candidates() -> Vec<Candidate> {
             confidence: 0.6,
             param_unit: Unit::G,
             description: None,
+            also_affects: Vec::new(),
         },
     ]
 }
