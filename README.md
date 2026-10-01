@@ -67,11 +67,9 @@ decision it makes; see [Autonomy](#autonomy).
 A **tool** is one action the machine can perform: setting the grind,
 dispensing milk, ejecting the puck.
 
-Three things make one available: the mechanism, a handler that runs it, and
-one entry in a data file. The first two are work a firmware team already does.
-The third is what the protocol adds, and it is data rather than code.
-
-In sequence, with the two details that matter:
+Three things make one available: the mechanism, a handler that runs it, and one
+entry in a data file. The first two are ordinary appliance engineering and the
+third is data rather than code. In sequence, with the two details that matter:
 
 **1. Build the mechanism.** A motor, a valve, a heater, driven from a pin.
 Ordinary appliance engineering.
