@@ -1278,6 +1278,15 @@ Normative, and central to the certification argument.
 5. The engine MUST retain, for each invocation, the inputs, the resolved
    knowledge layer for each value used, and the rule that produced it, sufficient
    to reconstruct the decision.
+6. Where clamping under requirement 2 changed a value, the engine MUST record
+   what was wanted alongside what was sent. Snapping to resolution is not this:
+   a parameter declared in whole steps receiving 21.4 is set to 21 and nothing is
+   amiss. A value outside the declared range means the mechanism cannot reach
+   where the engine intended, so the correction is partial, and an engine that
+   does not record the difference cannot distinguish a small correction from one
+   that did nothing. An engine SHOULD say so when reporting the outcome to a
+   person, since a machine that reports having acted when it could not is worse
+   than one that reports a limit.
 
 Requirement 5 is what lets a manufacturer answer the question a regulator or an
 insurer will eventually ask, which is why the machine did that. Layer
@@ -1320,8 +1329,17 @@ and means none at all.
 
 The reasoning on this path is the model's. An engine MUST therefore supply it
 with what reasoning requires: the utterance, the declared styles and materials,
-the decision history, and **the cycles the machine remembers**, meaning the same
-store the engine resolves a relative target against.
+the declared variables **with their units and meanings** (§7.3), the decision
+history, and **the cycles the machine remembers**, meaning the same store the
+engine resolves a relative target against.
+
+A variable supplied as a bare identifier can be mapped onto a request only where
+the model was trained on the domain, which is not a property a profile may
+assume, and is never true of a variable a manufacturer introduced (§6.3).
+
+An engine SHOULD also supply what bears on a question rather than a request: the
+device identity from the declaration, the declared tools with their descriptions
+(§4.2), and the notes the knowledge layers carry (§6.7).
 
 Both sides see that store, and they use it for different things. The model reads
 it to work out which earlier cycle a person means and whether that one was any
@@ -1419,6 +1437,23 @@ answer composes a confident wrong one equally readily.
 This is distinct from an engine with no model at all, which is a configuration
 error and MUST be reported as one. A model that asks a question has understood
 enough to know what it is missing, and the machine is working correctly.
+
+#### 9.4.6 An engine SHOULD state its constraints, and MAY ask again
+
+An engine that asks a model to select an action SHOULD send, with the request,
+the constraints the answer is checked against: one step per goal, selection by
+index into the candidate list supplied, no two steps moving the same variable
+(§9.5), and at D2 a value that is the absolute setting rather than a change.
+
+A model asked to satisfy a constraint it has not been shown will break it, and
+the commonest break, two steps moving one variable, is a plan refused whole.
+
+Where an answer is refused for a reason the model could correct, an engine MAY
+make one further attempt, supplying the reason. It MUST bound this: a backend
+that is broken rather than mistaken has to surface as a failure rather than a
+loop. An engine MUST NOT retry a refusal that cannot change on a second attempt,
+which includes no candidate serving the goal, contradictory goals, and a
+declaration carrying no stateful envelope.
 
 ### 9.5 One variable at a time, not one action at a time
 

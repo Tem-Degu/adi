@@ -45,6 +45,22 @@ This runs at D2, the default: a model turns speech into a structured request,
 chooses which declared action serves it, and proposes the value. The engine
 clamps and checks everything before it is sent.
 
+The machine also answers questions, which actuates nothing:
+
+```
+> what model are you
+  answers      Example Appliances EX-900, firmware 3.2.1
+
+> why was it sour
+  answers      Sour usually means under-extraction: the water passed through
+               too quickly to dissolve enough...
+  from         adi.espresso.note.sour_vs_bitter
+```
+
+It answers from the declaration it already reasons over and from notes the
+knowledge base carries, and names what it drew on. `listen <file.wav>`
+transcribes a recorded utterance and treats it as a request.
+
 ---
 
 ## Layout
@@ -152,6 +168,65 @@ adi run --level d2 --config models/models.example-process.yaml
 
 The chooser runs the same program as the interpreter, since an appliance with
 one model resident answers both questions from it.
+
+## What a machine declares
+
+Three files, and only the first is required.
+
+**The declaration** says what the machine can physically do. Each tool carries
+its parameters with units, ranges and resolutions, its preconditions, and
+optionally a `description`: prose for a model choosing between two tools that
+serve the same purpose. A description may influence which candidate is picked
+and may never affect which candidates exist or what value is sent, so one that
+is wrong, stale or promotional cannot reach the actuator.
+
+**The skill** says how the machine behaves: how far one unit of a parameter
+moves an outcome, signed, with a confidence. This is what makes a tool
+*selectable* rather than merely callable.
+
+**A knowledge extension** is optional and holds three things a manufacturer may
+add:
+
+| | |
+|---|---|
+| Narrower ranges | A machine that cannot hold 96 degrees says so. Layers may narrow and never widen |
+| Their own outcomes | Namespaced, with a unit and a meaning, for a tool that moves nothing the profile models |
+| Notes | Free text the machine may answer from |
+
+Declaring an outcome is what makes a genuinely new capability reachable. A tool
+that wipes a tray moves nothing the espresso profile models; declare
+`x.acme.tray_state` with a unit and a description, name it in a skill response,
+and the engine can select the tool for a goal on it. Validation requires the
+identifier to sit in the vendor's namespace and refuses any redefinition of a
+base identifier.
+
+### Outcomes are data
+
+The variables a profile models are declared in its knowledge base, each with a
+unit and a statement of what it means, and that declaration is authoritative:
+the profile reads its list from there rather than holding one. Every style
+target is checked against it, both that the outcome exists and that the target
+is stated in the outcome's unit.
+
+The meanings are sent to the model. A variable identified only by name can be
+mapped onto a request only where the model was trained on the domain, which is
+not a property a profile may assume, and is certainly not true of a
+manufacturer's own.
+
+### Notes
+
+Every note reaches the model on every utterance. There is no relevance filter,
+because filtering is a guess about what a question needs and a wrong guess
+withholds the answer silently.
+
+**Keeping the total within the context of the smallest model you target is
+therefore your responsibility.** The engine applies its budget, discards notes
+before anything a request depends on, and prints a warning when it has to.
+
+A note may inform an answer and may never determine an action. Supplying notes
+changes nothing about how a request is validated. A note must not state a target
+or an effect magnitude, because those belong in a style and in the skill where
+they are validated, and a figure written twice will diverge.
 
 ## Build
 
@@ -357,6 +432,23 @@ attempted.
 The engine's own errors are precise and intended for a log. Translating them
 into something a person can act on is the integrator's job, and `adi run` shows
 one way of doing it.
+
+### When a correction cannot be carried out in full
+
+A correction held at the end of a declared range is partial. The engine records
+what it wanted alongside what it sent, and `adi run` says so:
+
+```
+  sent         setting = 60 Step
+  at limit     setting could not reach 999; this correction is partial
+```
+
+Without that, the record says the machine acted and nothing distinguishes a small
+correction from a mechanism that cannot move. The person is told their request
+was carried out when it was not.
+
+Snapping to resolution is not this. A parameter declared in whole steps receiving
+21.4 is set to 21, which is ordinary; only a value outside the range is reported.
 
 ### Running without models
 

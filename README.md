@@ -55,12 +55,22 @@ A complete cycle:
    that only apply to sequences, such as a container that three individually
    valid additions would overflow.
 6. It sends the invocation. The appliance validates it again, independently.
-7. It records every value that contributed to the decision, along with where
-   that value came from, and remembers the cycle for the next one.
+7. It records what it did, including what it wanted where a mechanism was
+   already at its limit, so a partial correction is reported as partial rather
+   than as a success.
+8. It explains the decision in words, and remembers the cycle for the next one.
 
 A language model turns speech into a structured request and phrases the
 explanation afterwards. Three autonomy levels determine how much of the
 decision it makes; see [Autonomy](#autonomy).
+
+A request is not the only thing a person can say. Asked a question, the machine
+answers from the declaration it already reasons over and from whatever the
+manufacturer wrote down, and names what it drew on. Nothing is actuated.
+
+Where a request cannot be served, the refusal says which kind it was: nothing
+declared can move that, the plan would breach a safety limit, the appliance
+declined. A refusal is an outcome rather than a fault, and the session continues.
 
 ## Integrating a machine
 
@@ -134,9 +144,37 @@ responses:
     confidence: 0.75
 ```
 
-The manufacturer implements no reasoning, no models and no domain knowledge. A
-tool they implement works the day they declare it, without a release from this
-project.
+**6. Optionally, declare an outcome of your own.** A response has to name an
+outcome the engine models, and a tool doing something the profile never
+considered moves none of them. Declare one in your own namespace and the engine
+can select your tool for a goal on it.
+
+```yaml
+variables:
+  x.acme.tray_state:
+    unit: none
+    description: >
+      How clean the drip tray is, from 0 for soiled to 1 for clean.
+```
+
+This is what makes a capability nobody anticipated reachable.
+
+**7. Optionally, say what you know.** Free text the machine may answer from.
+
+```yaml
+notes:
+  - id: "x.acme.note.basket"
+    text: >
+      A 58 mm basket, taking 18 to 20 g. A stepped basket will not seat
+      correctly.
+```
+
+A note may inform an answer and may never determine an action. Every note
+reaches the model on every utterance, so keeping the total within the context of
+the smallest model you ship is the author's responsibility.
+
+The manufacturer implements no reasoning and no models. A tool they implement
+works the day they declare it, without a release from this project.
 
 Three platform functions complete the integration: a millisecond clock, a byte
 write, and a function that drives the machine to a safe state.
@@ -287,8 +325,9 @@ cargo run -p adi-cli -- conformance conformance/espresso/cases --interpreter con
 
 Pre-release. The specification is stable, both implementations exchange
 messages over a transport, and a cycle runs end to end: observe, diagnose,
-plan, check the safety envelope, invoke, record, remember. All three autonomy
-levels run against a real appliance.
+plan, check the safety envelope, invoke, record, explain, remember. All three
+autonomy levels run against a real appliance, and all four model seams are
+reached in a session.
 
 The appliance library occupies roughly 12 KB of flash with no static or heap
 allocation, measured on x86-64.
@@ -302,6 +341,10 @@ without removing it.
 
 Not yet done:
 
+- **No audio capture or playback.** Speech synthesis writes a file and
+  transcription reads one. Driving a microphone and a speaker needs a platform
+  library and a device, which belongs in a product rather than in this SDK, and
+  no worked example of doing it is supplied.
 - **Models run beside the engine rather than inside it.** The engine starts
   them and exchanges one message per line, so a developer supplies model files
   and writes no code. Backends that load models through ONNX Runtime and

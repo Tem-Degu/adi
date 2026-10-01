@@ -23,6 +23,10 @@ Making one callable takes three things:
 2. A handler in your firmware that runs it when a named instruction arrives.
 3. One entry in a data file declaring the name, its parameters and its limits.
 
+Two further steps, both optional and both data. One entry in the skill lets the
+engine *choose* your tool while solving a problem rather than only call it when
+told. And notes let the machine answer questions about your machine in words.
+
 Steps 1 and 2 are ordinary appliance engineering. **Step 3 is the only new work
 the protocol asks of you**, and it is not code.
 
@@ -338,8 +342,8 @@ physics, and no description field contains it.
 
 ### 16. Skill response
 
-Only if the tool moves a variable the engine models. A tray wiper does not
-affect the coffee, so it needs nothing here. A second grinder would:
+One entry saying which outcome your tool moves and by how much. A second
+grinder, for instance:
 
 ```yaml
 responses:
@@ -355,6 +359,46 @@ responses:
 `per_unit` is a signed number rather than a word, so direction cannot be
 misread. `confidence` between 0 and 1 tells the engine how firmly you hold the
 figure, and it sizes its correction steps accordingly.
+
+### 16b. Declare your own outcome, if none of ours fits
+
+A response has to name an outcome the engine models, and the espresso profile
+models nine of them. A tool doing something the profile never considered,
+wiping a drip tray, flushing a line, retracting a cover, moves none of them.
+
+Declare your own, in your namespace, in your knowledge extension:
+
+```yaml
+variables:
+  x.acme.tray_state:
+    unit: none
+    description: >
+      How clean the drip tray is, from 0 for soiled to 1 for clean.
+```
+
+Then name it in the skill exactly as you would one of ours:
+
+```yaml
+responses:
+  - tool: "x.acme.tray.wipe"
+    parameter: "passes"
+    variable: "x.acme.tray_state"
+    per_unit: 0.4
+    unit: none
+    confidence: 0.8
+```
+
+The engine can now select your tool, because it has an outcome to pursue and a
+number telling it how far one pass gets there. This is what makes a capability
+nobody anticipated reachable, and it needs no change from us.
+
+The `description` matters more here than for a base outcome. A model has
+intuitions about what makes coffee bitter and none at all about
+`x.acme.tray_state`, so what you write is the only thing connecting a person's
+words to your mechanism.
+
+Two constraints, both checked at validation: the identifier must sit in your
+namespace, and you may not redefine one of ours.
 
 ### 17. Dynamics
 
@@ -406,14 +450,79 @@ You own the order of operations. The engine owns the numbers.
 
 ---
 
-## Phase 6: Test, in this order
+## Phase 6: Telling it what you know (optional)
+
+Everything above makes the machine *do* things. This makes it *answer* things.
+
+### 19. Notes
+
+Free text the machine may answer from, in your knowledge extension:
+
+```yaml
+notes:
+  - id: "x.acme.note.basket"
+    text: >
+      A 58 mm basket, taking 18 to 20 g. Third-party baskets of the same
+      diameter fit, and a stepped basket will not seat correctly.
+
+  - id: "x.acme.note.descaling"
+    text: >
+      Descale every 300 cycles, or sooner in hard water. The machine does not
+      detect scale; the counter is on the display.
+```
+
+What goes in them is your judgement. We specify the mechanism and prescribe no
+content. If you believe an owner might ask it, write it down.
+
+Four things to know.
+
+**Every note is sent to the model on every utterance.** There is no relevance
+filter, because filtering is a guess about what a question needs and a wrong
+guess withholds the answer without telling anyone.
+
+**You are therefore responsible for the total size.** A model has a finite
+context. Keep the notes within what the smallest model you ship can hold,
+alongside everything else the engine sends. Exceed it and the engine truncates
+them and prints a warning, which is a degraded answer rather than a failure, but
+it is still your fault and not the engine's.
+
+**A note may inform an answer and may never determine an action.** Supplying
+them changes nothing about how a request is validated: a closed schema, outcomes
+only from the declared set, every value clamped and checked. A note cannot make
+the machine do something it could not already do.
+
+**Do not put numbers in them.** "Aim for 27 seconds" belongs in a style and
+"shortens the shot by 0.4 s per step" belongs in the skill, where both are
+validated. A figure written in a note as well will eventually disagree with the
+one that is used.
+
+The machine also answers from what it already knows without any notes at all:
+its own model and firmware, what each declared tool is for, and what each
+outcome means. You get that for free.
+
+### 20. What an answer is not
+
+An answer is text going to a person, and nothing verifies it.
+
+An action is safe because of the shape of the system: you declared it, the
+engine clamped it, your firmware validated it again. An answer has none of that
+behind it. The engine instructs the model to answer only from what it was given
+and to say it does not know otherwise, which narrows the risk and does not
+remove it.
+
+So treat the notes as published material, in the same way a printed manual is,
+because that is what they become.
+
+---
+
+## Phase 7: Test, in this order
 
 Each stage works before you add the next. Do not wire everything and then debug.
 
-**19. The function alone.** On the bench, no engine. Does the mechanism complete
+**21. The function alone.** On the bench, no engine. Does the mechanism complete
 and return home.
 
-**20. Against the reference engine, on a laptop.** The messages are CBOR, so
+**22. Against the reference engine, on a laptop.** The messages are CBOR, so
 they are not something you can type by hand. Build your firmware as a host
 binary and let the engine drive it:
 
@@ -432,9 +541,9 @@ The automated equivalent, if you want this in your own test suite:
 cargo test -p adi-cli --test loopback
 ```
 
-**21. On the machine, with the engine connected.**
+**23. On the machine, with the engine connected.**
 
-**22. The failure paths.** These matter more than the happy path:
+**24. The failure paths.** These matter more than the happy path:
 
 - Open the interlock. Confirm `REJECTED` with `INTERLOCK`.
 - Send an out-of-range value. Confirm rejection, not clamping.
@@ -457,6 +566,9 @@ cargo test -p adi-cli --test loopback
 - [ ] Handlers return rather than blocking, so the deadline stays reachable
 - [ ] Measurements are published, or the engine has nothing to reason about
 - [ ] Out-of-range values are rejected, never silently clamped
+- [ ] The declared range is wide enough to be useful. The engine clamps to it and
+      reports the correction as partial, so a range narrower than the mechanism
+      allows makes the machine look stuck
 - [ ] Every numeric parameter declares unit, range and resolution
 - [ ] `monotonic` is set on any direction-bearing mechanism
 - [ ] Preconditions list every required state
@@ -470,16 +582,30 @@ cargo test -p adi-cli --test loopback
 
 **If the engine should select the tool by itself**
 
-- [ ] A skill response names a modelled domain variable
+- [ ] A skill response names an outcome the engine models
+- [ ] Or, where none fits, you declared your own in your namespace with a unit
+      and a description
 - [ ] `per_unit` is signed, and `confidence` reflects measured certainty
 - [ ] Retention, settling or hysteresis are declared where they exist
+
+**If the machine should be able to answer questions about it**
+
+- [ ] A `description` on the tool, if another tool could serve the same purpose
+- [ ] Notes for anything an owner might ask that the structured data does not say
+- [ ] The notes fit the context of the smallest model you ship
+- [ ] No targets and no effect magnitudes in any note
 
 ---
 
 ## What you are not doing
 
-No reasoning. No models. No domain knowledge. No adoption of another build
-system, language or release schedule.
+No reasoning. No models. No adoption of another build system, language or
+release schedule.
+
+No domain knowledge is required of you either. The profile supplies what makes
+espresso good, and your declaration describes your machine. Where you know
+something about *your* machine that we could not, notes and your own outcomes
+are there for it, and both are optional.
 
 No parser, no validator, no framing, no CRC, no range checking and no envelope
 bookkeeping either. `libadip` is freestanding C99 with no allocation and no
