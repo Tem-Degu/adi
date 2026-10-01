@@ -330,9 +330,10 @@ Cortex-M target.
   structure for tracing every value back to the knowledge layer that produced
   it, and the session leaves it empty.
 - **No learning.** `Layer::User` is defined and nothing writes to it.
-- **No microcontroller port.** `libadip` is tested on a host. Milestone M6 in
-  [`c/DESIGN.md`](./c/DESIGN.md) requires a target board, and the footprint
-  above is an x86-64 measurement.
+- **No microcontroller port.** `libadip` is developed and tested on a host.
+  The remaining milestone in [`c/DESIGN.md`](./c/DESIGN.md) is a reference
+  port, which requires a target board. The footprint above is an x86-64
+  measurement.
 - **The decoder has not been fuzzed**, and no MISRA review has been performed.
 
 `serde_yaml` 0.9 is unmaintained upstream. No part of the design depends on

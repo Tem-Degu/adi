@@ -38,6 +38,11 @@ pub fn run(
     let skill: Skill = serde_yaml::from_str(&read(&skill_path)?)?;
     let domain = Espresso::new();
 
+    // Checked before anything is started. An argument that cannot be honoured
+    // should be refused on its own terms, not after a failure to find a
+    // binary that was never going to be used.
+    let requested = parse_level(level.as_deref())?;
+
     let appliance_path = appliance_path.unwrap_or_else(default_appliance);
     if !appliance_path.exists() {
         return Err(format!(
@@ -59,7 +64,6 @@ pub fn run(
     // session opens at D0, which is deterministic and needs no model. The
     // level is reported either way rather than assumed, because a record
     // naming a level that did not run is the one thing 3.3 forbids.
-    let requested = parse_level(level.as_deref())?;
     let chooser = load_chooser(config_path.as_deref(), requested)?;
 
     let mut session = match (requested, chooser) {

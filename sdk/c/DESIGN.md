@@ -10,11 +10,12 @@ firmware. This document is the plan and the record of progress against it.
 ## 1. What it is for
 
 A manufacturer's firmware engineer should be able to make their machine speak
-ADI-P in a day, without adopting our language, our build system or our release
-schedule, and without writing a parser or a validator themselves.
+ADI-P in a day, without adopting another language, build system or release
+schedule, and without writing a parser or a validator.
 
-`HOW-TO-ADD-A-TOOL.md` currently tells that engineer to hand-write a message
-handler. This SDK is what makes that step small instead of a project.
+`HOW-TO-ADD-A-TOOL.md` describes that path from the engineer's side. This
+document describes what the library does on their behalf, and why it is
+shaped as it is.
 
 ## 2. What "correct" means here
 
@@ -247,8 +248,8 @@ The old number described a smaller library. It was set when this SDK could only
 receive: an invocation in, an acknowledgement out, and no way to report a
 measurement, raise an event or answer a heartbeat. A library that also talks is
 doing about twice the work, and holding it to a figure chosen before half its
-job existed would mean trimming safety-relevant code to honour a constraint we
-invented.
+job existed would mean trimming safety-relevant code to meet a figure chosen
+before the work was understood.
 
 The measurement is not the target. Every figure in section 9 is x86-64 and
 labelled indicative for good reason: this is branch-heavy integer code with no
@@ -277,9 +278,9 @@ what matters:
 | generated tables, 6 tools | 2320 B | 0 | 0 |
 
 **Zero bytes of `data` and `bss`.** The tables are genuinely const and live in
-flash, which was the point of generating them. 49 host checks pass, and the
-whole thing compiles clean under `-Wall -Wextra -pedantic -Wconversion
--Wsign-conversion -Wcast-qual -Wshadow -Wdouble-promotion`.
+flash, which was the point of generating them. The whole thing compiles clean
+under `-Wall -Wextra -pedantic -Wconversion -Wsign-conversion -Wcast-qual
+-Wshadow -Wdouble-promotion`.
 
 Three defects the compiler caught that review had not: enum value arrays were
 being emitted inside an initialiser list, which is not valid C; sizing macros
@@ -288,8 +289,8 @@ translation unit; and the device symbol itself collided for the same reason. It
 is now `adip_device_<basename>` with every header symbol namespaced.
 
 **M2. Decode and validate. DONE.** Framing with CRC, a CBOR reader, decode into
-a resolved invocation, and validation against the declaration. 54 host checks,
-almost all of them rejection paths.
+a resolved invocation, and validation against the declaration. Almost every
+test here covers a rejection path.
 
 Runtime footprint after M2, x86-64 host, indicative:
 
@@ -306,7 +307,7 @@ Runtime footprint after M2, x86-64 host, indicative:
 Under half the 12 KB budget with the hardest part done, and still no RAM.
 
 **M3. Dispatch and reply. DONE.** Context, feed, poll, dispatch, the handler
-contract, asynchronous completion. 57 host checks.
+contract, asynchronous completion.
 
 Footprint after M3, x86-64 host, indicative:
 
@@ -338,7 +339,7 @@ port layer, so everything else links and tests with no platform at all.
 
 **M4. Stateful envelope. DONE.** Invariants, rate limits and resources, with
 the first test group mirroring `adi-safety`'s `composition.rs` case for case
-against the same fixture. 30 host checks.
+against the same fixture.
 
 **Cross-implementation testing paid for itself immediately.** It found a real
 bug in `adi-safety`: `check_invariants` added the raw `f64` of a contribution
@@ -372,8 +373,8 @@ invariants would mean the declaration advertises a limit the firmware silently
 ignores, which is worse than not starting.
 
 **M5. Failsafe and timing. DONE.** Link timeout, safe state entry, duration
-overrun, and the reply deadline as a measurement. 42 host checks, all of them
-on paths that only run when something has gone wrong.
+overrun, and the reply deadline as a measurement. Every test in this
+milestone exercises a path that only runs when something has gone wrong.
 
 Four decisions worth recording.
 
@@ -413,7 +414,7 @@ now takes `now_ms` too, the runtime reads the clock once and uses it for both
 calls, and `test_m1` and `test_m2` link `CORE` alone, which is what makes the
 claim checkable rather than merely stated.
 
-**M7. The outbound half. DONE.** Signals, events and the heartbeat, plus
+**M6. The outbound half. DONE.** Signals, events and the heartbeat, plus
 message kinds on every frame. Until this the library had exactly one outbound
 message, the response to an invocation, which carries an id, an outcome and a
 reason and no measured value of any kind. A machine running libadip could be
@@ -434,10 +435,10 @@ compare a value against the thing it had just been stamped from. It could never
 fire, and its comment claimed it caught an engine sending grams where
 millilitres were declared.
 
-Footprint after M7: 12212 B text, 0 data, 0 bss. The budget was raised from 12
+Footprint after M6: 12212 B text, 0 data, 0 bss. The budget was raised from 12
 to 16 KB in section 8, with the reasoning, rather than met by squeezing.
 
-**M6. Port and integrate.** Reference port for one real MCU, then run the
+**M7. Port and integrate.** Reference port for one real MCU, then run the
 conformance suite against a device rather than a simulator.
 
 M1 to M5 need no hardware and are testable on a host.
@@ -470,12 +471,20 @@ one scale against a step taken at another.
 The espresso conformance corpus drives the engine only. Running it across the
 wire is not yet possible and is not claimed.
 
-**Fuzzing the decoder.** The decoder is the only place untrusted bytes are
-handled, so it gets fuzzed. Any input must produce a rejection rather than a
-crash, an out-of-bounds read, or corrupted state.
+Two further forms are planned and not yet done, listed here so the gap is
+visible rather than implied.
 
-**Static analysis** with the warnings turned all the way up, plus a MISRA-style
-pass, since some customers will require it.
+**Fuzzing the decoder.** The decoder is the only place untrusted bytes are
+handled, which makes it the only place where a hostile or corrupted input can
+reach memory. Any input must produce a rejection rather than a crash, an
+out-of-bounds read, or corrupted state. The code is written for this, with
+bounded loops and no recursion, and that intent has not been tested against a
+fuzzer.
+
+**A MISRA-style review.** The build runs with a wide warning set, listed at
+the top of the makefile, and the tree is kept free of warnings. Enforcing that
+with `-Werror` and carrying out a MISRA pass are separate exercises, and some
+integrators will require the latter.
 
 ## 11. Deliberately out of scope for v1
 
@@ -487,29 +496,34 @@ pass, since some customers will require it.
   device never sees them.
 - **An RTOS abstraction.** Three port functions, no task model.
 
-## 12. Open questions
+## 12. Decisions worth recording
 
-**Wire encoding. DECIDED: CBOR.** Three reasons, in order of weight.
+**Wire encoding: CBOR.** Three reasons, in order of weight.
 
 RFC 8949 tag 4 is a decimal fraction, encoded as `[exponent, mantissa]`, which
 is exactly `adip_num_t`. Numbers cross the wire with no conversion and no
 rounding, which is what keeps a range check against a safety limit exact. JSON
-would have meant parsing decimal text into scaled integers on an MCU.
+would have meant parsing decimal text into scaled integers on a
+microcontroller.
 
-A decoder for the subset we need is 1.5 KB and needs no allocation.
+A decoder for the subset needed is about 1.5 KB and requires no allocation.
 
-It matches the BLE binding the spec already specifies.
+It matches the BLE binding the specification already gives.
 
 Binary floats are refused rather than converted, since a float cannot hold 0.1
-exactly and accepting one would put back the ambiguity scaled integers remove.
-
-The development-only JSON path was dropped. A second encoder is a second thing
-to get wrong, and `adi-cli` can print a decoded frame on the host instead.
+exactly and accepting one would reintroduce the ambiguity scaled integers
+remove. A development-only JSON path was considered and dropped: a second
+encoder is a second thing to get wrong, and `adi-cli` can decode a frame on
+the host instead.
 
 **Timer wraparound.** `adip_port_millis` wraps every 49 days on a 32-bit
-counter. Unsigned subtraction handles it correctly, but every comparison must be
-written that way and it must be tested at the boundary rather than assumed.
+counter. Unsigned subtraction handles this correctly, but only if every
+comparison is written that way. `test_m4.c` exercises the boundary rather than
+assuming it.
 
-**Reporting engine defects.** The spec says an out-of-range invocation indicates
-an engine defect and SHOULD be logged. Whether the SDK keeps a counter, and
-whether it surfaces one, is undecided.
+**Reporting engine defects.** ADI-P 9.2 states that an out-of-range invocation
+indicates a defect in the engine rather than an unlucky value, and should be
+logged. The runtime counts these separately in `stat_engine_defects`, so a
+manufacturer can distinguish a misbehaving engine from a machine being asked
+for something it cannot do. Whether a product surfaces that counter is left to
+the integrator.
