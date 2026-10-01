@@ -135,7 +135,7 @@ responses:
 ```
 
 The manufacturer implements no reasoning, no models and no domain knowledge. A
-tool they invent works the day they declare it, without a release from this
+tool they implement works the day they declare it, without a release from this
 project.
 
 Three platform functions complete the integration: a millisecond clock, a byte
@@ -146,7 +146,15 @@ including the electrical steps and the failure cases.
 
 ## Autonomy
 
-Three levels, which are configuration rather than separate code paths.
+Once the engine has a request, or has diagnosed something wrong with a cycle,
+two decisions remain. Which of the declared actions to use, and what value to
+send it. A grind setting can be changed, or a dose, or a brew temperature, and
+each takes a number.
+
+The autonomy level states who makes each of those two decisions: the engine,
+working deterministically from the manufacturer's declared effects, or the
+model. It is configuration rather than a separate code path, and it appears in
+every decision record.
 
 | Level | Which action | What value |
 |---|---|---|
@@ -154,9 +162,9 @@ Three levels, which are configuration rather than separate code paths.
 | D1 | model, from the declared actions | engine |
 | **D2** (default) | model | model |
 
-The model turns speech into a structured request at every level, and explains
-afterwards at every level. What the level determines is who decides what to do
-about it.
+The model turns speech into a structured request at every level, including D0,
+and explains the outcome afterwards at every level. The level governs only
+what happens between those two points.
 
 D2 is the default because a machine limited to what someone anticipated in
 advance cannot respond to a request nobody wrote down. The safety of a
