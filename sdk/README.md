@@ -211,6 +211,16 @@ seam.
 
 ### Recommended models
 
+All four seams are reached in a session. A cycle is explained and spoken, an
+answer and a question are spoken, and `listen <file.wav>` transcribes a recorded
+utterance and treats it as a request.
+
+Speech output is written to `spoken.wav` rather than played, and input is read
+from a file rather than captured. Playback and capture need an output device, a
+microphone and a platform library, which is a packaging concern for a product
+rather than part of the protocol. What the SDK demonstrates is that text reaches
+the seam and audio comes back.
+
 | Seam | Model | Licence |
 |---|---|---|
 | Interpreter | Qwen 3 1.7B or 4B, GGUF | Apache-2.0 |

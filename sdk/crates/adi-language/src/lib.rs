@@ -133,10 +133,22 @@ pub struct RecordExplainer;
 
 impl Explainer for RecordExplainer {
     fn explain(&self, record: &DecisionRecord) -> Result<String, LanguageError> {
-        let mut text = if record.explanation.is_empty() {
+        // An empty explanation means the domain rules wrote none, not that
+        // nothing happened. The arguments say which it was, and reading the one
+        // as the other reported "made no change" on a cycle that had just
+        // changed something.
+        let mut text = if !record.explanation.is_empty() {
+            record.explanation.clone()
+        } else if record.arguments.is_empty() {
             format!("Diagnosed {} and made no change.", record.cause)
         } else {
-            record.explanation.clone()
+            let changes = record
+                .arguments
+                .iter()
+                .map(|(name, value)| format!("{name} to {}", value.value))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Diagnosed {} and set {changes}.", record.cause)
         };
 
         // A correction held at the end of its range is the one case where

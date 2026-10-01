@@ -19,8 +19,9 @@ use adi_decision::{
 };
 use adi_domain_espresso::Espresso;
 use adi_language::context::VariableInfo;
+use adi_language::{Explainer, RecordExplainer, Speaker, Transcriber};
 use adi_models::{
-    Surroundings,
+    ProcessSpeaker, ProcessTranscriber, Surroundings,
     Backend, ModelsConfig, ProcessChooser, ProcessInterpreter, ScriptedInterpreter, Seam,
 };
 use adi_protocol::declaration::Declaration;
@@ -118,6 +119,7 @@ pub fn run(
     println!("  autonomy     {}", session.level().as_str());
 
     let interpreter = load_interpreter(config_path.as_deref(), &domain, &declaration.device)?;
+    let voice = Voice::load(config_path.as_deref())?;
     match &interpreter {
         Some((_, label)) => println!("  interpreter  {label}"),
         None => println!("  interpreter  none, so spoken requests are unavailable"),
@@ -153,8 +155,17 @@ pub fn run(
                 Ok(())
             }
             "status" => status(&mut session, now_ms),
-            "cycle" => cycle(&mut session, now_ms),
-            _ => request(&mut session, interpreter.as_ref(), line, now_ms),
+            "cycle" => cycle(&mut session, now_ms, &voice),
+            // A recorded utterance, since capturing from a microphone needs a
+            // device and a platform library this tool does not carry.
+            other if other.starts_with("listen ") => listen(
+                &mut session,
+                interpreter.as_ref(),
+                &voice,
+                other.trim_start_matches("listen ").trim(),
+                now_ms,
+            ),
+            _ => request(&mut session, interpreter.as_ref(), line, now_ms, &voice),
         };
 
         if let Err(error) = outcome {
@@ -172,6 +183,163 @@ pub fn run(
 
     println!("\nclosed.");
     Ok(())
+}
+
+/// The voice seams, where they are configured.
+///
+/// Held together because they are reached at the same points and a session with
+/// one and not the other is not a useful configuration: a machine that hears and
+/// cannot reply is worse than one that does neither.
+struct Voice {
+    speaker: Option<Box<dyn Speaker>>,
+    transcriber: Option<Box<dyn Transcriber>>,
+}
+
+impl Voice {
+    /// Start whichever of the two the configuration names.
+    fn load(config_path: Option<&Path>) -> Result<Self, Box<dyn std::error::Error>> {
+        let Some(path) = config_path else {
+            return Ok(Self {
+                speaker: None,
+                transcriber: None,
+            });
+        };
+
+        let config = ModelsConfig::load(path)?;
+
+        let speaker = {
+            let seam = config.seam(Seam::Speaker);
+            match (seam.backend, seam.command.clone()) {
+                (Backend::Process, Some(command)) => Some(Box::new(ProcessSpeaker::start(
+                    &command,
+                    &seam.args,
+                    22_050,
+                )?) as Box<dyn Speaker>),
+                _ => None,
+            }
+        };
+
+        let transcriber = {
+            let seam = config.seam(Seam::Transcriber);
+            match (seam.backend, seam.command.clone()) {
+                (Backend::Process, Some(command)) => Some(Box::new(ProcessTranscriber::start(
+                    &command,
+                    &seam.args,
+                    16_000,
+                )?) as Box<dyn Transcriber>),
+                _ => None,
+            }
+        };
+
+        Ok(Self {
+            speaker,
+            transcriber,
+        })
+    }
+
+    /// Say something, where a speaker is configured.
+    ///
+    /// The audio is written beside the working directory rather than played.
+    /// Playback needs an output device and a platform library, which is a
+    /// packaging concern; what matters to the protocol is that the text reached
+    /// the seam and came back as samples.
+    fn say(&self, text: &str) {
+        let Some(speaker) = &self.speaker else {
+            return;
+        };
+
+        match speaker.speak(text) {
+            Ok(audio) => {
+                let path = std::path::Path::new("spoken.wav");
+                match write_wav(&path.to_path_buf(), &audio) {
+                    Ok(()) => println!(
+                        "  spoken       {} samples at {} Hz, written to {}",
+                        audio.samples.len(),
+                        audio.sample_rate,
+                        path.display()
+                    ),
+                    Err(e) => println!("  speaker      could not write the audio: {e}"),
+                }
+            }
+            // A machine that cannot speak should still work. The text was
+            // already printed, so nothing is lost but the voice.
+            Err(e) => println!("  speaker      unavailable: {e}"),
+        }
+    }
+}
+
+/// A minimal 16-bit mono WAV, so what the speaker produced can be listened to.
+///
+/// Hand written rather than taken from a crate: it is forty lines, it is the
+/// only audio file this tool writes, and a dependency for it would be carried by
+/// every build of the SDK.
+fn write_wav(path: &PathBuf, audio: &adi_language::Audio) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let data_bytes = (audio.samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data_bytes as usize);
+
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_bytes).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes()); // PCM header size
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM, uncompressed
+    out.extend_from_slice(&1u16.to_le_bytes()); // mono
+    out.extend_from_slice(&audio.sample_rate.to_le_bytes());
+    out.extend_from_slice(&(audio.sample_rate * 2).to_le_bytes()); // bytes per second
+    out.extend_from_slice(&2u16.to_le_bytes()); // bytes per frame
+    out.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_bytes.to_le_bytes());
+    for sample in &audio.samples {
+        out.extend_from_slice(&sample.to_le_bytes());
+    }
+
+    std::fs::File::create(path)?.write_all(&out)
+}
+
+/// Read a 16-bit mono WAV, so a recorded utterance can be transcribed.
+///
+/// Capturing from a microphone needs a platform library and a device, which this
+/// tool deliberately does not carry. A file is enough to exercise the seam.
+fn read_wav(path: &Path) -> Result<adi_language::Audio, Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(path)?;
+    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err(format!("{} is not a WAV file", path.display()).into());
+    }
+
+    let sample_rate = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+    let channels = u16::from_le_bytes([bytes[22], bytes[23]]);
+    let bits = u16::from_le_bytes([bytes[34], bytes[35]]);
+
+    if channels != 1 || bits != 16 {
+        return Err(format!(
+            "{} is {channels} channel at {bits} bit; 1 channel at 16 bit is required",
+            path.display()
+        )
+        .into());
+    }
+
+    // Find the data chunk rather than assuming it follows the format chunk,
+    // since a WAV may carry others between them.
+    let mut at = 12;
+    while at + 8 <= bytes.len() {
+        let id = &bytes[at..at + 4];
+        let size =
+            u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]])
+                as usize;
+        if id == b"data" {
+            let end = (at + 8 + size).min(bytes.len());
+            let samples = bytes[at + 8..end]
+                .chunks_exact(2)
+                .map(|p| i16::from_le_bytes([p[0], p[1]]))
+                .collect();
+            return Ok(adi_language::Audio::new(samples, sample_rate));
+        }
+        at += 8 + size + (size & 1);
+    }
+
+    Err(format!("{} carries no data chunk", path.display()).into())
 }
 
 /// Say what went wrong in terms a person can act on.
@@ -210,7 +378,10 @@ fn is_fatal(error: &(dyn std::error::Error + 'static)) -> bool {
 fn help() {
     println!("  cycle    feed a finished cycle and let the engine correct it");
     println!("           this needs no model and exercises the whole loop");
-    println!("  status   send a heartbeat and report what the appliance says");
+    println!("  status   send a heartbeat and report what the appliance says
+  listen <file.wav>
+           transcribe a recorded utterance and treat it as a request
+           16 bit mono. Needs a transcriber; see `adi models check`");
     println!("  quit     end the session");
     println!();
     println!("  anything else is treated as a spoken request, which needs an");
@@ -220,7 +391,11 @@ fn help() {
 
 /// The observation path: a cycle finished, something was wrong with it, and
 /// the engine corrects the machine. No model is involved at any point.
-fn cycle(session: &mut Session<'_>, now_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
+fn cycle(
+    session: &mut Session<'_>,
+    now_ms: u64,
+    voice: &Voice,
+) -> Result<(), Box<dyn std::error::Error>> {
     let n = session.memory().len() + 1;
 
     // A short shot, which the profile diagnoses as under extracted.
@@ -285,6 +460,16 @@ fn cycle(session: &mut Session<'_>, now_ms: u64) -> Result<(), Box<dyn std::erro
                 "  at limit     {parameter} could not reach {wanted}; this correction is partial"
             );
         }
+
+        // The explainer composes a sentence from the record. It needs no model,
+        // which is why a machine with no voice still has something to say.
+        match RecordExplainer.explain(record) {
+            Ok(text) => {
+                println!("  explains     {text}");
+                voice.say(&text);
+            }
+            Err(e) => println!("  explainer    unavailable: {e}"),
+        }
     }
 
     Ok(())
@@ -299,11 +484,43 @@ fn status(session: &mut Session<'_>, now_ms: u64) -> Result<(), Box<dyn std::err
 }
 
 /// The request path: a person asked for something in words.
+fn listen(
+    session: &mut Session<'_>,
+    interpreter: Option<&(Box<dyn Interpreter>, String)>,
+    voice: &Voice,
+    path: &str,
+    now_ms: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(transcriber) = &voice.transcriber else {
+        println!("  no transcriber is configured, so audio cannot be understood.");
+        println!("  run `adi models check` to see what is missing.");
+        return Ok(());
+    };
+
+    let audio = read_wav(Path::new(path))?;
+    println!(
+        "  heard        {} samples at {} Hz",
+        audio.samples.len(),
+        audio.sample_rate
+    );
+
+    let transcript = transcriber.transcribe(&audio)?;
+    println!(
+        "  transcribed  \"{}\" (confidence {:.2})",
+        transcript.text, transcript.confidence
+    );
+
+    // From here it is an ordinary spoken request. A transcript is text, and
+    // nothing downstream needs to know it arrived as sound.
+    request(session, interpreter, &transcript.text, now_ms, voice)
+}
+
 fn request(
     session: &mut Session<'_>,
     interpreter: Option<&(Box<dyn Interpreter>, String)>,
     words: &str,
     now_ms: u64,
+    voice: &Voice,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some((interpreter, _)) = interpreter else {
         println!("  no interpreter is configured, so this cannot be understood.");
@@ -323,6 +540,7 @@ fn request(
         Understood::Clarify { question, because } => {
             println!("  asks         {question}");
             println!("  because      {because}");
+            voice.say(&question);
         }
         // Nothing is actuated. The person asked something and is told.
         Understood::Answer { text, drew_on } => {
@@ -330,6 +548,7 @@ fn request(
             if !drew_on.is_empty() {
                 println!("  from         {}", drew_on.join(", "));
             }
+            voice.say(&text);
         }
         Understood::Intent(intent) => {
             println!("  understood   {:?}", intent.kind);
