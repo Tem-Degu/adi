@@ -6,6 +6,7 @@
 mod conformance;
 mod genc;
 mod bench;
+mod run;
 mod models;
 
 use std::path::PathBuf;
@@ -58,6 +59,22 @@ enum Command {
         #[command(subcommand)]
         what: ModelsCommand,
     },
+    /// Open a live session against a real appliance and drive it.
+    ///
+    /// Starts the appliance, connects, and accepts commands. This is the only
+    /// command that runs the engine rather than inspecting it.
+    Run {
+        #[arg(long, default_value = "examples/declarations/ex900.yaml")]
+        declaration: PathBuf,
+        #[arg(long, default_value = "examples/declarations/ex900.skill.yaml")]
+        skill: PathBuf,
+        /// Defaults to the example built by `cd c && make example`.
+        #[arg(long)]
+        appliance: Option<PathBuf>,
+        /// Models configuration. Without it, spoken requests are unavailable.
+        #[arg(long, short)]
+        config: Option<PathBuf>,
+    },
     /// Run the conformance corpus.
     Conformance {
         #[arg(default_value = "conformance/espresso/cases")]
@@ -104,6 +121,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ModelsCommand::Hash { path } => models::hash(path),
             ModelsCommand::Bench { corpus, interpreter } => bench::bench(corpus, interpreter),
         },
+        Command::Run { declaration, skill, appliance, config } => {
+            run::run(declaration, skill, appliance, config)
+        }
         Command::Conformance { dir, interpreter } => conformance(dir, interpreter),
     }
 }

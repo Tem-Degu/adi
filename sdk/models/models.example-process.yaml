@@ -19,6 +19,10 @@
 #
 # The programs referenced below are working implementations of the protocol
 # and contain no models. Replace them with your own.
+#
+# The command is whatever starts Python on your system. On most Linux and
+# macOS installations that is python3; on Windows it is usually python,
+# because python3 there is a store shim that exits immediately.
 
 root: .
 

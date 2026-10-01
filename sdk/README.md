@@ -13,6 +13,37 @@ Plan: [`../ROADMAP.md`](../ROADMAP.md).
 
 ---
 
+## Quickstart
+
+```sh
+# 1. Build the engine and the example appliance
+cargo build --release
+cd c && make example && cd ..
+
+# 2. Drive a real appliance
+cargo run -p adi-cli -- run
+```
+
+At the prompt, type `cycle`. The engine observes a finished cycle, diagnoses
+it, plans a correction, checks it against the safety envelope, and sends it to
+a real `libadip` build running as a separate process. Type `help` for the
+other commands.
+
+No models are required for this. The reasoning path is deterministic.
+
+### Adding speech
+
+```sh
+pip install -r requirements.txt
+adi models check                 # reports each missing file and its source
+# obtain the three model files it names
+cargo run -p adi-cli -- run --config models/models.example-local.yaml
+```
+
+Now a request can be typed in words rather than given as a command.
+
+---
+
 ## Layout
 
 ```
@@ -41,7 +72,11 @@ sdk/
 ├── models/                   Where model weights go. Ships empty; see Models.
 ├── eval/espresso/            Utterances and reference answers, for measuring
 │                             an interpreter with `adi models bench`.
-├── examples/interpreters/    A working model backend that is another program.
+├── examples/interpreters/    Model backends that are separate programs.
+│                             reference*.py implement the protocol with no
+│                             models; qwen_interpreter.py and
+│                             speech_backends.py run real ones.
+├── requirements.txt          Python packages those backends need.
 ├── profiles/espresso/        Knowledge base as data.
 ├── conformance/
 │   ├── espresso/cases/       Input and expected-decision pairs.
@@ -223,11 +258,19 @@ speaker      -> {"text":"..."}
 
 Audio is base64 of 16-bit signed, little endian, single channel samples.
 
-`models/models.example-process.yaml` configures all three.
+Two sets of backends are supplied.
+
 `examples/interpreters/reference.py` and
-`examples/interpreters/reference_speech.py` are working
-implementations of the protocol, containing no models, intended to be
-replaced one at a time.
+`examples/interpreters/reference_speech.py` implement the
+protocol and contain no models. They are the specification by example, and are
+used by the test suite.
+
+`examples/interpreters/qwen_interpreter.py` and
+`examples/interpreters/speech_backends.py` run real models, and are configured by `models/models.example-local.yaml`. They have
+been written from the libraries' documentation and **not yet verified against
+real weights**, because the machine they were written on cannot hold them.
+
+`models/models.example-process.yaml` configures the reference set.
 
 **Implement the trait.** `adi-language` defines the four seams as traits. A
 manufacturer shipping at volume implements them directly against their own

@@ -16,12 +16,14 @@
 
 pub mod config;
 pub mod manifest;
+pub mod parse;
 pub mod process;
 pub mod schema;
 pub mod speech;
 pub mod scripted;
 
 pub use config::{Backend, ModelsConfig, SeamConfig};
+pub use parse::understood;
 pub use manifest::{hash_file, identify, Manifest, Provenance, Published, Seam};
 pub use process::ProcessInterpreter;
 pub use speech::{ProcessSpeaker, ProcessTranscriber};

@@ -1,27 +1,48 @@
-# A seam served by a model file loaded into the engine.
+# Model files loaded by programs that run beside the engine.
 #
-# NOT YET USABLE. The llama and onnx backends are named in the configuration
-# format and have no implementation. `adi models check` reports this rather
-# than reporting a present file as ready.
+# This is the configuration to use once the model files are in place. It runs
+# real models, through the backends in examples/interpreters/.
 #
-# This file records the intended shape. To run a model today, use the process
-# backend in models.example-process.yaml.
+# First:
+#     pip install -r requirements.txt
+#     adi models check          # reports which files are missing, and where
+#                               # to obtain each one
+#
+# The command below is whatever starts Python on your system. On most Linux
+# and macOS installations that is python3; on Windows it is usually python,
+# because python3 there is a store shim that exits immediately.
 
 root: .
 
 seams:
   interpreter:
-    backend: llama
-    model: interpreter/qwen3-1.7b-instruct-q4_k_m.gguf
-    context_tokens: 2048
+    backend: process
+    command: python
+    args:
+      - "examples/interpreters/qwen_interpreter.py"
+      - "models/interpreter/qwen3-1.7b-instruct-q4_k_m.gguf"
 
   transcriber:
-    backend: onnx
-    model: transcriber/moonshine-base.onnx
+    backend: process
+    command: python
+    args:
+      - "examples/interpreters/speech_backends.py"
+      - "transcribe"
+      - "models/transcriber/moonshine-base"
     sample_rate: 16000
     min_confidence: 0.6
 
   speaker:
-    backend: onnx
-    model: speaker/en_GB-alba-medium.onnx
+    backend: process
+    command: python
+    args:
+      - "examples/interpreters/speech_backends.py"
+      - "speak"
+      - "models/speaker/en_GB-alba-medium.onnx"
     sample_rate: 22050
+
+  # The explainer needs no model. RecordExplainer produces text from the
+  # decision record, which is accurate though stilted. A language model here
+  # improves the wording, not the facts.
+  explainer:
+    backend: none

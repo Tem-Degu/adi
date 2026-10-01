@@ -1,0 +1,24 @@
+# Python packages for the model backends.
+#
+# The SDK itself needs none of this. These are only for the backends in
+# examples/interpreters/, which serve the model seams as separate programs.
+# A manufacturer supplying their own backends, in any language, needs none of
+# it either.
+#
+#     pip install -r requirements.txt
+#
+# Then obtain the model files. `adi models check` reports what is missing and
+# where to get it.
+
+# Understanding: runs a GGUF language model, with grammar constrained output
+# so the model cannot emit anything outside the schema.
+llama-cpp-python>=0.3,<0.4
+
+# Hearing: Moonshine through ONNX Runtime.
+useful-moonshine-onnx>=0.2,<1.0
+
+# Speaking: Piper, which handles phonemisation internally.
+piper-tts>=1.2,<2.0
+
+# Used by the backends for audio handling.
+numpy>=1.24

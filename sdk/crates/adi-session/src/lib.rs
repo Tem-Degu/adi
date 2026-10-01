@@ -19,6 +19,7 @@
 //! under ADI-P 9.2 a refused invocation is recorded as an engine defect, and a
 //! manufacturer counting those is counting ours.
 
+pub mod child;
 pub mod transport;
 
 use std::collections::BTreeMap;
@@ -33,6 +34,7 @@ use adi_protocol::units::Quantity;
 use adi_safety::{Guard, SafetyState};
 use adi_wire::{Message, Outcome};
 
+pub use child::ChildAppliance;
 pub use transport::{Recorded, Transport};
 
 #[derive(Debug, thiserror::Error)]
@@ -424,10 +426,28 @@ impl<'a> Session<'a> {
     /// seconds where it asked for steps, and it correctly refuses. The
     /// conformance runner had this same confusion once.
     fn current_settings(&self, cycle: &Cycle) -> BTreeMap<String, Quantity> {
-        cycle
-            .settings
-            .iter()
-            .map(|(variable, value)| (variable.0.clone(), *value))
-            .collect()
+        let mut current = BTreeMap::new();
+
+        for (variable, value) in &cycle.settings {
+            // Under its own name first, which covers the case where a cycle
+            // records a setting by the parameter that sets it.
+            current.insert(variable.0.clone(), *value);
+
+            // And under any parameter name the variable ends with. A cycle
+            // naturally records `grind_setting` while the tool that moves it
+            // declares a parameter called `setting`, and a planner asked for
+            // `setting` would otherwise find nothing and refuse a correction
+            // it could have made. The conformance runner resolves it the same
+            // way; this exists so the two agree.
+            for tool in &self.declaration.tools {
+                for parameter in tool.parameters.keys() {
+                    if variable.0 != *parameter && variable.0.ends_with(parameter.as_str()) {
+                        current.entry(parameter.clone()).or_insert(*value);
+                    }
+                }
+            }
+        }
+
+        current
     }
 }

@@ -13,6 +13,7 @@ dependencies = [
  "adi-models",
  "adi-protocol",
  "adi-safety",
+ "adi-session",
  "adi-wire",
  "clap",
  "serde",

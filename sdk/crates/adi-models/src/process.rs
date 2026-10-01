@@ -87,6 +87,10 @@ struct Pipe {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    /// Kept for error messages. A program that starts and immediately exits
+    /// reports only that its output closed, which says nothing about which
+    /// program. On Windows `python3` is a store shim that does exactly this.
+    command: String,
 }
 
 impl ProcessInterpreter {
@@ -125,6 +129,7 @@ impl ProcessInterpreter {
                 child,
                 stdin,
                 stdout: BufReader::new(stdout),
+                command: command.to_string(),
             }),
             budget,
             knowledge_styles: styles,
@@ -155,19 +160,21 @@ impl ProcessInterpreter {
             .map_err(|e| ModelError::Backend(format!("could not read the reply: {e}")))?;
 
         if read == 0 {
-            return Err(ModelError::Backend("the program closed its output".into()));
+            return Err(ModelError::Backend(format!(
+                "'{}' produced no output and exited. Check that the command exists and                  that the script path is correct; on Windows, 'python3' is often a store                  shim that exits immediately, and 'python' is the working command.",
+                pipe.command
+            )));
         }
 
         // A program that returns something outside the schema is refused
         // rather than guessed at. This is the boundary 9.3 requirement 3
         // describes, and it holds whether or not the program constrained its
         // own decoding.
-        serde_json::from_str(reply.trim()).map_err(|e| {
-            ModelError::Backend(format!(
-                "the reply is not a valid answer: {e}; got {}",
-                reply.trim()
-            ))
-        })
+        //
+        // Parsed tolerantly as to where the JSON begins and ends, because a
+        // program wrapping a model will often return it fenced or prefaced,
+        // and strictly as to what it contains. See crate::parse.
+        crate::parse::understood(&reply)
     }
 }
 
