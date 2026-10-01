@@ -292,9 +292,8 @@ request**.
 
 Published latency figures are measured on other hardware with other prompts, so
 they do not transfer. `adi models bench` runs the evaluation corpus against your
-configured interpreter on the board in front of you and reports how often the
-answer was correct and what each request cost. Run it before committing to a
-board, because this is the one decision that is expensive to revisit.
+configured interpreter on the board and reports how often the answer was correct
+and what each request cost. Run it before committing to a board.
 
 Storage depends on which models are installed. A speech recogniser, an
 interpreter and a synthesiser together are roughly 1 to 3 GB at the quantisations
