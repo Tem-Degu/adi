@@ -50,8 +50,9 @@ The model turns speech into structured intent at every level including D0, and
 explains afterwards at every level. What the level grades is what happens after
 intent.
 
-D2 is the default because a machine limited to what someone anticipated in
-advance cannot serve a request nobody wrote down. The safety of a
+D2 is the default because the alternative confines the machine to the
+situations its developers enumerated in advance, and the useful requests are
+frequently the ones outside that set. The safety of a
 model-chosen magnitude does not rest on trusting the model: the engine clamps it
 to the declared range and snaps it to the declared resolution, and the appliance
 validates it again independently. A plan failing any check is refused whole.
