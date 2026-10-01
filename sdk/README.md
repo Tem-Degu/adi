@@ -147,10 +147,11 @@ The model turns speech into structured intent at every level, including D0, and
 explains afterwards at every level. What the level grades is what happens after
 intent.
 
-D2 is the default because a machine that can only do what someone anticipated in
-advance is a program with a microphone attached. It refuses to initialise
-against a declaration without stateful invariants and rate limits, and that
-refusal is the point of the level system rather than an inconvenience.
+D2 is the default because an engine choosing on its own can only act on
+situations someone expressed as a rule beforehand, and a model can act on a
+request, or a cycle, that no rule describes. It refuses to initialise against a
+declaration without stateful invariants and rate limits, and that refusal is the
+point of the level system rather than an inconvenience.
 
 A model-driven level needs a **chooser**: the component that asks a model which
 declared action serves a goal, and at D2 what value to send. `ProcessChooser`
@@ -423,6 +424,57 @@ real weights**, because the machine they were written on cannot hold them.
 **Implement the trait.** `adi-language` defines the four seams as traits. A
 manufacturer shipping at volume implements them directly against their own
 runtime.
+
+### Wiring a microphone and a speaker
+
+The SDK handles sound once it is samples and once it has produced samples. Moving
+those to and from a device is yours, because an output device, a microphone and
+the library that drives them belong to a product and a platform rather than to a
+protocol.
+
+Two methods are the whole interface.
+
+```rust
+use adi_language::{Audio, Language};
+
+// Build it once, from whichever backends your configuration names.
+let language = Language::new(transcriber, interpreter, explainer, speaker);
+
+// Someone spoke. Your capture code produced i16 mono samples.
+let audio = Audio::new(samples, 16_000);
+let understood = language.understand(&audio, &context)?;
+
+// A decision was made. Hand the samples to your output device.
+let (text, spoken) = language.report(&record)?;
+```
+
+`understand` transcribes, checks the result, and interprets in one step. A
+transcript the backend is not confident in comes back as a question rather than
+an intent, which matters more here than anywhere else: mishearing "hotter" as
+"shorter" is a physical action on a machine with a heating element, and a
+transcript is the one place where a wrong word is indistinguishable downstream
+from a right one. The threshold is `min_transcript_confidence`, which defaults to
+0.6 rather than something near certainty, because speech recognition over a
+grinder is not a quiet-room benchmark and the cost of asking again is a second of
+someone's time against a wasted drink.
+
+What you supply:
+
+**Samples in the rate the transcriber wants.** `transcriber.required_sample_rate()`
+says which, and `understand` refuses a mismatch rather than resampling, since
+resampling badly is worse than refusing. Signed 16 bit, mono.
+
+**A decision about when to listen.** A button, a wake word, voice activity
+detection. The SDK has no opinion and should not: a button on a commercial
+machine and a wake word on a domestic one are different products, and neither
+belongs in a protocol.
+
+**Playback.** `report` returns the words alongside the samples, so a build with
+no synthesis configured still has something to display.
+
+What the SDK will not do for you is capture, playback, resampling, echo
+cancellation or noise suppression. Those are the parts that need the device in
+front of you, and no worked example against a real audio library is supplied yet.
 
 ### When something is refused
 

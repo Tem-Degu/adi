@@ -285,8 +285,9 @@ ranking but never on evidence, and the level is decorative.
 sequence rather than a single action, and the engine verifies the whole plan
 before any physical action.
 
-D2 is the default because a machine that can only do what someone anticipated in
-advance is a program with a microphone attached. The safety of a model-chosen
+D2 is the default because an engine choosing on its own can only act on
+situations someone expressed as a rule beforehand, and a model can act on a
+request, or a cycle, that no rule describes. The safety of a model-chosen
 magnitude does not rest on trusting the model: it is clamped to the declared
 range and snapped to the declared resolution by the engine, and validated again
 independently by the appliance under §9.2. A plan that fails any check is

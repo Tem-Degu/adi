@@ -104,7 +104,7 @@ argument is present, in range and in the declared unit, no interlock blocks
 it, the preconditions hold, and the sequence constraints are satisfied.
 
 **4. Declare it.** One entry in a data file, stating the name, the
-parameters, their limits, and the conditions under which the tool may run.
+parameters, their limits, the description, and the conditions under which the tool may run.
 
 ```yaml
 tools:
@@ -357,6 +357,8 @@ Not yet done:
 - **No audio capture or playback.** Speech synthesis writes a file and
   transcription reads one. Driving a microphone and a speaker needs a platform
   library and a device, which belongs in a product rather than in this SDK.
+  `sdk/README.md` sets out what an integrator supplies and what the SDK handles,
+  and no worked example against a real audio library is provided yet.
 - **Models run beside the engine rather than inside it.** The engine starts
   them and exchanges one message per line, so a developer supplies model files
   and writes no code. Backends that load models through ONNX Runtime and
