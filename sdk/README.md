@@ -21,7 +21,7 @@ cargo build --release
 cd c && make example && cd ..
 
 # 2. Drive a real appliance
-cargo run -p adi-cli -- run
+cargo run -p adi-cli -- run --level d0
 ```
 
 At the prompt, type `cycle`. The engine observes a finished cycle, diagnoses
@@ -29,7 +29,8 @@ it, plans a correction, checks it against the safety envelope, and sends it to
 a real `libadip` build running as a separate process. Type `help` for the
 other commands.
 
-No models are required for this. The reasoning path is deterministic.
+`--level d0` is the deterministic level and needs no model. The default is
+D2; see [Autonomy levels](#autonomy-levels).
 
 ### Adding speech
 
@@ -40,7 +41,9 @@ adi models check                 # reports each missing file and its source
 cargo run -p adi-cli -- run --config models/models.example-local.yaml
 ```
 
-Now a request can be typed in words rather than given as a command.
+This runs at D2, the default: a model turns speech into a structured request,
+chooses which declared action serves it, and proposes the value. The engine
+clamps and checks everything before it is sent.
 
 ---
 
@@ -300,16 +303,15 @@ explainer works without any model, producing text from the decision record.
 
 ## Status
 
-| | |
-|---|---|
-| Rust tests | 298 |
-| C checks | 322 across six binaries |
-| Conformance | 9 passing |
-| Appliance footprint | 12212 B flash, 0 data, 0 bss, against a 16 KB budget |
+Pre-release. The specification is stable, both implementations exchange
+messages over a transport, and a cycle runs end to end: observe, diagnose,
+plan, check the safety envelope, invoke, record, remember. All three autonomy
+levels run against a real appliance.
 
-The specification is complete. Both implementations exchange messages over a
-transport, and a cycle runs end to end: observe, diagnose, plan, check the
-safety envelope, invoke, record, remember.
+The appliance library occupies roughly 12 KB of flash with no static or heap
+allocation, against the 16 KB budget stated in [`c/DESIGN.md`](./c/DESIGN.md).
+That figure is measured on x86-64 and is expected to be smaller on a
+Cortex-M target.
 
 ### Current limitations
 

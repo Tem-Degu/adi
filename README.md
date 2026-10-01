@@ -81,12 +81,6 @@ appliance, and the conformance corpus that holds them to the specification.
 | [`sdk/`](./sdk/) | The implementation. A domain-neutral engine plus espresso as the first profile. |
 | [`sdk/c/`](./sdk/c/) | **`libadip`**, the appliance SDK. Freestanding C99, no allocation, no floating point, around 12 KB of flash. This is the half that runs on the machine. |
 
-
-The engine runs a complete cycle today: observation, diagnosis, planning,
-safety enforcement, invocation, recording and memory. The appliance SDK
-implements the full protocol and is exercised against the engine over a real
-transport on every build. See [Status](#status) for what is not finished.
-
 ## Running it
 
 Requires a Rust toolchain and a C compiler.
@@ -96,17 +90,21 @@ cd sdk
 cargo build --release
 cd c && make example && cd ..
 
-cargo run -p adi-cli -- run
+cargo run -p adi-cli -- run --level d0
 ```
 
 This starts the example appliance as a separate process, opens a session
 against it, and presents a prompt. Typing `cycle` observes a finished cycle:
 the profile diagnoses it, the engine plans a correction, the safety envelope
-checks the plan, and the appliance accepts the invocation. No model is
-required, because the reasoning path is deterministic.
+checks the plan, and the appliance accepts the invocation.
 
-Speech requires three model files and a configuration flag. See
-[`sdk/README.md`](./sdk/README.md).
+`--level d0` is the deterministic level, where the engine chooses both the
+action and the value, and no model is involved. The default is D2, where a
+model chooses both; it requires a model backend and refuses rather than
+running at a lower level than it reports.
+
+Speech and the model-driven levels need model files and a configuration flag.
+See [`sdk/README.md`](./sdk/README.md).
 
 To run the test suites and the conformance corpus:
 
@@ -122,29 +120,23 @@ model backend.
 
 ## Status
 
-The specification is complete. Both implementations exchange messages over a
-transport, and a cycle runs end to end: observe, diagnose, plan, check the
-safety envelope, invoke, record, remember.
+Pre-release. The specification is stable, both implementations exchange
+messages over a transport, and a cycle runs end to end: observe, diagnose,
+plan, check the safety envelope, invoke, record, remember. All three autonomy
+levels run against a real appliance.
 
-| | |
-|---|---|
-| Rust tests | 298 |
-| C checks | 322 |
-| Conformance corpus | 9 passing |
-| Appliance footprint | 12212 B flash, 0 data, 0 bss |
+The appliance library occupies roughly 12 KB of flash with no static or heap
+allocation, measured on x86-64.
 
-Current limitations:
+Not yet done:
 
-- **No model runs inside the engine.** Models run as separate programs
-  alongside it, started by the engine and exchanging one message per line.
-  Backends for speech, understanding and voice are supplied, so a developer
-  writes no code, but the two that load real models have not yet been run
-  against real weights. In-process llama.cpp and ONNX Runtime backends are not
-  written; see `sdk/README.md`.
+- **Models run beside the engine rather than inside it.** The engine starts
+  them and exchanges one message per line, so a developer supplies model files
+  and writes no code. Backends that load models through ONNX Runtime and
+  llama.cpp directly are not implemented.
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic.
-- **No microcontroller port.** `libadip` is tested on a host. The footprint
-  above is an x86-64 measurement.
+- **No microcontroller port.** `libadip` is developed and tested on a host.
 
 See [`ROADMAP.md`](./ROADMAP.md) and [`sdk/README.md`](./sdk/README.md) for
 detail.
