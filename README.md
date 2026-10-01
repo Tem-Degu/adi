@@ -94,9 +94,10 @@ safety envelope, invoke, record, remember.
 
 Current limitations:
 
-- **No model backends are linked.** The four model seams are defined and
-  tested, and an external program can serve any of them through the process
-  backend. The in-process llama.cpp and ONNX Runtime backends are not written.
+- **No model runs inside the engine.** The in-process llama.cpp and ONNX
+  Runtime backends are not written. Three of the four model seams can be
+  served today by an external program over a line protocol, and the fourth
+  needs no model, so a complete voice path is reachable without them.
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic.
 - **No microcontroller port.** `libadip` is tested on a host. The footprint

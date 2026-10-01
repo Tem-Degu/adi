@@ -1,32 +1,38 @@
-# Which file serves which seam.
+# Which file or program serves which seam.
 #
-# Copy this, point it at what you have, and pass it to the engine. A seam left
-# as `none` reports itself missing rather than failing: ADI-P 9.4.2 permits an
-# engine to ship without a model provided it names what it cannot do.
+# This ships with every seam unconfigured, which is a supported state: an
+# engine refuses the operations an unserved seam provides and names the seam,
+# rather than failing.
 #
-# `adi models check --config models/models.yaml` reports the result.
+# Two templates are provided. Copy the parts you need into this file.
+#
+#   models.example-process.yaml   a seam served by an external program. This
+#                                 works today and is how a model of your own
+#                                 choosing is used.
+#
+#   models.example-local.yaml     a seam served by a model file loaded into
+#                                 the engine. The llama and onnx backends are
+#                                 not implemented, so this is the intended
+#                                 shape rather than a working configuration.
+#
+# Check the result with:
+#
+#   adi models check --config models/models.yaml
 
 root: .
 
 seams:
-  interpreter:
-    backend: llama
-    model: interpreter/qwen3-1.7b-instruct-q4_k_m.gguf
-    context_tokens: 2048
-
   transcriber:
-    backend: onnx
-    model: transcriber/moonshine-base.onnx
-    sample_rate: 16000
-    min_confidence: 0.6
+    backend: none
+
+  interpreter:
+    backend: none
+
+  # The explainer needs no model. RecordExplainer produces text from the
+  # decision record, which is stilted but accurate, and a screen or a log can
+  # show it. A language model here improves the wording, not the facts.
+  explainer:
+    backend: none
 
   speaker:
-    backend: onnx
-    model: speaker/en_GB-alba-medium.onnx
-    sample_rate: 22050
-
-  # The explainer shares the interpreter's model by default. A second language
-  # model resident on an appliance costs a gigabyte or more to produce a
-  # different kind of sentence from the same decision record.
-  explainer:
     backend: none

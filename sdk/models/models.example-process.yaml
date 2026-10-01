@@ -1,23 +1,42 @@
-# A model that is another program.
+# Seams served by external programs.
 #
-# The engine writes one JSON request per line on the program's standard input
-# and reads one JSON answer per line from its standard output. The answer is
-# the shape described by `adi-models::schema::UNDERSTOOD_SCHEMA`: either an
-# intent or a question.
+# This works today. The engine writes one JSON request per line on each
+# program's standard input and reads one JSON answer per line from its
+# standard output. A program needs no dependency on this SDK and may be
+# written in any language.
 #
-# Nothing about the program is our concern. It may be a script, another
-# runtime, or a service reached by something else. It needs no dependency on
-# this SDK.
+#   interpreter  -> {"utterance":"half of last time","styles":[...]}
+#                <- {"intent":{"kind":"produce","targets":{...}}}
+#                or {"clarify":{"question":"...","because":"..."}}
 #
-#   -> {"utterance":"half of last time","styles":[...],"remembered":[...]}
-#   <- {"intent":{"kind":"produce","targets":{"sugar_mass":{"of":"last","scale":0.5}}}}
+#   transcriber  -> {"audio":"<base64>","sample_rate":16000}
+#                <- {"text":"...","confidence":0.91}
 #
-# A program that cannot resolve a request answers with a question instead:
+#   speaker      -> {"text":"..."}
+#                <- {"audio":"<base64>","sample_rate":22050}
 #
-#   <- {"clarify":{"question":"Half of what?","because":"no variable named"}}
+# Audio is base64 of 16-bit signed, little endian, single channel samples.
+#
+# The programs referenced below are working implementations of the protocol
+# and contain no models. Replace them with your own.
+
+root: .
 
 seams:
   interpreter:
     backend: process
     command: python3
-    args: ["my_interpreter.py"]
+    args: ["examples/interpreters/reference.py"]
+
+  transcriber:
+    backend: process
+    command: python3
+    args: ["examples/interpreters/reference_speech.py", "transcribe"]
+    sample_rate: 16000
+    min_confidence: 0.6
+
+  speaker:
+    backend: process
+    command: python3
+    args: ["examples/interpreters/reference_speech.py", "speak"]
+    sample_rate: 22050

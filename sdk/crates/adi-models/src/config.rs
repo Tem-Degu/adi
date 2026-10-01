@@ -36,6 +36,31 @@ pub enum Backend {
     None,
 }
 
+impl Backend {
+    /// Whether code exists that can actually load and run this.
+    ///
+    /// `Llama` and `Onnx` are named in the configuration format and have no
+    /// implementation. Reporting a present file as usable when nothing can
+    /// open it tells an integrator their setup is complete when it is not,
+    /// which is worse than reporting nothing at all.
+    pub fn implemented(self) -> bool {
+        match self {
+            Backend::Process | Backend::Scripted | Backend::None => true,
+            Backend::Llama | Backend::Onnx => false,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Backend::Llama => "llama",
+            Backend::Onnx => "onnx",
+            Backend::Process => "process",
+            Backend::Scripted => "scripted",
+            Backend::None => "none",
+        }
+    }
+}
+
 /// One seam's configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeamConfig {

@@ -145,7 +145,7 @@ different model the ordinary path rather than a special case.
 ### Obtaining them
 
 ```sh
-adi models check
+adi models check --config models/models.yaml
 ```
 
 This reads the folder and reports which seams are served, which files are
@@ -205,10 +205,29 @@ not to restrict what may be loaded.
 
 **Use another program.** The `process` backend runs an external program and
 exchanges one JSON request and one JSON answer per line over its standard
-input and output. The program requires no dependency on this SDK and may be
-written in any language. See `examples/interpreters/reference.py` for a working
-implementation of the protocol and `models/models.example-process.yaml` for
-the configuration.
+input and output. It serves the interpreter, transcriber and speaker seams.
+The program requires no dependency on this SDK and may be written in any
+language.
+
+```
+interpreter  -> {"utterance":"half of last time","styles":[...]}
+             <- {"intent":{"kind":"produce","targets":{...}}}
+             or {"clarify":{"question":"...","because":"..."}}
+
+transcriber  -> {"audio":"<base64>","sample_rate":16000}
+             <- {"text":"...","confidence":0.91}
+
+speaker      -> {"text":"..."}
+             <- {"audio":"<base64>","sample_rate":22050}
+```
+
+Audio is base64 of 16-bit signed, little endian, single channel samples.
+
+`models/models.example-process.yaml` configures all three.
+`examples/interpreters/reference.py` and
+`examples/interpreters/reference_speech.py` are working
+implementations of the protocol, containing no models, intended to be
+replaced one at a time.
 
 **Implement the trait.** `adi-language` defines the four seams as traits. A
 manufacturer shipping at volume implements them directly against their own
@@ -237,10 +256,11 @@ safety envelope, invoke, record, remember.
 
 ### Current limitations
 
-- **No model backends are linked.** The configuration, output schema,
-  provenance and process backend are implemented and tested. The in-process
-  llama.cpp and ONNX Runtime backends are not written. An external program can
-  serve any seam through the `process` backend.
+- **No model runs inside the engine.** The `llama` and `onnx` backends are
+  named in the configuration format and have no implementation; `adi models
+  check` reports this rather than reporting a present model file as ready.
+  Three of the four seams can be served today by an external program through
+  the `process` backend, and the fourth, the explainer, needs no model.
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic. Synthetic
   traces are plausible by construction, which is the condition under which an

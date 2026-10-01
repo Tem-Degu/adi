@@ -9,16 +9,29 @@
 //! costs little and it is the difference between "you may use our models" and
 //! "you may use any model".
 //!
-//! One line in, one line out, both JSON:
+//! One line in, one line out, both JSON. Three of the four seams are served
+//! this way; the explainer needs no model, because `RecordExplainer` produces
+//! text from the decision record.
 //!
 //! ```text
-//! -> {"utterance":"half of last time","styles":[...],"remembered":[...]}
-//! <- {"intent":{"kind":"produce","targets":{...}}}
+//! interpreter  -> {"utterance":"half of last time","styles":[...]}
+//!              <- {"intent":{"kind":"produce","targets":{...}}}
+//!
+//! transcriber  -> {"audio":"<base64 of little endian i16>","sample_rate":16000}
+//!              <- {"text":"half of last time","confidence":0.91}
+//!
+//! speaker      -> {"text":"I have made it finer."}
+//!              <- {"audio":"<base64 of little endian i16>","sample_rate":22050}
 //! ```
 //!
-//! The reply is exactly what `schema::UNDERSTOOD_SCHEMA` describes. A program
-//! that cannot resolve the request replies with a question, which is an
-//! ordinary outcome rather than a failure.
+//! An interpreter's reply is exactly what `schema::UNDERSTOOD_SCHEMA`
+//! describes. A program that cannot resolve a request replies with a question,
+//! which is an ordinary outcome rather than a failure.
+//!
+//! Audio is base64 over a line protocol rather than raw bytes, because a line
+//! protocol that can carry an arbitrary byte is not a line protocol. Samples
+//! are 16-bit signed, little endian, single channel, which is what every
+//! speech model in this space expects and what `Audio` already holds.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};

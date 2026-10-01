@@ -18,11 +18,13 @@ pub mod config;
 pub mod manifest;
 pub mod process;
 pub mod schema;
+pub mod speech;
 pub mod scripted;
 
 pub use config::{Backend, ModelsConfig, SeamConfig};
 pub use manifest::{hash_file, identify, Manifest, Provenance, Published, Seam};
 pub use process::ProcessInterpreter;
+pub use speech::{ProcessSpeaker, ProcessTranscriber};
 pub use schema::{OUTPUT_INSTRUCTION, UNDERSTOOD_SCHEMA};
 pub use scripted::ScriptedInterpreter;
 
@@ -93,6 +95,19 @@ fn survey_one(seam: Seam, config: &ModelsConfig, manifest: &Manifest) -> SeamSta
                 .command
                 .is_none()
                 .then(|| "the process backend names no command".to_string()),
+        },
+
+        // Named in the configuration format, with nothing behind it. Report
+        // that rather than inspecting the file, because a present file is not
+        // a usable seam when no code can open it.
+        backend if !backend.implemented() => SeamStatus {
+            seam,
+            backend,
+            provenance: None,
+            problem: Some(format!(
+                "the '{}' backend is not implemented; use 'process' to serve this seam with an external program",
+                backend.as_str()
+            )),
         },
 
         _ => {

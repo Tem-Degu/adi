@@ -1,0 +1,27 @@
+# A seam served by a model file loaded into the engine.
+#
+# NOT YET USABLE. The llama and onnx backends are named in the configuration
+# format and have no implementation. `adi models check` reports this rather
+# than reporting a present file as ready.
+#
+# This file records the intended shape. To run a model today, use the process
+# backend in models.example-process.yaml.
+
+root: .
+
+seams:
+  interpreter:
+    backend: llama
+    model: interpreter/qwen3-1.7b-instruct-q4_k_m.gguf
+    context_tokens: 2048
+
+  transcriber:
+    backend: onnx
+    model: transcriber/moonshine-base.onnx
+    sample_rate: 16000
+    min_confidence: 0.6
+
+  speaker:
+    backend: onnx
+    model: speaker/en_GB-alba-medium.onnx
+    sample_rate: 22050
