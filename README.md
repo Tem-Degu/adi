@@ -69,15 +69,14 @@ dispensing milk, ejecting the puck.
 
 Three things make one available: the mechanism, a handler that runs it, and one
 entry in a data file. The first two are ordinary appliance engineering and the
-third is data rather than code. In sequence, with the two details that matter:
+third is data rather than code:
 
 **1. Build the mechanism.** A motor, a valve, a heater, driven from a pin.
-Ordinary appliance engineering.
 
 **2. Decide how the firmware knows it finished.** A limit switch, an encoder
-count, a measured mass. A timer that expired is not the same as an action that
-completed, and reporting one as the other is how the engine comes to believe
-something that did not happen.
+count, a measured mass. An expired timer is not evidence of completion, and
+the engine treats a reported completion as fact, so an assumed one leaves it
+reasoning about a state the machine is not in.
 
 **3. Write a handler.** One function, called when a named instruction arrives.
 It starts the mechanism and returns; it does not block. Long operations report
