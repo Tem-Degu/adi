@@ -272,8 +272,7 @@ with no allocation, no recursion and no floating point, so an M0 is enough.
 |---|---|
 | Flash | around 12 KB, measured on x86-64 |
 | RAM | no static or heap allocation. One context of 496 bytes, plus the frame buffers you size |
-| Floating point | not used by the runtime, so no FPU required. One conversion helper exists for a host, behind `ADIP_ENABLE_FLOAT`, and is off by default |
-| RTOS | not required. Three platform functions and one handler |
+| Integration | three platform functions and one handler |
 
 The flash figure is a host measurement. The same code on a Cortex-M is expected
 to be smaller, since this is branch-heavy integer work that Thumb-2 encodes
@@ -283,8 +282,7 @@ compactly, and that stays an expectation until it runs on a board.
 
 The engine is Rust on an applications processor. What governs the choice is not
 the reasoning, which is small, but **how long the model takes to interpret a
-request**, since a person waiting four seconds for a machine to understand them
-will stop talking to it.
+request**.
 
 | Tier | Board class | Interpreter | Suits |
 |---|---|---|---|
@@ -302,14 +300,13 @@ Storage depends on which models are installed. A speech recogniser, an
 interpreter and a synthesiser together are roughly 1 to 3 GB at the quantisations
 above.
 
-### What is not required
+The named tiers are measured on general-purpose cores, so an accelerator is an
+optimisation and not a prerequisite. A dedicated NPU shortens the interpreter's
+response time where a board has one.
 
-No network, no accelerator, and no cloud account. A dedicated NPU helps the
-interpreter and is not needed: the tiers above are measured on general-purpose
-cores.
-
-Nothing above covers a microphone or a speaker. See
-[`sdk/README.md`](./sdk/README.md) for what an integrator supplies there.
+A microphone and a speaker are the integrator's to drive.
+[`sdk/README.md`](./sdk/README.md) sets out what the SDK handles and what they
+supply.
 
 ## Running it
 
