@@ -4,7 +4,7 @@ Artificial Domain Intelligence is an approach to making physical machines
 intelligent and capable within the thing they are built to do (their domain).
 A machine measures what it just produced, determines what was wrong with it,
 corrects itself, and accepts spoken instruction from the person using it. It
-acts on the machine directly rather than offering advice for the person to
+acts on the machine directly instead of offering advice for the person to
 carry out.
 
 It also holds the knowledge of its domain, so a person can ask it questions and
@@ -39,8 +39,8 @@ The intelligence acts only by invoking actions from that declaration. It
 cannot perform an action the manufacturer never built, cannot send a value
 outside a declared range, and cannot breach a limit the appliance enforces in
 its own firmware. This is the Safe Action Protocol, and its consequence is
-that safety is a property of the declared action surface rather than of a
-model behaving correctly.
+that safety is a property of the declared action surface, not of a model
+behaving correctly.
 
 A complete cycle:
 
@@ -144,7 +144,7 @@ numbers out of it: how far the mechanism moves an outcome belongs in step 5.
 
 **5. Optionally, describe its effect.** A separate file states how much the
 mechanism moves a result, which is what lets the engine size a correction
-rather than guess at one. A tool with no such entry remains callable; it is
+instead of guessing at one. A tool with no such entry remains callable; it is
 not selected automatically.
 
 ```yaml
@@ -204,8 +204,8 @@ each takes a number.
 
 The autonomy level states who makes each of those two decisions: the engine,
 working deterministically from the manufacturer's declared effects, or the
-model. It is configuration rather than a separate code path, and it appears in
-every decision record.
+model. It is configuration, not a separate code path, and it appears in every
+decision record.
 
 | Level | Which action | What value |
 |---|---|---|
@@ -220,7 +220,7 @@ what happens between those two points.
 D2 is the default because an engine choosing on its own can only act on
 situations someone expressed as a rule beforehand. A model can act on a
 request, or on a cycle, that no rule describes, which is what allows a person
-to ask for what they want in their own words rather than select from a fixed
+to ask for what they want in their own words instead of selecting from a fixed
 set of options. The safety of a model-chosen value does not depend on the model being right:
 the engine clamps it to the declared range and snaps it to the declared
 resolution, the safety envelope checks the whole plan, and the appliance
@@ -256,8 +256,60 @@ adi-cli        Validator, code generator and development driver.
 Every crate except the domain profile and the command line tool is
 domain-neutral and must remain so. `sdk/check-neutrality.py` enforces this,
 and `sdk/conformance/greenhouse/` tests the abstraction against a domain with
-a very different shape: cycles measured in weeks rather than seconds, feedback
+a very different shape: cycles measured in weeks, not seconds, feedback
 arriving long after the action, and operations that overlap.
+
+## Hardware
+
+Two sides, with very different requirements.
+
+### The appliance side
+
+Whatever microcontroller the machine already has. `libadip` is freestanding C99
+with no allocation, no recursion and no floating point, so an M0 is enough.
+
+| | |
+|---|---|
+| Flash | around 12 KB, measured on x86-64 |
+| RAM | no static or heap allocation. One context of 496 bytes, plus the frame buffers you size |
+| Floating point | not used by the runtime, so no FPU required. One conversion helper exists for a host, behind `ADIP_ENABLE_FLOAT`, and is off by default |
+| RTOS | not required. Three platform functions and one handler |
+
+The flash figure is a host measurement. The same code on a Cortex-M is expected
+to be smaller, since this is branch-heavy integer work that Thumb-2 encodes
+compactly, and that stays an expectation until it runs on a board.
+
+### The module side
+
+The engine is Rust on an applications processor. What governs the choice is not
+the reasoning, which is small, but **how long the model takes to interpret a
+request**, since a person waiting four seconds for a machine to understand them
+will stop talking to it.
+
+| Tier | Board class | Interpreter | Suits |
+|---|---|---|---|
+| Minimal | Raspberry Pi 5, 8 GB | Qwen 3 1.7B Q4 | Evaluation, and a product where a short pause is acceptable |
+| Standard | RK3588 class | Qwen 3 4B Q4 | A premium appliance, where the voice interaction should feel immediate |
+| Custom | Whatever you measure | Any | Measured with `adi models bench` |
+
+Published latency figures are measured on other hardware with other prompts, so
+they do not transfer. `adi models bench` runs the evaluation corpus against your
+configured interpreter on the board in front of you and reports how often the
+answer was correct and what each request cost. Run it before committing to a
+board, because this is the one decision that is expensive to revisit.
+
+Storage depends on which models are installed. A speech recogniser, an
+interpreter and a synthesiser together are roughly 1 to 3 GB at the quantisations
+above.
+
+### What is not required
+
+No network, no accelerator, and no cloud account. A dedicated NPU helps the
+interpreter and is not needed: the tiers above are measured on general-purpose
+cores.
+
+Nothing above covers a microphone or a speaker. See
+[`sdk/README.md`](./sdk/README.md) for what an integrator supplies there.
 
 ## Running it
 
@@ -356,10 +408,10 @@ Not yet done:
 
 - **No audio capture or playback.** Speech synthesis writes a file and
   transcription reads one. Driving a microphone and a speaker needs a platform
-  library and a device, which belongs in a product rather than in this SDK.
+  library and a device, which belongs in a product and not in this SDK.
   `sdk/README.md` sets out what an integrator supplies and what the SDK handles,
   and no worked example against a real audio library is provided yet.
-- **Models run beside the engine rather than inside it.** The engine starts
+- **Models run beside the engine, not inside it.** The engine starts
   them and exchanges one message per line, so a developer supplies model files
   and writes no code. Backends that load models through ONNX Runtime and
   llama.cpp directly are not implemented.
