@@ -13,46 +13,47 @@ The first domain is espresso.
 
 ---
 
-## Documents
+## How it works
 
-| File | What it is |
-|---|---|
-| [`PROTOCOL.md`](./PROTOCOL.md) | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model and the espresso registry. |
-| [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | The practical path through the protocol for a firmware engineer: mechanism, driver, C handler, declaration, and the optional skill entry. |
-| [`ROADMAP.md`](./ROADMAP.md) | The build plan, in phases with gates. |
-| [`sdk/`](./sdk/) | The implementation. A domain-neutral engine plus espresso as the first profile. |
-| [`sdk/c/`](./sdk/c/) | **`libadip`**, the appliance SDK. Freestanding C99, no allocation, no floating point, around 12 KB of flash. This is the half that runs on the machine. |
+An appliance declares what it can physically do: set the grind, dose by mass,
+start extraction, stop at a target weight, dispense milk, eject the puck. Each
+declared action carries its own range, its unit, its resolution and the
+conditions under which it may be used.
 
-## The idea in one paragraph
+The intelligence acts only by invoking actions from that list. It cannot
+perform an action the manufacturer never built, cannot send a value outside a
+declared range, and cannot breach a limit the appliance enforces in its own
+firmware. This is the Safe Action Protocol: safety follows from the shape of
+the action surface rather than from the model behaving well.
 
-A machine publishes a list of what it can physically do. Set the grind, dose by
-mass, start extraction, stop at weight, dispense milk, eject. The intelligence
-acts by invoking those declared actions and nothing else. It cannot take an
-action nobody built, cannot exceed a declared range, and cannot breach a limit
-the appliance enforces in its own firmware. That is Safe Action Protocol, and it
-means safety is a property of the action surface rather than of the model
-behaving well.
+The engine observes what the machine produced, identifies what was wrong,
+plans a correction, checks the whole plan against a safety envelope, and
+records every value it used along with the layer it came from. A language
+model turns speech into a structured request and phrases an explanation
+afterwards. It does not choose which action to take at the lower autonomy
+levels, and the values it proposes at the highest level are clamped to the
+declared range and validated independently by the appliance.
 
 A manufacturer describes their machine in two data files and implements the
 actions in their existing firmware, in their own language, on their own
-schedule. No reasoning, no models and no domain knowledge are implemented on
-their side. Anything they invent works the day they declare it, with no release
-from us.
+release schedule. They implement no reasoning, no models and no domain
+knowledge. An action they invent works the day they declare it, without a
+release from us.
 
 ## Architecture
 
 Two halves, one protocol.
 
-**On the appliance**, a microcontroller runs `libadip`: framing, decode,
-validation, the stateful envelope and the failsafe, from tables compiled out of
-the manufacturer's own declaration. A manufacturer implements three port
-functions and one handler. Nothing else.
+**On the appliance**, a microcontroller runs `libadip`: framing, decoding,
+validation, the stateful envelope and the failsafe, driven by tables compiled
+from the manufacturer's own declaration. The manufacturer implements three
+port functions and one invocation handler.
 
 **On the module**, an applications processor runs the engine:
 
 ```
 adi-protocol   Wire types. Declaration, skill, knowledge, intent, invocation.
-adi-wire       ADI-P 10.2 encoding. Matches libadip byte for byte.
+adi-wire       ADI-P 10.2 encoding, verified against libadip.
 adi-safety     Safe Action Protocol. Envelope, invariants, rate limits.
 adi-core       The reasoning. Cycle, targets, diagnosis, correction.
 adi-decision   Autonomy levels D0, D1 and D2 behind one selector trait.
@@ -67,17 +68,57 @@ way. `sdk/check-neutrality.py` enforces it, and `sdk/conformance/greenhouse/`
 exists to verify the abstraction against a domain with a very different
 shape.
 
-## Build
+## What is in this repository
 
-Requires a Rust toolchain.
+The specification, both halves of the implementation, a worked example
+appliance, and the conformance corpus that holds them to the specification.
+
+| File | What it is |
+|---|---|
+| [`PROTOCOL.md`](./PROTOCOL.md) | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model and the espresso registry. |
+| [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | The practical path through the protocol for a firmware engineer: mechanism, driver, C handler, declaration, and the optional skill entry. |
+| [`ROADMAP.md`](./ROADMAP.md) | The build plan, in phases with gates. |
+| [`sdk/`](./sdk/) | The implementation. A domain-neutral engine plus espresso as the first profile. |
+| [`sdk/c/`](./sdk/c/) | **`libadip`**, the appliance SDK. Freestanding C99, no allocation, no floating point, around 12 KB of flash. This is the half that runs on the machine. |
+
+
+The engine runs a complete cycle today: observation, diagnosis, planning,
+safety enforcement, invocation, recording and memory. The appliance SDK
+implements the full protocol and is exercised against the engine over a real
+transport on every build. See [Status](#status) for what is not finished.
+
+## Running it
+
+Requires a Rust toolchain and a C compiler.
 
 ```sh
 cd sdk
+cargo build --release
+cd c && make example && cd ..
+
+cargo run -p adi-cli -- run
+```
+
+This starts the example appliance as a separate process, opens a session
+against it, and presents a prompt. Typing `cycle` observes a finished cycle:
+the profile diagnoses it, the engine plans a correction, the safety envelope
+checks the plan, and the appliance accepts the invocation. No model is
+required, because the reasoning path is deterministic.
+
+Speech requires three model files and a configuration flag. See
+[`sdk/README.md`](./sdk/README.md).
+
+To run the test suites and the conformance corpus:
+
+```sh
 cargo test --workspace
 python check-neutrality.py
-cargo run -p adi-cli -- validate examples/declarations/ex900.yaml \
-                                --skill examples/declarations/ex900.skill.yaml
+cargo run -p adi-cli -- conformance conformance/espresso/cases --interpreter conformance/espresso/interpreter.yaml
 ```
+
+One corpus case carries a spoken request. Without `--interpreter` it is
+reported as pending rather than failing, since interpreting speech requires a
+model backend.
 
 ## Status
 
@@ -87,17 +128,19 @@ safety envelope, invoke, record, remember.
 
 | | |
 |---|---|
-| Rust tests | 266 |
+| Rust tests | 298 |
 | C checks | 322 |
 | Conformance corpus | 9 passing |
 | Appliance footprint | 12212 B flash, 0 data, 0 bss |
 
 Current limitations:
 
-- **No model runs inside the engine.** The in-process llama.cpp and ONNX
-  Runtime backends are not written. Three of the four model seams can be
-  served today by an external program over a line protocol, and the fourth
-  needs no model, so a complete voice path is reachable without them.
+- **No model runs inside the engine.** Models run as separate programs
+  alongside it, started by the engine and exchanging one message per line.
+  Backends for speech, understanding and voice are supplied, so a developer
+  writes no code, but the two that load real models have not yet been run
+  against real weights. In-process llama.cpp and ONNX Runtime backends are not
+  written; see `sdk/README.md`.
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic.
 - **No microcontroller port.** `libadip` is tested on a host. The footprint

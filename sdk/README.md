@@ -52,7 +52,7 @@ sdk/
 │   ├── adi-protocol/         Wire types. Declaration, skill, knowledge,
 │   │                         intent, invocation. Parsing and validation.
 │   ├── adi-wire/             ADI-P 10.2 message encoding. CBOR and framing,
-│   │                         written to match libadip byte for byte.
+│   │                         verified against libadip.
 │   ├── adi-safety/           Safe Action Protocol. Envelope, stateful
 │   │                         invariants, rate limits, resource accounting.
 │   ├── adi-core/             The reasoning. Cycle, targets, diagnosis,
@@ -288,7 +288,7 @@ explainer works without any model, producing text from the decision record.
 
 | | |
 |---|---|
-| Rust tests | 266 |
+| Rust tests | 298 |
 | C checks | 322 across six binaries |
 | Conformance | 9 passing |
 | Appliance footprint | 12212 B flash, 0 data, 0 bss, against a 16 KB budget |
