@@ -245,6 +245,7 @@ impl<'a> Session<'a> {
             history: &self.history,
             cycle: Some(&cycle),
             memory: Some(&self.memory),
+            rejected: None,
         };
 
         let corrections = decide(
@@ -287,6 +288,7 @@ impl<'a> Session<'a> {
             history: &self.history,
             cycle: None,
             memory: Some(&self.memory),
+            rejected: None,
         };
 
         let corrections = decide(

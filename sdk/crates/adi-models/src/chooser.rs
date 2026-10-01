@@ -49,6 +49,16 @@ struct Request<'a> {
     /// So a program can answer both levels without being configured twice.
     level: &'static str,
     remembered: Vec<String>,
+    /// The rules the answer is checked against.
+    ///
+    /// Sent with every request rather than left to a backend author to
+    /// reproduce. A model asked to satisfy a constraint it was never shown will
+    /// break it, and before this was sent the commonest break, two steps moving
+    /// one variable, failed the cycle outright.
+    constraints: Vec<&'static str>,
+    /// Why the previous answer was refused. Absent on a first attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rejected: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -98,6 +108,18 @@ struct Step {
 }
 
 // --------------------------------------------------------------- the process
+
+/// What a valid answer must satisfy.
+///
+/// Facts about the contract, not persuasion. The engine enforces every one of
+/// these after the fact; sending them lets a model satisfy them first.
+const CONSTRAINTS: &[&str] = &[
+    "Return exactly one step per goal, in the same order as the goals.",
+    "Choose each step by its candidate index. Do not invent a tool name.",
+    "No two steps may move the same variable. ADI-P 9.5: the next cycle could      not then attribute the change to either, and the plan is refused whole.",
+    "Every step needs a value, and it is the absolute setting to send, not a      change. Add your intended change to the candidate's current value.",
+    "Serve every goal or none. A plan missing a goal is refused.",
+];
 
 struct Pipe {
     child: Child,
@@ -182,6 +204,12 @@ impl ProcessChooser {
                 })
                 .collect(),
             level: self.level,
+            constraints: CONSTRAINTS
+                .iter()
+                .copied()
+                .filter(|rule| self.level == "d2" || !rule.starts_with("Every step"))
+                .collect(),
+            rejected: context.rejected,
             remembered: context
                 .memory
                 // No import needed: these are trait methods on a trait

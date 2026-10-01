@@ -94,6 +94,14 @@ pub struct SelectionContext<'a> {
     pub cycle: Option<&'a Cycle>,
     /// What the machine remembers producing.
     pub memory: Option<&'a dyn Memory>,
+    /// Why the previous answer was refused, on a second attempt.
+    ///
+    /// `None` on the first attempt. A chooser that can pass this to a model
+    /// gives it the one thing it needs to correct a recoverable mistake, such
+    /// as two steps moving the same variable. Carried here rather than added to
+    /// the chooser traits so that a chooser which has no use for it is
+    /// unaffected.
+    pub rejected: Option<&'a str>,
 }
 
 /// Hand-written because `dyn Memory` is not `Debug`, and requiring it would
@@ -117,7 +125,14 @@ impl<'a> SelectionContext<'a> {
             history,
             cycle,
             memory: None,
+            rejected: None,
         }
+    }
+
+    /// The same context, carrying why the previous answer was refused.
+    pub fn with_rejection(mut self, reason: &'a str) -> Self {
+        self.rejected = Some(reason);
+        self
     }
 
     pub fn with_memory(mut self, memory: &'a dyn Memory) -> Self {
@@ -582,6 +597,37 @@ pub fn decide(
     context: &SelectionContext<'_>,
     current: &std::collections::BTreeMap<String, Quantity>,
 ) -> Result<Vec<Correction>, DecisionError> {
+    let first = attempt(planner, selector, goals, context, current);
+
+    // One retry, and only for a mistake the model could fix if told what it
+    // was. Before this, a chooser that returned two steps moving the same
+    // variable failed the cycle outright, having never been shown the rule it
+    // broke.
+    //
+    // Retrying a deterministic selector is pointless: D0 would return the same
+    // answer, so the attempt is wasted and the error arrives later than it
+    // should.
+    let Err(error) = first else {
+        return first;
+    };
+    if selector.level() == AutonomyLevel::D0 || !error.is_worth_retrying() {
+        return Err(error);
+    }
+
+    // Bound it at one. A backend that is broken rather than mistaken must
+    // surface as a failure, not as a loop.
+    let reason = error.to_string();
+    let second = context.with_rejection(&reason);
+    attempt(planner, selector, goals, &second, current)
+}
+
+fn attempt(
+    planner: &Planner<'_>,
+    selector: &dyn ActionSelector,
+    goals: &[Goal],
+    context: &SelectionContext<'_>,
+    current: &std::collections::BTreeMap<String, Quantity>,
+) -> Result<Vec<Correction>, DecisionError> {
     check_goals(goals)?;
     let variables: Vec<VariableId> = goals
         .iter()
@@ -645,6 +691,27 @@ pub fn decide_one(
         context,
         current,
     )
+}
+
+impl DecisionError {
+    /// Whether a second attempt could plausibly succeed.
+    ///
+    /// True for a malformed answer: the model proposed something the contract
+    /// refuses, and being told which rule it broke is usually enough.
+    ///
+    /// False for everything structural. No candidate serves the goal, the goals
+    /// themselves are contradictory, the declaration carries no stateful
+    /// envelope, no backend is attached: asking again cannot change any of
+    /// these, and retrying would delay a failure the caller needs to see.
+    fn is_worth_retrying(&self) -> bool {
+        matches!(
+            self,
+            DecisionError::ConflictingSteps { .. }
+                | DecisionError::MalformedSelection(_)
+                | DecisionError::UndeclaredSelection(_)
+                | DecisionError::EmptyPlan
+        )
+    }
 }
 
 /// ADI-P 9.5. Two tools whose effects reach the same variable must not be

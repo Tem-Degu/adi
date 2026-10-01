@@ -7,7 +7,7 @@ __pycache__/
 # ---------------------------------------------------------------- NOT PUBLIC
 #
 # These are excluded from the public repository, not merely from version
-# control. See "What is public" in README.md.
+# control.
 #
 # If you split this into a public repo, verify with:
 #     git ls-files | grep -Ei 'investor|wefunder|deck|whitepaper|build-guide'
@@ -37,6 +37,7 @@ TODO.md
 PLAN.md
 MODELS-PLAN.md
 PATH-A-RUST.md
+FIXES-PLAN.md
 *.bak
 *~
 .DS_Store

@@ -347,6 +347,7 @@ fn run_case(
                 history: &[],
                 cycle: None,
                 memory: None,
+            rejected: None,
             };
 
             match interpreter.interpret(words, &context) {

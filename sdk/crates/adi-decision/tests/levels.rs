@@ -378,6 +378,141 @@ fn a_plan_moving_one_variable_twice_is_refused() {
     assert!(matches!(err, DecisionError::ConflictingSteps { .. }));
 }
 
+/// A chooser that proposes a conflicting plan and then a valid one succeeds.
+///
+/// Before the retry existed this failed the whole cycle. The model had never
+/// been shown ADI-P 9.5 and got no chance to correct a mistake that a single
+/// sentence of feedback resolves.
+#[test]
+fn a_recoverable_mistake_gets_one_more_attempt() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// Conflicts on the first call and answers properly on the second.
+    ///
+    /// The counters are shared with the test rather than held inside, so the
+    /// test can assert a retry happened. Asserting only the result would pass
+    /// if the first attempt had somehow succeeded, proving nothing about the
+    /// retry this test exists for.
+    struct ConflictsOnce {
+        calls: Rc<Cell<usize>>,
+        saw_rejection: Rc<Cell<bool>>,
+    }
+
+    impl ActionChooser for ConflictsOnce {
+        fn choose(
+            &self,
+            _: &[adi_decision::Goal],
+            _: &[Candidate],
+            context: &SelectionContext<'_>,
+        ) -> Result<Vec<ProposedStep>, String> {
+            self.calls.set(self.calls.get() + 1);
+
+            if self.calls.get() == 1 {
+                assert!(
+                    context.rejected.is_none(),
+                    "a first attempt carries no rejection"
+                );
+                // Two steps, both moving cycle_time.
+                return Ok(vec![
+                    ProposedStep { candidate: 0, value: 25.0 },
+                    ProposedStep { candidate: 1, value: 10.0 },
+                ]);
+            }
+
+            self.saw_rejection.set(context.rejected.is_some());
+            Ok(vec![ProposedStep { candidate: 0, value: 25.0 }])
+        }
+    }
+
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    let calls = Rc::new(Cell::new(0));
+    let saw_rejection = Rc::new(Cell::new(false));
+    let selector = ModelActionSelector::new(
+        ConflictsOnce {
+            calls: Rc::clone(&calls),
+            saw_rejection: Rc::clone(&saw_rejection),
+        },
+        &d,
+    )
+    .unwrap();
+
+    let out = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present())
+        .expect("the second attempt should succeed");
+
+    assert_eq!(calls.get(), 2, "the chooser should have been asked twice");
+    assert!(
+        saw_rejection.get(),
+        "the second attempt must be told why the first was refused"
+    );
+    assert_eq!(out.len(), 1, "one correction from the valid second plan");
+}
+
+/// The retry is bounded at one. A backend that is broken rather than mistaken
+/// must surface as a failure, not loop.
+#[test]
+fn a_chooser_that_always_conflicts_fails_after_exactly_two_attempts() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct AlwaysConflicts(Rc<Cell<usize>>);
+
+    impl ActionChooser for AlwaysConflicts {
+        fn choose(
+            &self,
+            _: &[adi_decision::Goal],
+            _: &[Candidate],
+            _: &SelectionContext<'_>,
+        ) -> Result<Vec<ProposedStep>, String> {
+            self.0.set(self.0.get() + 1);
+            Ok(vec![
+                ProposedStep { candidate: 0, value: 25.0 },
+                ProposedStep { candidate: 1, value: 10.0 },
+            ])
+        }
+    }
+
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    let calls = Rc::new(Cell::new(0));
+    let selector = ModelActionSelector::new(AlwaysConflicts(Rc::clone(&calls)), &d).unwrap();
+    let err = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present())
+        .expect_err("a plan that always conflicts must fail");
+
+    assert_eq!(calls.get(), 2, "exactly two attempts, never a third");
+    assert!(matches!(err, DecisionError::ConflictingSteps { .. }), "{err:?}");
+}
+
+/// D0 is deterministic, so a retry would ask the same question and receive the
+/// same answer. Retrying it would delay a failure the caller needs to see.
+#[test]
+fn a_deterministic_selector_is_not_retried() {
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    // Two goals on one variable is refused before any selector is consulted,
+    // which is the behaviour being preserved: D0 must fail on its own terms.
+    let err = adi_decision::decide(
+        &planner,
+        &EngineSelector,
+        &[goals()[0].clone(), goals()[0].clone()],
+        &ctx(),
+        &present(),
+    )
+    .expect_err("duplicate goals must be refused");
+
+    assert!(matches!(err, DecisionError::DuplicateGoal(_)), "{err:?}");
+}
+
 /// A plan that is wrong in its last step must perform none of its first.
 #[test]
 fn a_plan_with_a_bad_step_performs_nothing() {

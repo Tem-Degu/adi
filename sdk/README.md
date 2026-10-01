@@ -257,7 +257,8 @@ not to restrict what may be loaded.
 
 **Use another program.** The `process` backend runs an external program and
 exchanges one JSON request and one JSON answer per line over its standard
-input and output. It serves the interpreter, transcriber and speaker seams.
+input and output. It serves the interpreter, chooser, transcriber and speaker
+seams.
 The program requires no dependency on this SDK and may be written in any
 language.
 
@@ -265,6 +266,12 @@ language.
 interpreter  -> {"utterance":"half of last time","styles":[...]}
              <- {"intent":{"kind":"produce","targets":{...}}}
              or {"clarify":{"question":"...","because":"..."}}
+
+chooser      -> {"goals":[{"variable":"shot_time","delta":-3.0,...}],
+                 "candidates":[{"index":0,"tool":"...","variable":"shot_time",
+                                "per_unit":-1.4,"current":24,...}],
+                 "level":"d2","constraints":[...]}
+             <- {"steps":[{"candidate":0,"value":21}]}
 
 transcriber  -> {"audio":"<base64>","sample_rate":16000}
              <- {"text":"...","confidence":0.91}
@@ -274,6 +281,14 @@ speaker      -> {"text":"..."}
 ```
 
 Audio is base64 of 16-bit signed, little endian, single channel samples.
+
+A chooser answers with an index into the candidate list the engine supplied, so
+it cannot name a tool the machine does not declare. `constraints` states the
+rules the answer is checked against, including that no two steps may move the
+same variable, so a backend author does not have to reproduce them. Where an
+answer is refused for a reason the model could fix, the engine asks once more
+with a `rejected` field explaining why. At D2 a value is the absolute setting to
+send, not a change, which is why each candidate carries its `current` value.
 
 Two sets of backends are supplied.
 

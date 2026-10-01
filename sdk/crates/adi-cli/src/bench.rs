@@ -96,6 +96,7 @@ fn run(
         history: &[],
         cycle: None,
         memory: None,
+    rejected: None,
     };
 
     for case in &corpus.cases {

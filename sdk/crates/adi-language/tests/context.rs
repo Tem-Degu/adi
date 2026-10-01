@@ -81,6 +81,7 @@ fn the_model_is_given_what_the_protocol_requires() {
         history: &history,
         cycle: None,
         memory: Some(&memory),
+        rejected: None,
     };
 
     let assembled = ModelContext::assemble(
@@ -110,6 +111,7 @@ fn only_the_most_recent_cycles_are_offered() {
         history: &[],
         cycle: None,
         memory: Some(&memory),
+        rejected: None,
     };
 
     let budget = ContextBudget {
@@ -134,6 +136,7 @@ fn the_budget_is_enforced_however_much_is_remembered() {
         history: &history,
         cycle: None,
         memory: Some(&memory),
+        rejected: None,
     };
 
     let budget = ContextBudget {
@@ -162,6 +165,7 @@ fn truncation_drops_history_before_it_drops_memory() {
         history: &history,
         cycle: None,
         memory: Some(&memory),
+        rejected: None,
     };
 
     // Tight enough to force a drop, loose enough that not everything goes.
@@ -195,6 +199,7 @@ fn what_was_dropped_is_reported() {
         history: &history,
         cycle: None,
         memory: Some(&memory),
+        rejected: None,
     };
 
     let tight = ContextBudget {
@@ -217,6 +222,7 @@ fn an_empty_memory_is_not_an_error() {
         history: &[],
         cycle: None,
         memory: None,
+        rejected: None,
     };
 
     let assembled = ModelContext::assemble(

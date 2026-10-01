@@ -251,6 +251,7 @@ fn request(
         history: session.history(),
         cycle: None,
         memory: Some(session.memory()),
+        rejected: None,
     };
 
     match interpreter.interpret(words, &context)? {

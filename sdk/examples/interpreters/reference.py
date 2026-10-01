@@ -197,6 +197,17 @@ def choose(request):
     candidates = request.get("candidates", [])
     steps = []
 
+    # The engine states its rules in the request, and refusing to read them is
+    # how a plan gets rejected for breaking one that was sent. On a second
+    # attempt it also sends why the first was refused.
+    if request.get("rejected"):
+        sys.stderr.write("previous answer refused: {}\n".format(request["rejected"]))
+
+    # ADI-P 9.5: no two steps may move the same variable. Tracked rather than
+    # assumed, because two goals can share a candidate when the skill declares
+    # a response for each.
+    taken = set()
+
     for goal in request.get("goals", []):
         variable = goal.get("variable")
 
@@ -207,7 +218,13 @@ def choose(request):
             # and the selector refuses on the count.
             return {"steps": []}
 
-        best = max(serving, key=lambda c: c.get("confidence", 0.0))
+        # Skip any candidate whose variable another step already moves.
+        available = [c for c in serving if c.get("variable") not in taken]
+        if not available:
+            return {"steps": []}
+
+        best = max(available, key=lambda c: c.get("confidence", 0.0))
+        taken.add(best.get("variable"))
         step = {"candidate": best["index"]}
 
         if request.get("level") == "d2":
