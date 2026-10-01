@@ -166,13 +166,14 @@ The model turns speech into a structured request at every level, including D0,
 and explains the outcome afterwards at every level. The level governs only
 what happens between those two points.
 
-D2 is the default because the alternative confines the machine to the
-situations its developers enumerated in advance, and the useful requests are
-frequently the ones outside that set. The safety of a model-chosen value does
-not depend on the model being right: the engine clamps it to the declared
-range and snaps it to the declared resolution, the safety envelope checks the
-whole plan, and the appliance validates it independently. A wrong value
-produces a refused plan.
+D2 is the default because an engine choosing on its own can only act on
+situations someone expressed as a rule beforehand. A model can act on a
+request, or on a cycle, that no rule describes.
+
+The safety of a model-chosen value does not depend on the model being right:
+the engine clamps it to the declared range and snaps it to the declared
+resolution, the safety envelope checks the whole plan, and the appliance
+validates it independently. A wrong value produces a refused plan.
 
 D2 refuses to initialise against a declaration that states no sequence
 constraints, since that is precisely the case where individually valid actions

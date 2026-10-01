@@ -200,8 +200,8 @@ confuse because both count from zero. They answer different questions.
 | **Autonomy level D0 to D2** | Who decides what to do? | The integrator, as configuration | §3.3 |
 
 They are orthogonal. A Conformance Level 2 machine can be operated at autonomy
-D0, and frequently is, because a machine capable of running unattended is
-exactly the kind that may require every decision to be reproducible.
+D0, and there are reasons to: a machine capable of running unattended is
+exactly the kind whose decisions may be required to be reproducible.
 Conformance Level 2 is named "Autonomous" because the *machine* needs no human
 hands. It says nothing about who chooses the actions.
 
