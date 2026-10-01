@@ -133,13 +133,27 @@ pub struct RecordExplainer;
 
 impl Explainer for RecordExplainer {
     fn explain(&self, record: &DecisionRecord) -> Result<String, LanguageError> {
-        if record.explanation.is_empty() {
-            return Ok(format!(
-                "Diagnosed {} and made no change.",
-                record.cause
-            ));
+        let mut text = if record.explanation.is_empty() {
+            format!("Diagnosed {} and made no change.", record.cause)
+        } else {
+            record.explanation.clone()
+        };
+
+        // A correction held at the end of its range is the one case where
+        // reporting the action alone is misleading. The person asked for
+        // something, was told it was done, and nothing changed, because the
+        // mechanism was already as far as it goes. Said plainly, they can try
+        // something else; unsaid, they conclude the machine does not work.
+        for (parameter, wanted) in &record.clamped_from {
+            if let Some(sent) = record.arguments.get(parameter) {
+                text.push_str(&format!(
+                    " {parameter} could not go to {wanted}; it is limited to {} and was set there,                      so this correction is partial.",
+                    sent.value
+                ));
+            }
         }
-        Ok(record.explanation.clone())
+
+        Ok(text)
     }
 }
 

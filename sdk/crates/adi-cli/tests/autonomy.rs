@@ -41,6 +41,11 @@ fn sdk() -> std::path::PathBuf {
 /// exits immediately. Written per run rather than committed, so the test does
 /// not depend on which name happens to work here.
 fn config_for(py: &str) -> std::path::PathBuf {
+    config_named(py, "examples/interpreters/reference.py")
+}
+
+/// A models configuration pointing at a named backend script.
+fn config_named(py: &str, script: &str) -> std::path::PathBuf {
     // One file per call, not per process. Every test in a binary shares a
     // process id, so a name built from it alone had parallel tests writing and
     // reading the same file: this passed when run alone and failed in the suite.
@@ -52,7 +57,7 @@ fn config_for(py: &str) -> std::path::PathBuf {
     std::fs::write(
         &path,
         format!(
-            "root: .\nseams:\n  interpreter:\n    backend: process\n    command: {py}\n    args: [\"examples/interpreters/reference.py\"]\n"
+            "root: .\nseams:\n  interpreter:\n    backend: process\n    command: {py}\n    args: [\"{script}\"]\n"
         ),
     )
     .unwrap();
@@ -221,4 +226,41 @@ fn a_proposed_value_is_snapped_to_the_declared_resolution() {
 fn an_unknown_level_is_refused() {
     let out = drive("quit\n", &["--level", "d9"]);
     assert!(out.contains("unknown level"), "{out}");
+}
+
+/// A value the mechanism cannot reach is clamped, sent at the limit, and
+/// reported as partial.
+///
+/// The record used to carry no trace of clamping, so a correction held at the
+/// end of its range was indistinguishable from one that worked, and the person
+/// was told the machine had acted.
+#[test]
+fn a_value_beyond_the_range_is_reported_as_a_partial_correction() {
+    if !appliance_built() {
+        eprintln!("skipping: build the appliance first");
+        return;
+    }
+    let Some(py) = python() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+
+    let config = config_named(py, "examples/interpreters/overreaching_chooser.py");
+    let out = drive(
+        "cycle
+quit
+",
+        &["--config", config.to_str().unwrap(), "--level", "d2"],
+    );
+
+    let value = sent_value(&out).expect("a value should still be sent");
+    assert!(
+        value <= 60.0,
+        "the proposal must be clamped to the declared range, got {value}:
+{out}"
+    );
+    assert!(out.contains("at limit"), "the shortfall must be reported:
+{out}");
+    assert!(out.contains("999"), "naming what could not be reached:
+{out}");
 }

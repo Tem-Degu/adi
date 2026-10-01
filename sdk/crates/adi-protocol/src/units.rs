@@ -113,6 +113,19 @@ impl Range {
     }
 
     /// Clamp and snap to the declared resolution.
+    /// Whether a value lies outside the declared range, and so cannot be
+    /// reached by this parameter at all.
+    ///
+    /// Distinct from what `clamp` does, which is both limiting and snapping to
+    /// resolution. Snapping 21.4 to 21 on a parameter declared in whole steps
+    /// is ordinary and means nothing is wrong. Being held at the end of the
+    /// range means the mechanism cannot go where the engine wanted, and that is
+    /// worth recording: without it the machine reports having acted, and the
+    /// person cannot tell a small adjustment from no adjustment at all.
+    pub fn exceeds(&self, value: f64) -> bool {
+        value < self.min || value > self.max
+    }
+
     pub fn clamp(&self, value: f64) -> f64 {
         let clamped = value.clamp(self.min, self.max);
         match self.resolution {

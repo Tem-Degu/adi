@@ -423,7 +423,16 @@ impl<'a> Session<'a> {
                 selected_by: self.level.selected_by(),
                 inputs: Vec::new(),
                 arguments: invocation.numeric_arguments.clone(),
-                clamped_from: BTreeMap::new(),
+                // Recorded only where the declared range would not allow what
+                // the engine wanted. Without this the record says the machine
+                // acted, and nothing distinguishes a small correction from a
+                // mechanism that is at its limit and cannot move.
+                clamped_from: correction
+                    .clamped_from
+                    .map(|wanted| {
+                        BTreeMap::from([(correction.parameter.clone(), wanted.value)])
+                    })
+                    .unwrap_or_default(),
                 explanation: String::new(),
             })
             .collect()

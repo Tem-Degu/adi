@@ -222,6 +222,15 @@ fn cycle(session: &mut Session<'_>, now_ms: u64) -> Result<(), Box<dyn std::erro
             println!("  sent         {name} = {} {:?}", value.value, value.unit);
         }
         println!("  accepted     by the appliance");
+
+        // A correction held at the end of its range is partial, and saying so
+        // is the difference between a person trying something else and a person
+        // concluding the machine does not work.
+        for (parameter, wanted) in &record.clamped_from {
+            println!(
+                "  at limit     {parameter} could not reach {wanted}; this correction is partial"
+            );
+        }
     }
 
     Ok(())

@@ -192,3 +192,35 @@ fn the_default_threshold_is_usable() {
     assert!(t > 0.0 && t < 1.0);
     assert!(Transcript::new("make me the usual", 0.8).is_reliable(t));
 }
+
+/// The person is told when a correction could not be carried out in full.
+///
+/// This is the whole point of recording a limit. The explainer reads the record
+/// and nothing else, so before the record carried this, a machine whose
+/// mechanism was already at the end of its travel reported having moved it.
+#[test]
+fn a_partial_correction_is_explained_as_partial() {
+    let mut record = record("Reduced the feed rate.");
+    record.arguments = BTreeMap::from([(
+        "setting".to_string(),
+        adi_protocol::units::Quantity::new(0.0, adi_protocol::units::Unit::Step),
+    )]);
+    record.clamped_from = BTreeMap::from([("setting".to_string(), -4.0)]);
+
+    let text = RecordExplainer.explain(&record).unwrap();
+
+    assert!(text.contains("Reduced the feed rate."), "the action is still stated: {text}");
+    assert!(text.contains("partial"), "and the shortfall is stated: {text}");
+    assert!(text.contains("-4"), "with what was wanted: {text}");
+}
+
+/// An ordinary correction gains nothing. A machine that appended a caveat to
+/// every explanation would train people to ignore it.
+#[test]
+fn an_ordinary_correction_is_explained_without_a_caveat() {
+    let record = record("Reduced the feed rate.");
+
+    let text = RecordExplainer.explain(&record).unwrap();
+
+    assert_eq!(text, "Reduced the feed rate.");
+}

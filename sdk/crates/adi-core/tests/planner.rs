@@ -494,3 +494,82 @@ fn a_tool_description_reaches_the_candidate() {
         );
     }
 }
+
+// ------------------------------------------------- a correction at the limit
+
+/// A correction held at the end of the declared range records what it wanted.
+///
+/// Without this the record says the machine acted, and nothing distinguishes a
+/// small correction from a mechanism that cannot move. The person is told their
+/// request was carried out when it was not.
+#[test]
+fn a_correction_held_at_the_limit_records_what_it_wanted() {
+    let declaration = declaration();
+    let skill = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&declaration, Some(&skill), &domain);
+
+    // Ask for far more change than the range allows.
+    let diagnosis = Diagnosis {
+        cause: "cycle_time".into(),
+        target_variable: Some(VariableId::from("cycle_time")),
+        desired_delta: Some(900.0),
+        confidence: 1.0,
+        explanation: String::new(),
+    };
+
+    let candidate = planner
+        .candidates(&VariableId::from("cycle_time"))
+        .into_iter()
+        .next()
+        .expect("a candidate");
+
+    let correction = planner
+        .plan(&diagnosis, &candidate, Quantity::new(20.0, candidate.param_unit))
+        .expect("a correction is still produced, partial");
+
+    let wanted = correction
+        .clamped_from
+        .expect("the range would not allow it, so what was wanted is recorded");
+    assert!(
+        wanted.value != correction.absolute.value,
+        "the recorded value should differ from the one sent"
+    );
+}
+
+/// Snapping to resolution is not being stuck.
+///
+/// `Range::clamp` both limits and snaps, and conflating them would report every
+/// ordinary correction on an integer parameter as a mechanism at its limit.
+#[test]
+fn snapping_to_resolution_is_not_recorded_as_a_limit() {
+    let declaration = declaration();
+    let skill = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&declaration, Some(&skill), &domain);
+
+    // A small change, well inside the range, that will not land on a step.
+    let diagnosis = Diagnosis {
+        cause: "cycle_time".into(),
+        target_variable: Some(VariableId::from("cycle_time")),
+        desired_delta: Some(1.0),
+        confidence: 1.0,
+        explanation: String::new(),
+    };
+
+    let candidate = planner
+        .candidates(&VariableId::from("cycle_time"))
+        .into_iter()
+        .next()
+        .expect("a candidate");
+
+    let correction = planner
+        .plan(&diagnosis, &candidate, Quantity::new(20.0, candidate.param_unit))
+        .expect("a correction");
+
+    assert!(
+        correction.clamped_from.is_none(),
+        "an ordinary correction must not be reported as being at a limit, got {:?}",
+        correction.clamped_from
+    );
+}

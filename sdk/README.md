@@ -343,8 +343,13 @@ Cortex-M target.
   temperature targets, and `diagnose` does not yet use them.
 - **Decision records carry no provenance yet.** `DecisionRecord` has the
   structure for tracing every value back to the knowledge layer that produced
-  it, and the session leaves it empty.
-- **No learning.** `Layer::User` is defined and nothing writes to it.
+  it, and the session leaves it empty. Today the answer would be the base layer
+  for nearly every value, since no machine ships a vendor extension and nothing
+  writes the user layer. It becomes a real question when those exist.
+- **No learning.** The machine remembers recent cycles and acts on them, so
+  "half the sugar of last time" resolves correctly. What is missing is
+  accumulation: `Layer::User` is defined, resolves correctly, and nothing writes
+  to it, so twenty sweeter drinks do not change where the next one starts.
 - **No microcontroller port.** `libadip` is developed and tested on a host.
   The remaining milestone in [`c/DESIGN.md`](./c/DESIGN.md) is a reference
   port, which requires a target board. The footprint above is an x86-64

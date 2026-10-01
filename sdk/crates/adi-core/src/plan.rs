@@ -29,6 +29,13 @@ pub struct Correction {
     /// Set when the skill declares retention: the engine should purge or
     /// discount the next cycle rather than trusting it.
     pub requires_purge: Option<SemanticId>,
+    /// What the engine wanted, where the declared range would not allow it.
+    ///
+    /// `None` in the ordinary case. `Some` means the mechanism is at its limit
+    /// and the correction is partial, which is the difference between a machine
+    /// working towards a target and one that cannot reach it. Snapping to
+    /// resolution does not set this; only a value outside the range does.
+    pub clamped_from: Option<Quantity>,
 }
 
 pub struct Planner<'a> {
@@ -203,7 +210,11 @@ impl<'a> Planner<'a> {
         // and, in a slow domain, possibly a whole week.
         let scaled = raw_delta * candidate.confidence.clamp(0.1, 1.0) * diagnosis.confidence;
 
-        let absolute_value = range.clamp(current.value + scaled);
+        let wanted = current.value + scaled;
+        let absolute_value = range.clamp(wanted);
+        let clamped_from = range
+            .exceeds(wanted)
+            .then(|| Quantity::new(wanted, range.unit));
 
         // Last gate before the value leaves the engine. A non-finite confidence
         // on either side could still have produced one.
@@ -227,6 +238,7 @@ impl<'a> Planner<'a> {
             variable,
             confidence: candidate.confidence * diagnosis.confidence,
             requires_purge,
+            clamped_from,
         })
     }
 
@@ -283,6 +295,9 @@ impl<'a> Planner<'a> {
         }
 
         let absolute_value = range.clamp(requested.value);
+        let clamped_from = range
+            .exceeds(requested.value)
+            .then(|| Quantity::new(requested.value, range.unit));
         if !absolute_value.is_finite() {
             return Err(CoreError::NotFinite {
                 parameter: candidate.parameter.clone(),
@@ -305,6 +320,7 @@ impl<'a> Planner<'a> {
             // having been chosen confidently.
             confidence: candidate.confidence,
             requires_purge,
+            clamped_from,
         })
     }
 
