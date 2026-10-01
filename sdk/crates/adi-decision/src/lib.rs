@@ -545,6 +545,30 @@ pub trait Interpreter {
 /// Present so the request path can be assembled, tested and shipped before any
 /// model exists, and so the failure is a clear refusal rather than a machine
 /// that silently ignores speech.
+/// A boxed interpreter is an interpreter.
+///
+/// So that a caller choosing its backend at run time, which is what a
+/// configuration file means, can still satisfy a bound of `P: Interpreter`.
+impl<P: Interpreter + ?Sized> Interpreter for &P {
+    fn interpret(
+        &self,
+        utterance: &str,
+        context: &SelectionContext<'_>,
+    ) -> Result<Understood, DecisionError> {
+        (**self).interpret(utterance, context)
+    }
+}
+
+impl<P: Interpreter + ?Sized> Interpreter for Box<P> {
+    fn interpret(
+        &self,
+        utterance: &str,
+        context: &SelectionContext<'_>,
+    ) -> Result<Understood, DecisionError> {
+        (**self).interpret(utterance, context)
+    }
+}
+
 pub struct NoInterpreter;
 
 impl Interpreter for NoInterpreter {

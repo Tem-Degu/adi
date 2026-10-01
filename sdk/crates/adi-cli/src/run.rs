@@ -19,7 +19,7 @@ use adi_decision::{
 };
 use adi_domain_espresso::Espresso;
 use adi_language::context::VariableInfo;
-use adi_language::{Explainer, RecordExplainer, Speaker, Transcriber};
+use adi_language::{Explainer, Language, NoSpeaker, RecordExplainer, Speaker, Transcriber};
 use adi_models::{
     ProcessSpeaker, ProcessTranscriber, Surroundings,
     Backend, ModelsConfig, ProcessChooser, ProcessInterpreter, ScriptedInterpreter, Seam,
@@ -504,15 +504,34 @@ fn listen(
         audio.sample_rate
     );
 
-    let transcript = transcriber.transcribe(&audio)?;
-    println!(
-        "  transcribed  \"{}\" (confidence {:.2})",
-        transcript.text, transcript.confidence
+    let Some((interpreter, _)) = interpreter else {
+        println!("  no interpreter is configured, so this cannot be understood.");
+        return Ok(());
+    };
+
+    // Through Language::understand rather than the transcriber directly.
+    //
+    // The library applies a check this skipped when written by hand: a
+    // transcript the backend is not confident in becomes a question rather than
+    // an intent. Mishearing "hotter" as "shorter" is a physical action on a
+    // machine with a heating element, and the transcript is the one place where
+    // a wrong word is indistinguishable downstream from a right one.
+    let language = Language::new(
+        transcriber,
+        interpreter,
+        RecordExplainer,
+        NoSpeaker,
     );
 
-    // From here it is an ordinary spoken request. A transcript is text, and
-    // nothing downstream needs to know it arrived as sound.
-    request(session, interpreter, &transcript.text, now_ms, voice)
+    let context = SelectionContext {
+        history: session.history(),
+        cycle: None,
+        memory: Some(session.memory()),
+        rejected: None,
+    };
+
+    let understood = language.understand(&audio, &context)?;
+    act_on(session, understood, now_ms, voice)
 }
 
 fn request(
@@ -535,7 +554,22 @@ fn request(
         rejected: None,
     };
 
-    match interpreter.interpret(words, &context)? {
+    let understood = interpreter.interpret(words, &context)?;
+    act_on(session, understood, now_ms, voice)
+}
+
+/// What to do with whatever the model made of an utterance.
+///
+/// Shared by the typed and the spoken path, so a request that arrived as audio
+/// is treated identically to one that was typed. A transcript is text, and
+/// nothing past this point needs to know how it got here.
+fn act_on(
+    session: &mut Session<'_>,
+    understood: Understood,
+    now_ms: u64,
+    voice: &Voice,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match understood {
         // ADI-P 9.4.3. Asking is an outcome, not a failure.
         Understood::Clarify { question, because } => {
             println!("  asks         {question}");

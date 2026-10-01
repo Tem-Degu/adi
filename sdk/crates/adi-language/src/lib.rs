@@ -171,6 +171,64 @@ impl Explainer for RecordExplainer {
 
 // ----------------------------------------------------------------- assembly
 
+// A boxed seam is a seam. Without these, `Language` could only be built from
+// concrete types, so a caller choosing its backends at run time, which is what a
+// configuration file means, could not use it at all and would reimplement
+// `understand` and `report` against the traits directly. The CLI did exactly
+// that, and so skipped the transcript confidence check these methods apply.
+
+impl<T: Transcriber + ?Sized> Transcriber for &T {
+    fn required_sample_rate(&self) -> u32 {
+        (**self).required_sample_rate()
+    }
+
+    fn transcribe(&self, audio: &Audio) -> Result<Transcript, LanguageError> {
+        (**self).transcribe(audio)
+    }
+}
+
+impl<S: Speaker + ?Sized> Speaker for &S {
+    fn sample_rate(&self) -> u32 {
+        (**self).sample_rate()
+    }
+
+    fn speak(&self, text: &str) -> Result<Audio, LanguageError> {
+        (**self).speak(text)
+    }
+}
+
+impl<E: Explainer + ?Sized> Explainer for &E {
+    fn explain(&self, record: &DecisionRecord) -> Result<String, LanguageError> {
+        (**self).explain(record)
+    }
+}
+
+impl<T: Transcriber + ?Sized> Transcriber for Box<T> {
+    fn required_sample_rate(&self) -> u32 {
+        (**self).required_sample_rate()
+    }
+
+    fn transcribe(&self, audio: &Audio) -> Result<Transcript, LanguageError> {
+        (**self).transcribe(audio)
+    }
+}
+
+impl<S: Speaker + ?Sized> Speaker for Box<S> {
+    fn sample_rate(&self) -> u32 {
+        (**self).sample_rate()
+    }
+
+    fn speak(&self, text: &str) -> Result<Audio, LanguageError> {
+        (**self).speak(text)
+    }
+}
+
+impl<E: Explainer + ?Sized> Explainer for Box<E> {
+    fn explain(&self, record: &DecisionRecord) -> Result<String, LanguageError> {
+        (**self).explain(record)
+    }
+}
+
 /// The four seams, assembled.
 ///
 /// Holds the pipeline so an integrator swaps a backend in one place. A build
