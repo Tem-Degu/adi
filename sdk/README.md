@@ -263,9 +263,11 @@ The program requires no dependency on this SDK and may be written in any
 language.
 
 ```
-interpreter  -> {"utterance":"half of last time","styles":[...]}
+interpreter  -> {"utterance":"half of last time","styles":[...],
+                 "variables":[...],"notes":[...],"machine":"..."}
              <- {"intent":{"kind":"produce","targets":{...}}}
              or {"clarify":{"question":"...","because":"..."}}
+             or {"answer":{"text":"...","drew_on":["<note id>"]}}
 
 chooser      -> {"goals":[{"variable":"shot_time","delta":-3.0,...}],
                  "candidates":[{"index":0,"tool":"...","variable":"shot_time",
@@ -281,6 +283,12 @@ speaker      -> {"text":"..."}
 ```
 
 Audio is base64 of 16-bit signed, little endian, single channel samples.
+
+An interpreter has three outcomes rather than two. A request becomes an intent,
+an unresolvable one becomes a question back, and a question from the person
+becomes an answer, which actuates nothing. `notes` carries whatever the
+knowledge base supplies for answering, and `machine` the device identity, so a
+backend needs no access to either.
 
 A chooser answers with an index into the candidate list the engine supplied, so
 it cannot name a tool the machine does not declare. `constraints` states the

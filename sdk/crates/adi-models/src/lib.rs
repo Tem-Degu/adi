@@ -27,7 +27,7 @@ pub use chooser::ProcessChooser;
 pub use config::{Backend, ModelsConfig, SeamConfig};
 pub use parse::understood;
 pub use manifest::{hash_file, identify, Manifest, Provenance, Published, Seam};
-pub use process::ProcessInterpreter;
+pub use process::{ProcessInterpreter, Surroundings};
 pub use speech::{ProcessSpeaker, ProcessTranscriber};
 pub use schema::{OUTPUT_INSTRUCTION, UNDERSTOOD_SCHEMA};
 pub use scripted::ScriptedInterpreter;

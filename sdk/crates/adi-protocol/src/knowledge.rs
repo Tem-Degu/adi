@@ -50,6 +50,9 @@ pub struct KnowledgeExtension {
     /// so. Optional, and absent in most extensions.
     #[serde(default)]
     pub constraints: BTreeMap<String, Range>,
+    /// What this vendor wants the machine able to say. See [`Note`].
+    #[serde(default)]
+    pub notes: Vec<Note>,
 }
 
 /// What a domain variable is.
@@ -68,6 +71,77 @@ pub struct VariableDef {
     pub unit: crate::units::Unit,
     /// One line: what it measures, and which direction means what.
     pub description: String,
+}
+
+/// Something a manufacturer wants the machine to be able to say.
+///
+/// Free text. What belongs in it is the manufacturer's judgement, not this
+/// protocol's: a basket size, a descaling interval, a warning about third-party
+/// parts, anything they believe the model should know. The mechanism is
+/// specified here and the content is not.
+///
+/// The rule that bounds it, and the reason it can be free text at all:
+///
+/// **A note may inform an answer. It may never determine an action.**
+///
+/// Notes reach the model, and an intent is still validated exactly as without
+/// them: a closed schema, targets only on declared variables, every value
+/// clamped to the declared range and checked against the envelope. So a note
+/// cannot cause an undeclared action or an out-of-range value.
+///
+/// What a note must not contain is a target or a magnitude. "Aim for 27
+/// seconds" belongs in a style and "moves shot time 1.4 s per step" belongs in
+/// the skill, because those paths have validation and monotonicity rules that
+/// prose does not. A number stated in two places will diverge.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Note {
+    /// Namespaced for a vendor, as every other identifier is. Named in an
+    /// answer's `drew_on`, so a record can say what the machine drew on.
+    pub id: String,
+    /// Words that should bring this note into context.
+    ///
+    /// Optional. A machine with a handful of notes needs none; one with sixty
+    /// does, because the context budget cannot hold them all and the ones
+    /// relevant to the question are the ones worth sending.
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Optionally, the tool, variable or style this is about, so the note
+    /// surfaces when that is under discussion without the person having used
+    /// any of its keywords.
+    #[serde(default)]
+    pub about: Option<String>,
+    pub text: String,
+}
+
+impl Note {
+    /// Whether this note should be offered for an utterance.
+    ///
+    /// On the type rather than on `Knowledge`, because a caller that has
+    /// precomputed its context, as the process backend does to avoid keeping
+    /// the knowledge alive, needs the same rule and must not reimplement it.
+    ///
+    /// A note with neither keywords nor an `about` is always offered, which
+    /// suits a machine with a handful of them. One with either is offered when
+    /// it matches, which is what lets a machine carry many.
+    pub fn matches(&self, utterance: &str) -> bool {
+        if self.about.is_none() && self.keywords.is_empty() {
+            return true;
+        }
+
+        let lowered = utterance.to_lowercase();
+        let words: Vec<&str> = lowered
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+
+        let mentions = |needle: &str| {
+            let needle = needle.to_lowercase();
+            words.contains(&needle.as_str()) || lowered.contains(&needle)
+        };
+
+        self.about.as_deref().is_some_and(&mentions)
+            || self.keywords.iter().any(|k| mentions(k))
+    }
 }
 
 /// The base domain knowledge, owned by StreetAI. Layer 0.
@@ -94,6 +168,10 @@ pub struct KnowledgeBase {
     pub default_steps: BTreeMap<String, crate::units::Quantity>,
     #[serde(default)]
     pub constraints: BTreeMap<String, Range>,
+    /// What the machine can tell a person, beyond what the structured data
+    /// already says. See [`Note`].
+    #[serde(default)]
+    pub notes: Vec<Note>,
     /// Variables that express taste rather than process. The engine must never
     /// try to correct a process fault by changing one. See PROTOCOL.md 7.1.
     #[serde(default)]
@@ -112,6 +190,7 @@ pub struct KnowledgeLayer {
     /// Empty for the base, which owns the unprefixed namespace.
     pub namespace: Option<String>,
     pub variables: BTreeMap<VariableId, VariableDef>,
+    pub notes: Vec<Note>,
     pub styles: Vec<StyleEntry>,
     pub material_priors: Vec<MaterialPrior>,
     pub default_steps: BTreeMap<String, crate::units::Quantity>,
@@ -125,6 +204,7 @@ impl KnowledgeBase {
             layer: Layer::Base,
             namespace: None,
             variables: self.variables,
+            notes: self.notes,
             styles: self.styles,
             material_priors: self.material_priors,
             default_steps: self.default_steps,
@@ -163,6 +243,7 @@ impl KnowledgeExtension {
             layer,
             namespace: Some(self.namespace),
             variables: self.variables,
+            notes: self.notes,
             styles: self.styles,
             material_priors: self.material_priors,
             default_steps,
@@ -418,6 +499,18 @@ impl KnowledgeExtension {
             .chain(self.material_priors.iter().map(|m| m.id.as_str()))
             .collect();
 
+        for note in &self.notes {
+            if base.notes.iter().any(|n| n.id == note.id) {
+                return Err(ExtensionError::Redefinition(note.id.clone()));
+            }
+            if !note.id.starts_with(&prefix) {
+                return Err(ExtensionError::NotNamespaced {
+                    id: note.id.clone(),
+                    namespace: self.namespace.clone(),
+                });
+            }
+        }
+
         for id in &mine {
             // Redefinition is checked before namespacing, because it is the
             // more specific complaint and the more useful message.
@@ -568,6 +661,30 @@ impl Knowledge {
         };
         k.push(base)?;
         Ok(k)
+    }
+
+    /// Every note, across layers.
+    ///
+    /// For a caller that filters per utterance itself, which the process
+    /// backend does to avoid keeping the knowledge alive for the session.
+    pub fn notes(&self) -> impl Iterator<Item = &Note> {
+        self.layers.iter().flat_map(|l| l.notes.iter())
+    }
+
+    /// Notes relevant to an utterance, in layer order.
+    ///
+    /// Selection is deliberately simple, because what belongs in a note is the
+    /// manufacturer's concern and the mechanism is this protocol's. See
+    /// [`Note::matches`].
+    ///
+    /// The caller applies the context budget. A machine with more notes than
+    /// fit has them truncated and the context says so.
+    pub fn notes_for(&self, utterance: &str) -> Vec<&Note> {
+        self.layers
+            .iter()
+            .flat_map(|l| l.notes.iter())
+            .filter(|n| n.matches(utterance))
+            .collect()
     }
 
     /// What a variable is, from whichever layer declares it.

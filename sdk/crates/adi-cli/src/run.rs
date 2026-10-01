@@ -20,6 +20,7 @@ use adi_decision::{
 use adi_domain_espresso::Espresso;
 use adi_language::context::VariableInfo;
 use adi_models::{
+    Surroundings,
     Backend, ModelsConfig, ProcessChooser, ProcessInterpreter, ScriptedInterpreter, Seam,
 };
 use adi_protocol::declaration::Declaration;
@@ -116,7 +117,7 @@ pub fn run(
 
     println!("  autonomy     {}", session.level().as_str());
 
-    let interpreter = load_interpreter(config_path.as_deref(), &domain)?;
+    let interpreter = load_interpreter(config_path.as_deref(), &domain, &declaration.device)?;
     match &interpreter {
         Some((_, label)) => println!("  interpreter  {label}"),
         None => println!("  interpreter  none, so spoken requests are unavailable"),
@@ -270,6 +271,13 @@ fn request(
             println!("  asks         {question}");
             println!("  because      {because}");
         }
+        // Nothing is actuated. The person asked something and is told.
+        Understood::Answer { text, drew_on } => {
+            println!("  answers      {text}");
+            if !drew_on.is_empty() {
+                println!("  from         {}", drew_on.join(", "));
+            }
+        }
         Understood::Intent(intent) => {
             println!("  understood   {:?}", intent.kind);
             if let Some(style) = &intent.style {
@@ -368,6 +376,7 @@ type Loaded = Option<(Box<dyn Interpreter>, String)>;
 fn load_interpreter(
     config_path: Option<&Path>,
     domain: &Espresso,
+    device: &adi_protocol::declaration::Device,
 ) -> Result<Loaded, Box<dyn std::error::Error>> {
     let Some(path) = config_path else {
         return Ok(None);
@@ -396,23 +405,35 @@ fn load_interpreter(
             let interpreter = ProcessInterpreter::start(
                 &command,
                 &seam.args,
-                knowledge.style_ids().into_iter().map(str::to_string).collect(),
-                knowledge.material_ids().into_iter().map(str::to_string).collect(),
-                // Each with its unit and meaning, looked up from the
-                // knowledge, so the model is not asked to infer what a
-                // variable is from its name alone.
-                domain
-                    .variables()
-                    .iter()
-                    .map(|v| {
-                        let declared = domain.knowledge().variable(v);
-                        VariableInfo {
-                            name: v.0.clone(),
-                            unit: declared.map(|d| format!("{:?}", d.unit).to_lowercase()),
-                            meaning: declared.map(|d| d.description.trim().to_string()),
-                        }
-                    })
-                    .collect(),
+                Surroundings {
+                    styles: knowledge.style_ids().into_iter().map(str::to_string).collect(),
+                    materials: knowledge
+                        .material_ids()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                    // Each with its unit and meaning, so the model is not asked
+                    // to infer what a variable is from its name alone.
+                    variables: domain
+                        .variables()
+                        .iter()
+                        .map(|v| {
+                            let declared = knowledge.variable(v);
+                            VariableInfo {
+                                name: v.0.clone(),
+                                unit: declared.map(|d| format!("{:?}", d.unit).to_lowercase()),
+                                meaning: declared.map(|d| d.description.trim().to_string()),
+                            }
+                        })
+                        .collect(),
+                    // The manufacturer's own material, so the machine can answer
+                    // a question rather than only act on a request.
+                    notes: knowledge.notes().cloned().collect(),
+                    device: Some(format!(
+                        "{} {}, firmware {}",
+                        device.vendor, device.model, device.firmware_version
+                    )),
+                },
                 Default::default(),
             )?;
             Ok(Some((Box::new(interpreter), label)))

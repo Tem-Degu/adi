@@ -30,12 +30,14 @@
 pub const UNDERSTOOD_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Understood",
-  "description": "What a model may return: a resolved request, or a question.",
+  "description": "What a model may return: a resolved request, a question back, or an answer.",
   "oneOf": [
     { "type": "object", "required": ["intent"], "additionalProperties": false,
       "properties": { "intent": { "$ref": "#/$defs/intent" } } },
     { "type": "object", "required": ["clarify"], "additionalProperties": false,
-      "properties": { "clarify": { "$ref": "#/$defs/clarify" } } }
+      "properties": { "clarify": { "$ref": "#/$defs/clarify" } } },
+    { "type": "object", "required": ["answer"], "additionalProperties": false,
+      "properties": { "answer": { "$ref": "#/$defs/answer" } } }
   ],
   "$defs": {
     "intent": {
@@ -50,6 +52,15 @@ pub const UNDERSTOOD_SCHEMA: &str = r##"{
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/target" }
         }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "drew_on": { "type": "array", "items": { "type": "string" } }
       }
     },
     "clarify": {
@@ -116,6 +127,12 @@ If the request cannot be resolved, ask instead:
 
 Asking is a correct answer. Do not guess a value, a style or a cycle that was
 not stated: the result of this request moves a machine.
+
+If the person asked a question rather than requesting anything, answer it:
+  {\"answer\": {\"text\": \"<what to say>\", \"drew_on\": [\"<note id>\"]}}
+
+Answer only from what is given above. Where it does not cover the question, say
+so instead of supplying something plausible. List in drew_on the notes you used.
 
 Name only the styles, materials and variables given above.";
 

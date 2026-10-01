@@ -478,6 +478,27 @@ pub enum Understood {
         /// Why it could not be resolved, for the record rather than the person.
         because: String,
     },
+    /// The person asked something rather than requesting anything.
+    ///
+    /// Nothing is actuated. This is the half of a domain intelligence that is
+    /// knowing rather than doing, and before it existed a question had to come
+    /// back as an intent, which made the machine act, or as a clarification,
+    /// which asked a question of someone who had just asked one.
+    ///
+    /// Unlike an intent, this is **not safe by construction**. An intent is
+    /// checked against the declaration, clamped and validated by the appliance,
+    /// so a wrong one becomes a refused plan. Text goes straight to a person and
+    /// nothing checks it. The mitigation is to answer from supplied knowledge
+    /// and to record what was drawn on, which narrows the risk rather than
+    /// removing it. ADI-P 9.4.3 states this asymmetry.
+    Answer {
+        /// What to say.
+        text: String,
+        /// Identifiers of the knowledge entries this drew on, for the record.
+        /// Empty where the model answered from context rather than a note.
+        #[serde(default)]
+        drew_on: Vec<String>,
+    },
 }
 
 /// Work out what a person wants. **This is the model.**

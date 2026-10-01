@@ -133,9 +133,57 @@ def find_variable(words, variables):
     return None
 
 
+def answer_question(request, words):
+    """Answer a question from what the request supplied.
+
+    A real model would read the notes and the machine identity and compose a
+    reply. This matches crudely, because the point is the shape of the answer
+    and the boundary it crosses, not the quality of the language.
+
+    Nothing here is actuated, which is why it may return free text at all. The
+    corresponding rule is that it answers only from what was given: a backend
+    that invented a fact about the machine would be stating something nothing
+    can check.
+    """
+    asked = {"what", "which", "how", "why", "when", "where", "who", "is", "does", "can"}
+    if not (words & asked):
+        return None
+
+    # The machine's own identity, which the engine supplies.
+    machine = request.get("machine")
+    if machine and ({"model", "machine", "firmware", "version", "you"} & words):
+        return {"answer": {"text": machine, "drew_on": []}}
+
+    # Then the manufacturer's notes. Already filtered by relevance before
+    # arriving, so the first is the best available.
+    notes = request.get("notes", [])
+    if notes:
+        return {
+            "answer": {
+                "text": notes[0]["text"],
+                "drew_on": [notes[0]["id"]],
+            }
+        }
+
+    # A question with nothing to answer it from. Saying so is correct; supplying
+    # something plausible is the failure this path exists to avoid.
+    return {
+        "answer": {
+            "text": "I do not have information about that.",
+            "drew_on": [],
+        }
+    }
+
+
 def interpret(request):
     utterance = request.get("utterance", "")
     words = set(re.findall(r"[a-z']+", utterance.lower()))
+
+    # A question is answered rather than acted on. Tried first, because an
+    # utterance that is a question should never become an intent.
+    answered = answer_question(request, words)
+    if answered is not None:
+        return answered
 
     styles = request.get("styles", [])
     variables = request.get("variables", [])

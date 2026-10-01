@@ -47,6 +47,24 @@ fn styles() -> Vec<String> {
     ]
 }
 
+/// One note with keywords and one without, so both selection paths are covered.
+fn notes() -> Vec<adi_protocol::knowledge::Note> {
+    vec![
+        adi_protocol::knowledge::Note {
+            id: "x.example.note.basket".into(),
+            keywords: vec!["basket".into(), "portafilter".into()],
+            about: None,
+            text: "A 58 mm basket, taking 18 to 20 g.".into(),
+        },
+        adi_protocol::knowledge::Note {
+            id: "x.example.note.general".into(),
+            keywords: Vec::new(),
+            about: None,
+            text: "Always offered, since it names nothing to match on.".into(),
+        },
+    ]
+}
+
 fn variables() -> Vec<VariableInfo> {
     // One described and one not, so the request carries both shapes and a
     // backend that assumes every variable has a meaning is caught here.
@@ -69,9 +87,13 @@ fn start() -> Option<ProcessInterpreter> {
     ProcessInterpreter::start(
         python,
         &[script()],
-        styles(),
-        Vec::new(),
-        variables(),
+        adi_models::Surroundings {
+            styles: styles(),
+            materials: Vec::new(),
+            variables: variables(),
+            notes: notes(),
+            device: Some("Example Appliances EX-900, firmware 1.0.0".into()),
+        },
         ContextBudget::default(),
     )
     .ok()
@@ -239,5 +261,68 @@ fn a_programs_answer_is_validated_like_any_other() {
             );
         }
         other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// ------------------------------------------------------ answering a question
+
+/// ADI-P 9.4.3. A question is answered, and nothing is actuated.
+///
+/// Before this the model had two outcomes, act or ask, so a question came back
+/// as an intent and the machine tried to do something, or as a clarification
+/// and it asked a question of someone who had just asked one.
+#[test]
+fn a_question_about_the_machine_is_answered() {
+    let Some(interpreter) = start() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+
+    match interpreter.interpret("what model are you", &empty()) {
+        Ok(Understood::Answer { text, drew_on }) => {
+            assert!(text.contains("EX-900"), "it should say what it is: {text}");
+            assert!(
+                drew_on.is_empty(),
+                "its own identity needs no note: {drew_on:?}"
+            );
+        }
+        other => panic!("expected an answer, got {other:?}"),
+    }
+}
+
+/// A question a note covers is answered from it, and the note is named.
+#[test]
+fn a_question_a_note_covers_names_the_note() {
+    let Some(interpreter) = start() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+
+    match interpreter.interpret("what size is the basket", &empty()) {
+        Ok(Understood::Answer { text, drew_on }) => {
+            assert!(text.contains("58"), "answered from the note: {text}");
+            assert_eq!(
+                drew_on,
+                vec!["x.example.note.basket".to_string()],
+                "and the source is recorded"
+            );
+        }
+        other => panic!("expected an answer, got {other:?}"),
+    }
+}
+
+/// A request is still a request. If every utterance became an answer the
+/// machine would have stopped working, which a test asserting only the new
+/// path would not notice.
+#[test]
+fn a_request_is_still_understood_as_an_intent() {
+    let Some(interpreter) = start() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+
+    match interpreter.interpret("make me an espresso", &empty()) {
+        Ok(Understood::Intent(_)) => {}
+        other => panic!("a request must still be an intent, got {other:?}"),
     }
 }

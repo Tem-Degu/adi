@@ -852,6 +852,7 @@ Requirements:
 | New bean priors | Base diagnosis rules |
 | Machine-specific defaults and starting points | Hard constraints, in the permissive direction |
 | New domain variables in the vendor namespace, with unit and meaning | Registry semantic IDs |
+| Notes: free text the machine may answer from (§6.7) | The meaning of a base identifier |
 | Narrower target ranges for the vendor's own styles | The meaning of a base identifier |
 
 Base **diagnosis rules** are deliberately not extendable in this version. Those
@@ -930,6 +931,44 @@ produced it. A layer that restates a range already in force has narrowed
 nothing, and attribution MUST remain with the layer that last changed the value.
 
 ---
+
+### 6.7 Notes
+
+A knowledge layer MAY carry notes: free text the machine may answer from.
+
+```yaml
+notes:
+  - id: "x.acme.note.basket"
+    keywords: ["basket", "portafilter"]
+    text: >
+      A 58 mm basket, taking 18 to 20 g. Third-party baskets of the same
+      diameter fit; a stepped basket will not seat correctly.
+```
+
+`id` MUST be namespaced as §6.2 requires, and MUST NOT redefine a note from a
+lower layer. `keywords` and `about` are optional and govern retrieval: a note
+naming neither is always offered, and one naming either is offered when the
+utterance matches. `about` MAY name a declared tool, variable or style, so a
+note surfaces when that subject is under discussion.
+
+What belongs in a note is the author's judgement. This specification states the
+mechanism and does not prescribe the content.
+
+**A note MAY inform an answer. It MUST NOT determine an action.**
+
+Notes are supplied to a model, and an intent remains validated exactly as
+without them: a closed schema, targets only on declared variables, every value
+clamped and checked against the envelope. A note therefore cannot produce an
+undeclared action or an out-of-range value.
+
+A note MUST NOT state a target or the magnitude of a tool's effect. A target
+belongs in a style and a magnitude belongs in the skill, because those are
+validated and subject to §6.4; prose is neither, and a quantity stated in two
+places will diverge.
+
+An engine MUST apply its context budget to notes, and SHOULD discard notes before
+discarding anything an intent depends on. A degraded answer is preferable to a
+degraded request.
 
 ## 7. Semantic registry, espresso v1
 
@@ -1329,10 +1368,6 @@ A question is text shown to a person. It reaches no actuation value, so none of
 the checks in §9.3 apply to it and the model is under no constraint in composing
 it.
 
-This is distinct from an engine with no model at all, which is a configuration
-error and MUST be reported as one. A model that asks a question has understood
-enough to know what it is missing, and the machine is working correctly.
-
 #### 9.4.4 A preference request MUST NOT alter the process
 
 Normative, and the counterpart to §7.1.
@@ -1350,6 +1385,35 @@ The check MUST cover every variable a tool touches, meaning its declared
 `effects`, the variable any skill response attributes to that parameter, and
 anything `also_affects` names. Where no capable tool passes, the engine MUST
 refuse and say so rather than serve the request by other means.
+
+#### 9.4.5 A model MAY answer a question
+
+Where the person asked something rather than requesting anything, a model MAY
+return an answer. An engine MUST NOT derive any invocation from one.
+
+An engine SHOULD supply, as context, what it knows that bears on a question: the
+device identity from the declaration, the declared tools and their descriptions,
+the declared variables and their meanings, and any notes the knowledge base
+carries (§6.7). An answer SHOULD name the notes it drew on, so a record can
+state what the machine told a person and on what basis.
+
+**This path is not safe by construction, and the distinction is normative.**
+
+An invocation is safe because of the shape of the system. The model selects from
+a declared list, the engine clamps the value to the declared range, the envelope
+checks the whole plan, and the appliance validates it independently. A wrong
+answer from the model becomes a refused plan.
+
+An answer has none of that. The text reaches a person directly and nothing
+verifies it. An engine MUST NOT present an answer as carrying the same assurance
+as an action. Implementations SHOULD constrain a model to answer only from
+supplied context and to decline where that context does not cover the question,
+which narrows the risk without removing it: the mechanism that composes a good
+answer composes a confident wrong one equally readily.
+
+This is distinct from an engine with no model at all, which is a configuration
+error and MUST be reported as one. A model that asks a question has understood
+enough to know what it is missing, and the machine is working correctly.
 
 ### 9.5 One variable at a time, not one action at a time
 

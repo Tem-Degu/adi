@@ -358,6 +358,14 @@ fn run_case(
                 // Asking is an ordinary outcome for an interpreter, but a case
                 // expecting an action did not get one. That is a failure of
                 // this case rather than of the interpreter.
+                // A corpus case states an expected decision, so an answer is
+                // as much a failure of the case as a clarification is. The
+                // question path has its own tests.
+                Ok(adi_decision::Understood::Answer { text, .. }) => {
+                    return Outcome::Fail(vec![format!(
+                        "the interpreter answered instead of acting: {text}"
+                    )]);
+                }
                 Ok(adi_decision::Understood::Clarify { question, because }) => {
                     return Outcome::Fail(vec![format!(
                         "the interpreter asked '{question}' rather than acting ({because})"

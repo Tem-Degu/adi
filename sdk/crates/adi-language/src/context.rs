@@ -79,6 +79,12 @@ pub struct ModelContext {
     /// Recent decisions, most recent first.
     pub history: Vec<DecisionSummary>,
     /// Sections dropped to stay inside the budget, for the record.
+    /// What the machine can say about itself and its domain, beyond the
+    /// structured data. Supplied by the manufacturer; see `knowledge::Note`.
+    pub notes: Vec<NoteLine>,
+    /// What this machine is. Already known to the engine and, until this was
+    /// sent, unreachable to the person asking.
+    pub device: Option<String>,
     pub truncated: Vec<&'static str>,
 }
 
@@ -114,6 +120,13 @@ const CHARS_PER_TOKEN: usize = 4;
 /// Estimated tokens in a string.
 pub fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(CHARS_PER_TOKEN)
+}
+
+/// A note as the model is told about it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteLine {
+    pub id: String,
+    pub text: String,
 }
 
 /// A variable as the model is told about it.
@@ -152,6 +165,15 @@ impl ModelContext {
                 .collect(),
             remembered: Vec::new(),
             history: Vec::new(),
+            notes: knowledge
+                .notes_for(utterance)
+                .into_iter()
+                .map(|n| NoteLine {
+                    id: n.id.clone(),
+                    text: n.text.trim().to_string(),
+                })
+                .collect(),
+            device: None,
             truncated: Vec::new(),
         };
 
@@ -189,7 +211,23 @@ impl ModelContext {
             return;
         }
 
-        // History first. A model can interpret a request without knowing what
+        // Notes first. They are prose and the largest thing here, and losing
+        // them degrades an answer to "I don't have that information" while
+        // losing anything else degrades a request that moves a machine.
+        //
+        // Dropped oldest-layer-first rather than wholesale, so a vendor's note
+        // about their own machine outlives a general one from the base.
+        while !self.notes.is_empty() && self.estimated_tokens() > budget.max_tokens {
+            self.notes.remove(0);
+            if !self.truncated.contains(&"notes") {
+                self.truncated.push("notes");
+            }
+        }
+        if self.estimated_tokens() <= budget.max_tokens {
+            return;
+        }
+
+        // History next. A model can interpret a request without knowing what
         // the engine decided last time; it cannot interpret "half of last
         // time" without knowing what last time was.
         if !self.history.is_empty() {
@@ -232,6 +270,17 @@ impl ModelContext {
         let mut out = String::new();
 
         let _ = writeln!(out, "request: {}", self.utterance);
+
+        if let Some(device) = &self.device {
+            let _ = writeln!(out, "machine: {device}");
+        }
+
+        if !self.notes.is_empty() {
+            let _ = writeln!(out, "notes:");
+            for note in &self.notes {
+                let _ = writeln!(out, "  [{}] {}", note.id, note.text);
+            }
+        }
 
         if !self.styles.is_empty() {
             let _ = writeln!(out, "styles: {}", self.styles.join(", "));

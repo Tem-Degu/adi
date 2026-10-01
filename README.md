@@ -7,11 +7,11 @@ corrects itself, and accepts spoken instruction from the person using it. It
 acts on the machine directly rather than offering advice for the person to
 carry out.
 
-It also holds the knowledge of its domain, so a person can ask it questions
-and receive instruction without consulting anything else. Why the last result
-came out as it did, what a particular setting changes, how to prepare for what
-they are about to make. The machine answers from the same knowledge it uses to
-correct itself, so the explanation and the action agree.
+It also holds the knowledge of its domain, so a person can ask it questions and
+receive instruction without consulting anything else. What model it is, why a
+result came out as it did, what a particular setting changes. It answers from
+what the manufacturer supplied and from the declaration it already reasons over,
+and it names what it drew on, so an answer can be traced to its source.
 
 Everything runs on the device. No internet connection, no account, no
 companion application.
@@ -292,6 +292,13 @@ levels run against a real appliance.
 
 The appliance library occupies roughly 12 KB of flash with no static or heap
 allocation, measured on x86-64.
+
+Answering a question is not safe in the way acting is. An action is checked
+against the declaration, clamped to the declared range and validated
+independently by the appliance, so a wrong one is refused. An answer is text
+that reaches a person, and nothing verifies it. The mitigation is to answer only
+from supplied knowledge and to record what was used, which narrows the risk
+without removing it.
 
 Not yet done:
 

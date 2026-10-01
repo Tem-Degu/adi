@@ -43,6 +43,33 @@ use serde::Serialize;
 
 use crate::ModelError;
 
+/// What the interpreter needs to know about the machine and its domain.
+///
+/// Grouped rather than passed as eight positional arguments, which is what this
+/// had grown into. It is also the list of everything a model is told, which is
+/// worth being able to read in one place.
+#[derive(Debug, Default, Clone)]
+pub struct Surroundings {
+    /// Styles the knowledge declares, which an intent may name.
+    pub styles: Vec<String>,
+    /// Materials the knowledge declares.
+    pub materials: Vec<String>,
+    /// Variables the profile models, each with its unit and meaning.
+    pub variables: Vec<VariableInfo>,
+    /// The manufacturer's own material, for answering a question. Reaches no
+    /// actuation value.
+    pub notes: Vec<adi_protocol::knowledge::Note>,
+    /// What this machine is, where the caller knows.
+    pub device: Option<String>,
+}
+
+/// A note as the backend is told about it.
+#[derive(Debug, Serialize)]
+struct NoteLineOut<'a> {
+    id: &'a str,
+    text: &'a str,
+}
+
 /// A variable as the backend is told about it.
 #[derive(Debug, Serialize)]
 struct VariableLine<'a> {
@@ -63,6 +90,13 @@ struct Request<'a> {
     /// Each with its unit and what it means, rather than a bare name. A model
     /// cannot map a request onto a variable it has only been shown the name of.
     variables: &'a [VariableLine<'a>],
+    /// What the manufacturer wants the machine able to say. Supplied so the
+    /// model can answer a question; it reaches no actuation value.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    notes: &'a [NoteLineOut<'a>],
+    /// What this machine is, where the engine was told.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    machine: Option<&'a str>,
     remembered: Vec<RememberedLine>,
     history: Vec<HistoryLine>,
 }
@@ -93,6 +127,10 @@ pub struct ProcessInterpreter {
     knowledge_styles: Vec<String>,
     knowledge_materials: Vec<String>,
     variables: Vec<VariableInfo>,
+    /// Every note the knowledge holds, filtered per utterance.
+    notes: Vec<adi_protocol::knowledge::Note>,
+    /// What this machine is, where the caller supplied it.
+    device: Option<String>,
 }
 
 struct Pipe {
@@ -114,9 +152,7 @@ impl ProcessInterpreter {
     pub fn start(
         command: &str,
         args: &[String],
-        styles: Vec<String>,
-        materials: Vec<String>,
-        variables: Vec<VariableInfo>,
+        surroundings: Surroundings,
         budget: ContextBudget,
     ) -> Result<Self, ModelError> {
         let mut child = Command::new(command)
@@ -144,9 +180,11 @@ impl ProcessInterpreter {
                 command: command.to_string(),
             }),
             budget,
-            knowledge_styles: styles,
-            knowledge_materials: materials,
-            variables,
+            knowledge_styles: surroundings.styles,
+            knowledge_materials: surroundings.materials,
+            variables: surroundings.variables,
+            notes: surroundings.notes,
+            device: surroundings.device,
         })
     }
 
@@ -201,6 +239,16 @@ impl Interpreter for ProcessInterpreter {
             styles: self.knowledge_styles.clone(),
             materials: self.knowledge_materials.clone(),
             variables: self.variables.clone(),
+            notes: self
+                .notes
+                .iter()
+                .filter(|n| n.matches(utterance))
+                .map(|n| adi_language::context::NoteLine {
+                    id: n.id.clone(),
+                    text: n.text.trim().to_string(),
+                })
+                .collect(),
+            device: self.device.clone(),
             ..Default::default()
         };
 
@@ -242,11 +290,22 @@ impl Interpreter for ProcessInterpreter {
             })
             .collect();
 
+        let note_lines: Vec<NoteLineOut<'_>> = assembled
+            .notes
+            .iter()
+            .map(|n| NoteLineOut {
+                id: &n.id,
+                text: &n.text,
+            })
+            .collect();
+
         let request = Request {
             utterance: &assembled.utterance,
             styles: &assembled.styles,
             materials: &assembled.materials,
             variables: &variable_lines,
+            notes: &note_lines,
+            machine: assembled.device.as_deref(),
             remembered: assembled
                 .remembered
                 .iter()
