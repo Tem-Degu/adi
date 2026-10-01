@@ -103,8 +103,8 @@ By the time this is called the library has confirmed the tool exists, every
 argument is present, in range and in the declared unit, no interlock blocks
 it, the preconditions hold, and the sequence constraints are satisfied.
 
-**4. Declare it.** One entry in a data file, stating the name, the
-parameters, their limits, the description, and the conditions under which the tool may run.
+**4. Declare it.** One entry in a data file, stating the name, the parameters,
+their limits, the description, and the conditions under which the tool may run.
 
 ```yaml
 tools:
@@ -221,10 +221,12 @@ D2 is the default because an engine choosing on its own can only act on
 situations someone expressed as a rule beforehand. A model can act on a
 request, or on a cycle, that no rule describes, which is what allows a person
 to ask for what they want in their own words instead of selecting from a fixed
-set of options. The safety of a model-chosen value does not depend on the model being right:
-the engine clamps it to the declared range and snaps it to the declared
-resolution, the safety envelope checks the whole plan, and the appliance
-validates it independently.
+set of options.
+
+The safety of a model-chosen value does not depend on the model being right: the
+engine clamps it to the declared range and snaps it to the declared resolution,
+the safety envelope checks the whole plan, and the appliance validates it
+independently.
 
 D2 refuses to initialise against a declaration that states no sequence
 constraints, since that is precisely the case where individually valid actions
