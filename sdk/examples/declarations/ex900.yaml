@@ -45,6 +45,11 @@ signals:
 tools:
   - id: "adi.espresso.grind.set_setting"
     name: "set_grind"
+    description: >
+      Stepper-driven burr collar, 60 detents. Settles within two seconds, and
+      retains roughly 0.4 g of grounds from the previous setting, so a purge is
+      advisable after a change of more than four steps. The primary control for
+      extraction rate, and the one to prefer when the dose is already correct.
     parameters:
       setting:
         type: integer
@@ -66,6 +71,10 @@ tools:
     reversible: false
 
   - id: "adi.espresso.dose.by_mass"
+    description: >
+      Gravimetric doser with a load cell. Immediate and repeatable, with no
+      retention. Changes the strength of the result as well as the extraction
+      rate, so prefer the grind where the intent is to correct extraction alone.
     parameters:
       mass: { type: number, unit: g, min: 6.0, max: 14.0, resolution: 0.1 }
     effects: ["dose_mass"]

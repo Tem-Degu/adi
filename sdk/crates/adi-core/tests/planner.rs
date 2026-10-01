@@ -411,6 +411,7 @@ fn a_zero_response_cannot_drive_the_mechanism_to_its_limit() {
         per_unit: 0.0,
         confidence: 0.9,
         param_unit: Unit::Step,
+            description: None,
     };
     assert!(matches!(
         p.plan(
@@ -454,6 +455,42 @@ fn a_non_finite_value_is_never_produced() {
                 Err(CoreError::NotFinite { .. })
             ),
             "a desired delta of {bad} must be refused"
+        );
+    }
+}
+
+/// A manufacturer's description reaches the candidate, so a model choosing
+/// between two tools can read it. Nothing in the engine consumes it.
+///
+/// The field is optional, and a tool without one must behave exactly as before,
+/// which is the half of this that a present-only assertion would miss.
+#[test]
+fn a_tool_description_reaches_the_candidate() {
+    let mut declaration = declaration();
+    let skill = skill();
+
+    declaration.tools[0].description = Some("settles slowly, retains grounds".into());
+
+    let domain = TestDomain::new();
+    let planner = Planner::new(&declaration, Some(&skill), &domain);
+    let candidates = planner.candidates(&VariableId::from("cycle_time"));
+
+    assert!(!candidates.is_empty(), "the fixture should offer candidates");
+
+    let described = candidates
+        .iter()
+        .find(|c| c.tool == declaration.tools[0].id)
+        .expect("the described tool should be a candidate");
+    assert_eq!(
+        described.description.as_deref(),
+        Some("settles slowly, retains grounds")
+    );
+
+    for other in candidates.iter().filter(|c| c.tool != declaration.tools[0].id) {
+        assert!(
+            other.description.is_none(),
+            "a tool with no description must carry none, got {:?}",
+            other.description
         );
     }
 }

@@ -92,6 +92,13 @@ struct CandidateLine<'a> {
     /// sensible one. Without this, a model proposing a delta has it read as an
     /// absolute and clamped to the end of the range.
     current: Option<f64>,
+    /// The manufacturer's description, where they wrote one.
+    ///
+    /// Advisory. It may inform which candidate is picked and reaches no
+    /// actuation value: every candidate here is already declared, and whatever
+    /// is proposed is clamped and checked regardless.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: &'a Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +208,7 @@ impl ProcessChooser {
                     confidence: c.confidence,
                     unit: format!("{:?}", c.param_unit).to_lowercase(),
                     current: present(context, &c.parameter),
+                    description: &c.description,
                 })
                 .collect(),
             level: self.level,

@@ -101,6 +101,23 @@ pub struct Tool {
     pub id: SemanticId,
     #[serde(default)]
     pub name: Option<String>,
+    /// What this tool is and when to prefer it, for a model choosing between
+    /// candidates. Advisory, and read by no engine logic.
+    ///
+    /// A description MAY influence which candidate a model picks. It MUST NOT
+    /// affect which candidates exist, or what value is sent. Candidates are
+    /// derived from `effects` and the skill's declared response; the value is
+    /// clamped to the declared range and snapped to the declared resolution
+    /// whatever any text says. So a description that is wrong, stale or
+    /// promotional can at worst cause a suboptimal choice among options that
+    /// are already safe, and cannot reach the actuator.
+    ///
+    /// The physics does not belong here. A description stating "moves shot time
+    /// by 1.4 seconds per step" puts that number in two places, and the skill's
+    /// `per_unit` is the one the engine uses. Describe what the mechanism is,
+    /// what it settles like, and when another tool would serve better.
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default)]
     pub parameters: BTreeMap<String, Parameter>,
     #[serde(default)]

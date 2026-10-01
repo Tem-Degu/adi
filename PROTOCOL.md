@@ -374,6 +374,20 @@ engine SHOULD cache declarations keyed on this value.
 
 ### 4.2 Parameter types
 
+A tool MAY carry a `description`: free text saying what the mechanism is and
+when to prefer it over another tool that serves the same variable.
+
+A description is advisory. An engine MAY use it when choosing between
+candidates. It MUST NOT be used to determine which tools are candidates, which
+follows from `effects` and the skill, nor to determine any value sent, which is
+clamped to the declared range and snapped to the declared resolution
+regardless. An engine therefore remains correct against a declaration whose
+description is wrong, stale or promotional.
+
+A description MUST NOT state the magnitude of a tool's effect. That belongs in
+the skill's `per_unit`, and stating it twice creates two sources that will
+diverge.
+
 Every numeric parameter MUST declare a unit, a range and a resolution. Units MUST
 be drawn from the table below. Unitless numbers are not permitted except for
 `index` and `count` types.

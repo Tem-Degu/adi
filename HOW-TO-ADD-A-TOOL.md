@@ -272,6 +272,25 @@ The checking is still duplicated, and deliberately: the engine checks so it
 never sends something wrong, and your firmware checks because it must never
 trust the engine. What is no longer duplicated is the number itself.
 
+### 13b. Describe it, if another tool could serve the same purpose
+
+Optional, and worth doing only where a machine has two tools that move the same
+variable. The engine picks between them by confidence; a description tells a
+model what the numbers do not.
+
+```yaml
+    description: >
+      Stepper-driven burr collar, 60 detents. Settles within two seconds, and
+      retains roughly 0.4 g from the previous setting, so a purge is advisable
+      after a change of more than four steps.
+```
+
+Two rules. Do not put the magnitude of the effect here: `per_unit` in the skill
+is what sizes a correction, and writing it twice creates two numbers that will
+disagree. And do not rely on it for safety, because nothing does: the engine
+clamps and checks whatever is chosen, so a description that is wrong produces a
+poor choice among safe options rather than an unsafe one.
+
 ### 14. Add envelope entries if the tool can accumulate
 
 Some limits only exist across a sequence rather than within one call. Three

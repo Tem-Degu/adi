@@ -88,6 +88,7 @@ impl<'a> Planner<'a> {
                     per_unit: response.per_unit,
                     confidence: response.confidence,
                     param_unit: range.unit,
+                    description: tool.description.clone(),
                 });
             }
         }
@@ -362,6 +363,11 @@ pub struct Candidate {
     /// variable it moves. Grind position is in steps; it moves shot time in
     /// seconds.
     pub param_unit: crate::plan::Unit,
+    /// The manufacturer's description of the tool, where they wrote one.
+    ///
+    /// Carried so a model choosing between candidates can read it. Nothing in
+    /// the engine reads it, and the declaration's documentation states why.
+    pub description: Option<String>,
 }
 
 pub use adi_protocol::units::Unit;
