@@ -10,15 +10,14 @@ carry out.
 It also holds the knowledge of its domain, so a person can ask it questions and
 receive instruction without consulting anything else. What model it is, why a
 result came out as it did, what a particular setting changes. It answers from
-what the manufacturer supplied and from the declaration it already reasons over,
-and it names what it drew on, so an answer can be traced to its source.
+what the manufacturer supplied and from the declaration it already reasons over.
 
 Everything runs on the device. No internet connection, no account, no
 companion application.
 
 The intelligence is bounded to one domain, meaning the scope of what the
-machine exists to do. An espresso machine reasons about extraction while 
-greenhouse controller reasons about growth. That boundary is what keeps the 
+machine exists to do. An espresso machine reasons about extraction while
+greenhouse controller reasons about growth. That boundary is what keeps the
 system small enough to run on appliance
 hardware, specific enough to be useful, and narrow enough that its behaviour
 can be tested and certified.
@@ -66,11 +65,7 @@ decision it makes; see [Autonomy](#autonomy).
 
 A request is not the only thing a person can say. Asked a question, the machine
 answers from the declaration it already reasons over and from whatever the
-manufacturer wrote down, and names what it drew on. Nothing is actuated.
-
-Where a request cannot be served, the refusal says which kind it was: nothing
-declared can move that, the plan would breach a safety limit, the appliance
-declined. A refusal is an outcome rather than a fault, and the session continues.
+manufacturer wrote down.
 
 ## Integrating a machine
 
@@ -124,10 +119,19 @@ tools:
     preconditions: ["state == idle"]
     duration_ms_max: 6000
     reversible: true
+    # Optional. For a model choosing between two tools that serve the same
+    # purpose, and read by no engine logic.
+    description: >
+      Stepper-driven burr collar. Settles within two seconds, and retains
+      roughly 0.4 g of grounds from the previous setting.
 ```
 
 `adi generate-c` compiles that into constant tables, so a limit exists in one
 place and nothing can drift from it.
+
+A `description` may influence which tool a model picks and never what value is
+sent, so one that is wrong or out of date cannot reach the actuator. Keep the
+numbers out of it: how far the mechanism moves an outcome belongs in step 5.
 
 **5. Optionally, describe its effect.** A separate file states how much the
 mechanism moves a result, which is what lets the engine size a correction
@@ -157,7 +161,7 @@ variables:
       How clean the drip tray is, from 0 for soiled to 1 for clean.
 ```
 
-This is what makes a capability nobody anticipated reachable.
+This is what makes a new capability reachable.
 
 **7. Optionally, say what you know.** Free text the machine may answer from.
 
@@ -211,7 +215,7 @@ to ask for what they want in their own words rather than select from a fixed
 set of options. The safety of a model-chosen value does not depend on the model being right:
 the engine clamps it to the declared range and snaps it to the declared
 resolution, the safety envelope checks the whole plan, and the appliance
-validates it independently. 
+validates it independently.
 
 D2 refuses to initialise against a declaration that states no sequence
 constraints, since that is precisely the case where individually valid actions
@@ -343,8 +347,7 @@ Not yet done:
 
 - **No audio capture or playback.** Speech synthesis writes a file and
   transcription reads one. Driving a microphone and a speaker needs a platform
-  library and a device, which belongs in a product rather than in this SDK, and
-  no worked example of doing it is supplied.
+  library and a device, which belongs in a product rather than in this SDK.
 - **Models run beside the engine rather than inside it.** The engine starts
   them and exchanges one message per line, so a developer supplies model files
   and writes no code. Backends that load models through ONNX Runtime and
