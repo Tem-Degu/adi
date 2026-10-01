@@ -18,6 +18,7 @@ use adi_decision::{
     Understood,
 };
 use adi_domain_espresso::Espresso;
+use adi_language::context::VariableInfo;
 use adi_models::{
     Backend, ModelsConfig, ProcessChooser, ProcessInterpreter, ScriptedInterpreter, Seam,
 };
@@ -388,7 +389,21 @@ fn load_interpreter(
                 &seam.args,
                 knowledge.style_ids().into_iter().map(str::to_string).collect(),
                 knowledge.material_ids().into_iter().map(str::to_string).collect(),
-                domain.variables().iter().map(|v| v.0.clone()).collect(),
+                // Each with its unit and meaning, looked up from the
+                // knowledge, so the model is not asked to infer what a
+                // variable is from its name alone.
+                domain
+                    .variables()
+                    .iter()
+                    .map(|v| {
+                        let declared = domain.knowledge().variable(v);
+                        VariableInfo {
+                            name: v.0.clone(),
+                            unit: declared.map(|d| format!("{:?}", d.unit).to_lowercase()),
+                            meaning: declared.map(|d| d.description.trim().to_string()),
+                        }
+                    })
+                    .collect(),
                 Default::default(),
             )?;
             Ok(Some((Box::new(interpreter), label)))

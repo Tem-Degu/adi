@@ -10,6 +10,69 @@
 profile: "espresso/v1"
 knowledge_version: "1.0"
 
+variables:
+  dose_mass:
+    unit: g
+    description: >
+      Dry coffee going in. More gives a stronger result and slows extraction.
+  yield_mass:
+    unit: g
+    description: >
+      Liquid coming out. More gives a longer, weaker drink.
+  ratio:
+    unit: none
+    description: >
+      yield_mass divided by dose_mass. Low is concentrated and syrupy, high is
+      long and dilute.
+  shot_time:
+    unit: s
+    description: >
+      Seconds from first drip to stop. Short means under-extracted, which
+      tastes sour and thin; long means over-extracted, which tastes bitter and
+      harsh.
+  grind_setting:
+    unit: step
+    description: >
+      Grinder position. Finer slows the flow and lengthens the shot; coarser
+      speeds it up.
+  brew_temperature:
+    unit: c
+    description: >
+      Water temperature at the group. Higher extracts more, towards bitter;
+      lower extracts less, towards sour.
+  extraction_yield:
+    unit: pct
+    description: >
+      Percentage of the dry coffee dissolved into the drink, measured with a
+      refractometer. The direct measure of extraction, where available.
+  flow_peak:
+    unit: g_per_s
+    description: >
+      Fastest mass flow during the shot. High suggests the puck offered little
+      resistance.
+  flow_variance:
+    unit: none
+    description: >
+      Irregularity of flow through the shot. High indicates channelling, where
+      water found a path through the puck rather than passing evenly.
+
+  # Preference variables. These express what someone likes rather than how the
+  # machine performed, so the engine never adjusts one to correct a process
+  # fault. See PROTOCOL.md 7.1 and preference_variables below.
+  milk_volume:
+    unit: ml
+    description: >
+      Milk added to the drink. A preference: it is what someone asked for, not
+      a measure of how the extraction went.
+  sugar_mass:
+    unit: g
+    description: >
+      Sugar added to the drink. A preference.
+  syrup_volume:
+    unit: ml
+    description: >
+      Flavoured syrup added to the drink. A preference.
+
 styles:
   - id: "adi.espresso.style.espresso"
     targets:

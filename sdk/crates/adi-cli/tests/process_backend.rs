@@ -12,6 +12,7 @@
 //! Skipped rather than failed where Python is absent, so `cargo test` does not
 //! require an interpreter to be installed.
 
+use adi_language::context::VariableInfo;
 use adi_decision::{Interpreter, SelectionContext, Understood};
 use adi_language::context::ContextBudget;
 use adi_models::ProcessInterpreter;
@@ -46,8 +47,21 @@ fn styles() -> Vec<String> {
     ]
 }
 
-fn variables() -> Vec<String> {
-    vec!["sugar_mass".into(), "shot_time".into()]
+fn variables() -> Vec<VariableInfo> {
+    // One described and one not, so the request carries both shapes and a
+    // backend that assumes every variable has a meaning is caught here.
+    vec![
+        VariableInfo {
+            name: "sugar_mass".into(),
+            unit: Some("g".into()),
+            meaning: Some("Sugar added to the drink. A preference.".into()),
+        },
+        VariableInfo {
+            name: "shot_time".into(),
+            unit: None,
+            meaning: None,
+        },
+    ]
 }
 
 fn start() -> Option<ProcessInterpreter> {

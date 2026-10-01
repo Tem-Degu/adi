@@ -9,7 +9,9 @@
 //! than a property. The espresso base and the example from PROTOCOL.md 6.2 are
 //! tested in `adi-domain-espresso`, where that vocabulary belongs.
 
-use adi_protocol::knowledge::ExtensionError;
+use adi_protocol::knowledge::{ExtensionError, KnowledgeError, VariableDef};
+use adi_protocol::ids::VariableId;
+use adi_protocol::Knowledge;
 use adi_protocol::{KnowledgeBase, KnowledgeExtension, Layer, Range, Unit};
 
 fn load<T: serde::de::DeserializeOwned>(name: &str) -> T {
@@ -189,4 +191,87 @@ fn inheriting_from_the_base_is_allowed() {
         Some("adi.example.style.standard")
     );
     e.validate(&base()).expect("inheriting from the base is the point");
+}
+
+// --------------------------------------------- variables declared as data
+
+/// A style targeting a variable no layer declares is refused.
+///
+/// Before variables were declared there was nothing to check against, so a typo
+/// in a variable name produced a target that silently matched nothing.
+#[test]
+fn a_style_targeting_an_undeclared_variable_is_refused() {
+    let mut base = base();
+    base.styles[0]
+        .targets
+        .insert("cylce_time".into(), Range { min: 1.0, max: 2.0, unit: Unit::S, resolution: None });
+
+    let err = Knowledge::new(base.into_layer()).expect_err("a typo must be caught");
+    assert!(
+        matches!(err, KnowledgeError::UndeclaredVariable { ref variable, .. } if variable == "cylce_time"),
+        "{err:?}"
+    );
+}
+
+/// A target stated in the wrong unit is refused.
+///
+/// This is the worse of the two. A range in the wrong unit still compares
+/// against a measurement, and quietly decides a cycle was within target.
+#[test]
+fn a_target_in_the_wrong_unit_is_refused() {
+    let mut base = base();
+    let target = base.styles[0].targets.get_mut("cycle_time").unwrap();
+    target.unit = Unit::G;
+
+    let err = Knowledge::new(base.into_layer()).expect_err("a unit mismatch must be caught");
+    assert!(matches!(err, KnowledgeError::TargetUnitMismatch { .. }), "{err:?}");
+}
+
+/// PROTOCOL.md 6.3: a vendor may introduce variables in its own namespace.
+///
+/// This is what makes a genuinely new capability reachable. A tool moving
+/// nothing the base models can be declared, and without a variable to name in
+/// the skill the engine could never select it.
+#[test]
+fn a_vendor_may_declare_its_own_variable() {
+    let base = base();
+    let mut knowledge = Knowledge::new(base.into_layer()).unwrap();
+
+    let mut extension = extension();
+    extension.variables.insert(
+        VariableId::from("x.acme.tray_state"),
+        VariableDef {
+            unit: Unit::None,
+            description: "How clean the drip tray is.".into(),
+        },
+    );
+    extension.styles.clear();
+
+    knowledge
+        .add(extension.into_layer(Layer::Vendor))
+        .expect("a namespaced variable is permitted");
+}
+
+/// A vendor style may target a variable that vendor declared.
+#[test]
+fn a_vendor_style_may_target_a_vendor_variable() {
+    let base = base();
+    let mut knowledge = Knowledge::new(base.into_layer()).unwrap();
+
+    let mut extension = extension();
+    extension.variables.insert(
+        VariableId::from("x.acme.tray_state"),
+        VariableDef {
+            unit: Unit::None,
+            description: "How clean the drip tray is.".into(),
+        },
+    );
+    extension.styles[0].targets.insert(
+        "x.acme.tray_state".into(),
+        Range { min: 0.0, max: 1.0, unit: Unit::None, resolution: None },
+    );
+
+    knowledge
+        .add(extension.into_layer(Layer::Vendor))
+        .expect("a vendor may target its own variable");
 }

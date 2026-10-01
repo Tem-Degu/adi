@@ -44,13 +44,41 @@ signals:
     sample_rate_hz: 0.0017
     accuracy: { abs: 1.5, unit: pct }
 
+# Units and meanings, in the same shape the espresso knowledge base uses. This
+# is where bare names fail hardest: a model has reliable intuitions about what
+# makes coffee bitter and none at all about daily_light_integral, so a profile
+# that does not state what its variables mean is relying on the model having
+# read about the domain.
 variables:
-  - substrate_moisture
-  - air_temperature
-  - daily_light_integral
-  - nutrient_concentration
-  - growth_rate
-  - leaf_health
+  substrate_moisture:
+    unit: pct
+    description: >
+      Water held in the growing medium. Low stresses the plant; high excludes
+      air from the roots.
+  air_temperature:
+    unit: c
+    description: >
+      Air temperature in the enclosure.
+  daily_light_integral:
+    unit: mol_per_m2_per_day
+    description: >
+      Total photosynthetically active light received over a day. The main
+      determinant of growth rate, and accumulated rather than instantaneous.
+  nutrient_concentration:
+    unit: ppm
+    description: >
+      Dissolved nutrient in the feed solution. Low starves the plant; high
+      draws water back out of the roots.
+  growth_rate:
+    unit: mm_per_day
+    description: >
+      Change in plant height per day. The outcome, observed over weeks rather
+      than at the end of a cycle.
+  leaf_health:
+    unit: none
+    description: >
+      Subjective assessment of foliage. A judgement a person makes, not a
+      measurement the machine takes.
 
 # The point of the exercise. Espresso never produces numbers like these, and
 # any neutral code that cannot represent them has an espresso assumption in it.

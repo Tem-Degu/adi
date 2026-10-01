@@ -38,10 +38,20 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 
 use adi_decision::{accept_intent, DecisionError, Interpreter, SelectionContext, Understood};
-use adi_language::context::{ContextBudget, ModelContext};
+use adi_language::context::{ContextBudget, ModelContext, VariableInfo};
 use serde::Serialize;
 
 use crate::ModelError;
+
+/// A variable as the backend is told about it.
+#[derive(Debug, Serialize)]
+struct VariableLine<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meaning: Option<&'a str>,
+}
 
 /// What the program is sent. A flattened `ModelContext`, so a program in any
 /// language can read it without knowing our types.
@@ -50,7 +60,9 @@ struct Request<'a> {
     utterance: &'a str,
     styles: &'a [String],
     materials: &'a [String],
-    variables: &'a [String],
+    /// Each with its unit and what it means, rather than a bare name. A model
+    /// cannot map a request onto a variable it has only been shown the name of.
+    variables: &'a [VariableLine<'a>],
     remembered: Vec<RememberedLine>,
     history: Vec<HistoryLine>,
 }
@@ -80,7 +92,7 @@ pub struct ProcessInterpreter {
     budget: ContextBudget,
     knowledge_styles: Vec<String>,
     knowledge_materials: Vec<String>,
-    variables: Vec<String>,
+    variables: Vec<VariableInfo>,
 }
 
 struct Pipe {
@@ -104,7 +116,7 @@ impl ProcessInterpreter {
         args: &[String],
         styles: Vec<String>,
         materials: Vec<String>,
-        variables: Vec<String>,
+        variables: Vec<VariableInfo>,
         budget: ContextBudget,
     ) -> Result<Self, ModelError> {
         let mut child = Command::new(command)
@@ -220,11 +232,21 @@ impl Interpreter for ProcessInterpreter {
             })
             .collect();
 
+        let variable_lines: Vec<VariableLine<'_>> = assembled
+            .variables
+            .iter()
+            .map(|v| VariableLine {
+                name: &v.name,
+                unit: v.unit.as_deref(),
+                meaning: v.meaning.as_deref(),
+            })
+            .collect();
+
         let request = Request {
             utterance: &assembled.utterance,
             styles: &assembled.styles,
             materials: &assembled.materials,
-            variables: &assembled.variables,
+            variables: &variable_lines,
             remembered: assembled
                 .remembered
                 .iter()

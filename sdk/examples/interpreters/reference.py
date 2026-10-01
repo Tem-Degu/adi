@@ -13,7 +13,8 @@ below are deliberately simple, and a real backend would put a language model
 here. What a real backend would not change is the contract:
 
   in   {"utterance": "...", "styles": [...], "materials": [...],
-        "variables": [...], "remembered": [...], "history": [...]}
+        "variables": [{"name": "...", "unit": "s", "meaning": "..."}],
+         "remembered": [...], "history": [...]}
 
   out  {"intent": {"kind": "produce"|"adjust", "style": "<id>",
                    "targets": {"<variable>": <target>}}}
@@ -107,11 +108,28 @@ def find_style(words, styles):
 
 
 def find_variable(words, variables):
-    """Match a spoken word against a modelled variable."""
+    """Match a spoken word against a modelled variable.
+
+    Each variable arrives as an object carrying its name, and usually its unit
+    and what it means. A real model would read the meaning, which is what lets
+    "less bitter" reach shot_time without the word appearing in the name. This
+    matches on the name and on words from the meaning, which is enough to show
+    the shape without pretending to understand language.
+    """
     for variable in variables:
-        parts = set(re.split(r"[._]", variable.lower()))
+        name = variable["name"]
+        parts = set(re.split(r"[._]", name.lower()))
         if parts & words:
-            return variable
+            return name
+
+    # Nothing matched a name. Try the descriptions, so a request phrased in the
+    # domain's own words rather than the variable's can still land.
+    for variable in variables:
+        meaning = variable.get("meaning")
+        if not meaning:
+            continue
+        if set(re.findall(r"[a-z]+", meaning.lower())) & words:
+            return variable["name"]
     return None
 
 

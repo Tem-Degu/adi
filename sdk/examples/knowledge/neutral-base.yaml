@@ -7,6 +7,30 @@
 profile: "example/v1"
 knowledge_version: "1.0"
 
+# The variables this profile models. Deliberately domain-neutral names: this
+# fixture exists to catch espresso assumptions leaking into the neutral crates.
+variables:
+  cycle_time:
+    unit: s
+    description: >
+      How long one cycle took. Short means the process ran too fast.
+  output_ratio:
+    unit: none
+    description: >
+      Output divided by input. Low is concentrated, high is dilute.
+  process_temperature:
+    unit: c
+    description: >
+      Temperature during the cycle.
+  input_mass:
+    unit: g
+    description: >
+      Material going in.
+  additive_volume:
+    unit: ml
+    description: >
+      Additive requested. A preference rather than a process measure.
+
 styles:
   - id: "adi.example.style.standard"
     targets:

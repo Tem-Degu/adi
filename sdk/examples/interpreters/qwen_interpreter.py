@@ -156,7 +156,15 @@ def context_lines(request):
     if request.get("materials"):
         lines.append("materials: " + ", ".join(request["materials"]))
     if request.get("variables"):
-        lines.append("variables: " + ", ".join(request["variables"]))
+        # Name, unit and meaning, one per line. The meaning is what lets a
+        # request phrased in the domain's own words reach the right variable:
+        # "less bitter" does not contain the word "time".
+        lines.append("variables:")
+        for v in request["variables"]:
+            if v.get("unit") and v.get("meaning"):
+                lines.append("  {} ({}): {}".format(v["name"], v["unit"], v["meaning"]))
+            else:
+                lines.append("  " + v["name"])
 
     for cycle in request.get("remembered", []):
         parts = ["cycle " + cycle.get("cycle_id", "?")]

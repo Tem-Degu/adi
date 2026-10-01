@@ -66,7 +66,14 @@ pub struct ModelContext {
     /// Material identifiers this machine's knowledge declares.
     pub materials: Vec<String>,
     /// Variables the engine models, so a model knows what it may name.
-    pub variables: Vec<String>,
+    /// The variables the model may name, each with its unit and what it means.
+    ///
+    /// Names alone were sent until this. A model then had to infer from
+    /// `shot_time` what a request about bitterness referred to, which works
+    /// where the model was trained on the domain and not otherwise. A
+    /// manufacturer's own variable has no such luck: nothing in a model's
+    /// training says what `x.acme.tray_state` is.
+    pub variables: Vec<VariableInfo>,
     /// Recent cycles, most recent first.
     pub remembered: Vec<RememberedSummary>,
     /// Recent decisions, most recent first.
@@ -109,6 +116,16 @@ pub fn estimate_tokens(text: &str) -> usize {
     text.len().div_ceil(CHARS_PER_TOKEN)
 }
 
+/// A variable as the model is told about it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariableInfo {
+    pub name: String,
+    /// Absent where the profile models a variable its knowledge does not
+    /// declare.
+    pub unit: Option<String>,
+    pub meaning: Option<String>,
+}
+
 impl ModelContext {
     /// Assemble what ADI-P 9.4.1 requires, within `budget`.
     pub fn assemble(
@@ -122,7 +139,17 @@ impl ModelContext {
             utterance: utterance.to_string(),
             styles: knowledge.style_ids().into_iter().map(str::to_string).collect(),
             materials: knowledge.material_ids().into_iter().map(str::to_string).collect(),
-            variables: variables.iter().map(|v| v.0.clone()).collect(),
+            variables: variables
+                .iter()
+                .map(|v| {
+                    let declared = knowledge.variable(v);
+                    VariableInfo {
+                        name: v.0.clone(),
+                        unit: declared.map(|d| format!("{:?}", d.unit).to_lowercase()),
+                        meaning: declared.map(|d| d.description.trim().to_string()),
+                    }
+                })
+                .collect(),
             remembered: Vec::new(),
             history: Vec::new(),
             truncated: Vec::new(),
@@ -213,7 +240,21 @@ impl ModelContext {
             let _ = writeln!(out, "materials: {}", self.materials.join(", "));
         }
         if !self.variables.is_empty() {
-            let _ = writeln!(out, "variables: {}", self.variables.join(", "));
+            let _ = writeln!(out, "variables:");
+            for v in &self.variables {
+                match (&v.unit, &v.meaning) {
+                    (Some(unit), Some(meaning)) => {
+                        let _ = writeln!(out, "  {} ({}): {}", v.name, unit, meaning);
+                    }
+                    // A variable the knowledge does not declare still has to be
+                    // offered, since a profile may model one it has not
+                    // described. Naming it alone is what used to happen to all
+                    // of them.
+                    _ => {
+                        let _ = writeln!(out, "  {}", v.name);
+                    }
+                }
+            }
         }
 
         for cycle in &self.remembered {

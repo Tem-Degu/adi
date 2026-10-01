@@ -53,8 +53,14 @@ impl Espresso {
 
     pub fn try_new() -> Result<Self, EspressoError> {
         let base: KnowledgeBase = serde_yaml::from_str(BASE_KNOWLEDGE)?;
+
+        // Read from the knowledge base rather than held here. The two used to be
+        // separate, a list in this file and a table in PROTOCOL.md 7.3, with
+        // nothing checking they agreed.
+        let variables: Vec<VariableId> = base.variables.keys().cloned().collect();
+
         Ok(Self {
-            variables: Self::modelled_variables(),
+            variables,
             knowledge: Knowledge::new(base.into_layer())?,
         })
     }
@@ -75,24 +81,6 @@ impl Espresso {
         Ok(())
     }
 
-    fn modelled_variables() -> Vec<VariableId> {
-        {
-            [
-                registry::vars::DOSE_MASS,
-                registry::vars::YIELD_MASS,
-                registry::vars::RATIO,
-                registry::vars::SHOT_TIME,
-                registry::vars::GRIND_SETTING,
-                registry::vars::BREW_TEMPERATURE,
-                registry::vars::EXTRACTION_YIELD,
-                registry::vars::FLOW_PEAK,
-                registry::vars::FLOW_VARIANCE,
-            ]
-            .iter()
-            .map(|v| VariableId::from(*v))
-            .collect()
-        }
-    }
 }
 
 impl Domain for Espresso {

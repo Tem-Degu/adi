@@ -851,7 +851,7 @@ Requirements:
 | New drink styles | Base drink style definitions |
 | New bean priors | Base diagnosis rules |
 | Machine-specific defaults and starting points | Hard constraints, in the permissive direction |
-| New domain variables in the vendor namespace | Registry semantic IDs |
+| New domain variables in the vendor namespace, with unit and meaning | Registry semantic IDs |
 | Narrower target ranges for the vendor's own styles | The meaning of a base identifier |
 
 Base **diagnosis rules** are deliberately not extendable in this version. Those
@@ -975,6 +975,19 @@ and will not attempt to correct a taste fault by changing them.
 The quantities the engine models. A skill response MUST name one of these, or a
 vendor variable declared under 6.3.
 
+These are declared as data in the profile's knowledge base, each with its unit
+and a statement of what it means, and that declaration is authoritative. The
+table below reproduces it.
+
+A style target MUST name a declared variable and MUST state it in that
+variable's declared unit. An engine MUST reject a knowledge layer that violates
+either, since a target in the wrong unit still compares against a measurement
+and silently decides a cycle was within range.
+
+The declared meanings are supplied to the model that interprets a request. A
+variable identified only by name can be mapped onto a request only where the
+model was trained on the domain, which is not a property a profile may assume.
+
 | Variable | Unit | Meaning |
 |---|---|---|
 | `dose_mass` | g | Dry coffee in |
@@ -986,6 +999,16 @@ vendor variable declared under 6.3.
 | `extraction_yield` | pct | Dissolved solids extracted, when measurable |
 | `flow_peak` | g_per_s | Peak mass flow |
 | `flow_variance` | none | Flow irregularity, the channeling indicator |
+
+Preference variables, which express what someone likes rather than how the
+machine performed. The engine never adjusts one to correct a process fault. See
+7.1.
+
+| Variable | Unit | Meaning |
+|---|---|---|
+| `milk_volume` | ml | Milk added to the drink |
+| `sugar_mass` | g | Sugar added to the drink |
+| `syrup_volume` | ml | Flavoured syrup added to the drink |
 
 ### 7.4 Minimum useful set
 

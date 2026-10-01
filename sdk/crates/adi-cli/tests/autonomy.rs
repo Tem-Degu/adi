@@ -41,7 +41,14 @@ fn sdk() -> std::path::PathBuf {
 /// exits immediately. Written per run rather than committed, so the test does
 /// not depend on which name happens to work here.
 fn config_for(py: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!("adi-autonomy-{}.yaml", std::process::id()));
+    // One file per call, not per process. Every test in a binary shares a
+    // process id, so a name built from it alone had parallel tests writing and
+    // reading the same file: this passed when run alone and failed in the suite.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    let path = std::env::temp_dir()
+        .join(format!("adi-autonomy-{}-{unique}.yaml", std::process::id()));
     std::fs::write(
         &path,
         format!(

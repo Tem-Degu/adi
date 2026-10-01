@@ -27,6 +27,16 @@ pub struct KnowledgeExtension {
     pub namespace: String,
     pub extension_version: String,
     pub extends: Extends,
+    /// Variables this vendor introduces, which the base does not model.
+    ///
+    /// PROTOCOL.md 6.3 permits these. Each MUST sit in the vendor's namespace
+    /// and MUST NOT redefine a base variable, checked in `validate`.
+    ///
+    /// This is what makes a genuinely new capability reachable. A tool that
+    /// moves nothing the base models can be declared, and without a variable to
+    /// name in the skill, the engine could never select it.
+    #[serde(default)]
+    pub variables: BTreeMap<VariableId, VariableDef>,
     #[serde(default)]
     pub styles: Vec<StyleEntry>,
     #[serde(default)]
@@ -42,6 +52,24 @@ pub struct KnowledgeExtension {
     pub constraints: BTreeMap<String, Range>,
 }
 
+/// What a domain variable is.
+///
+/// Before this existed, variables were declared nowhere. They appeared as keys
+/// inside style targets, as string constants in a profile, and as a table in
+/// PROTOCOL.md 7.3 that no code read. The unit was restated in every style that
+/// targeted the variable, and nothing checked those restatements agreed.
+///
+/// The description is sent to a model, which is otherwise given bare names and
+/// must infer from them what a request means. "Less bitter" maps onto shot_time
+/// only because a model trained on general text knows about coffee, which is
+/// not a mechanism a second domain can rely on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VariableDef {
+    pub unit: crate::units::Unit,
+    /// One line: what it measures, and which direction means what.
+    pub description: String,
+}
+
 /// The base domain knowledge, owned by StreetAI. Layer 0.
 ///
 /// Structurally the same as an extension, minus the namespace and version
@@ -51,6 +79,12 @@ pub struct KnowledgeExtension {
 pub struct KnowledgeBase {
     pub profile: String,
     pub knowledge_version: String,
+    /// The variables this profile models, with their units and meanings.
+    ///
+    /// Authoritative: a profile reads its variable list from here rather than
+    /// holding its own, so the two cannot drift.
+    #[serde(default)]
+    pub variables: BTreeMap<VariableId, VariableDef>,
     #[serde(default)]
     pub styles: Vec<StyleEntry>,
     #[serde(default)]
@@ -77,6 +111,7 @@ pub struct KnowledgeLayer {
     pub layer: Layer,
     /// Empty for the base, which owns the unprefixed namespace.
     pub namespace: Option<String>,
+    pub variables: BTreeMap<VariableId, VariableDef>,
     pub styles: Vec<StyleEntry>,
     pub material_priors: Vec<MaterialPrior>,
     pub default_steps: BTreeMap<String, crate::units::Quantity>,
@@ -89,6 +124,7 @@ impl KnowledgeBase {
         KnowledgeLayer {
             layer: Layer::Base,
             namespace: None,
+            variables: self.variables,
             styles: self.styles,
             material_priors: self.material_priors,
             default_steps: self.default_steps,
@@ -126,6 +162,7 @@ impl KnowledgeExtension {
         KnowledgeLayer {
             layer,
             namespace: Some(self.namespace),
+            variables: self.variables,
             styles: self.styles,
             material_priors: self.material_priors,
             default_steps,
@@ -509,6 +546,15 @@ pub enum KnowledgeError {
     InheritanceCycle(String),
     #[error(transparent)]
     Monotonicity(#[from] MonotonicityError),
+    #[error("style '{style}' targets '{variable}', which no layer declares")]
+    UndeclaredVariable { style: String, variable: String },
+    #[error("style '{style}' targets '{variable}' in {found}, but it is declared in {declared}")]
+    TargetUnitMismatch {
+        style: String,
+        variable: String,
+        declared: String,
+        found: String,
+    },
 }
 
 impl Knowledge {
@@ -522,6 +568,14 @@ impl Knowledge {
         };
         k.push(base)?;
         Ok(k)
+    }
+
+    /// What a variable is, from whichever layer declares it.
+    ///
+    /// Searched from the top down, though a higher layer cannot redefine a base
+    /// variable, so at most one layer declares any given one.
+    pub fn variable(&self, id: &VariableId) -> Option<&VariableDef> {
+        self.layers.iter().rev().find_map(|l| l.variables.get(id))
     }
 
     /// Accept a layer, or reject it whole.
@@ -550,6 +604,8 @@ impl Knowledge {
     }
 
     fn push(&mut self, layer: KnowledgeLayer) -> Result<(), KnowledgeError> {
+        self.check_targets_against_variables(&layer)?;
+
         // Fold into a copy first. If any constraint widens, the copy is dropped
         // and this instance is untouched.
         let mut trial = self.constraints.clone();
@@ -558,6 +614,49 @@ impl Knowledge {
         }
         self.constraints = trial;
         self.layers.push(layer);
+        Ok(())
+    }
+
+    /// Every style target must name a declared variable, in that variable's
+    /// unit.
+    ///
+    /// Nothing checked this before variables were declared, because there was
+    /// nothing to check against: a target carried its own unit and a typo in a
+    /// variable name produced a target that silently matched nothing. A unit
+    /// disagreement was worse, since a range in the wrong unit compares against
+    /// a measurement and quietly decides a shot was fine.
+    fn check_targets_against_variables(
+        &self,
+        layer: &KnowledgeLayer,
+    ) -> Result<(), KnowledgeError> {
+        for style in &layer.styles {
+            for (variable, range) in &style.targets {
+                let id = VariableId::from(variable.as_str());
+
+                // Declared by this layer, or by one already accepted. A vendor
+                // style may target a base variable, which is the common case.
+                let declared = layer
+                    .variables
+                    .get(&id)
+                    .or_else(|| self.layers.iter().find_map(|l| l.variables.get(&id)));
+
+                let Some(definition) = declared else {
+                    return Err(KnowledgeError::UndeclaredVariable {
+                        style: style.id.clone(),
+                        variable: variable.clone(),
+                    });
+                };
+
+                if range.unit != definition.unit {
+                    return Err(KnowledgeError::TargetUnitMismatch {
+                        style: style.id.clone(),
+                        variable: variable.clone(),
+                        declared: format!("{:?}", definition.unit),
+                        found: format!("{:?}", range.unit),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
