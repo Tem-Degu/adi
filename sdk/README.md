@@ -323,6 +323,31 @@ real weights**, because the machine they were written on cannot hold them.
 manufacturer shipping at volume implements them directly against their own
 runtime.
 
+### When something is refused
+
+A refusal is an ordinary outcome, not a crash. The engine refuses when no
+declared tool can move what was asked for, when a plan would breach the safety
+envelope, when a plan would change one variable two ways, and when the appliance
+declines a call.
+
+`adi run` states which of those happened and continues, so the next request can
+be made. Only a lost link ends a session, because nothing further can be
+attempted.
+
+```
+> raise the extraction
+  understood   Adjust
+  target       extraction_yield = 22 Pct
+  cannot       nothing this machine declares can move that.
+               `adi capabilities` lists what it can change.
+> status
+  link         alive
+```
+
+The engine's own errors are precise and intended for a log. Translating them
+into something a person can act on is the integrator's job, and `adi run` shows
+one way of doing it.
+
 ### Running without models
 
 An engine with an unserved seam is a supported configuration. It refuses the

@@ -175,3 +175,78 @@ fn a_missing_appliance_explains_how_to_build_it() {
     let out = drive("quit\n", &["--appliance", "no/such/appliance"]);
     assert!(out.contains("make example"), "{out}");
 }
+
+/// A refusal is reported and the session continues.
+///
+/// Every command used to propagate its error, so the first refusal ended the
+/// session. That is wrong twice over: a refusal is frequently the correct
+/// outcome, and a person who has just been refused is the one most likely to
+/// want to ask something else.
+#[test]
+fn a_refusal_does_not_end_the_session() {
+    require_appliance!();
+    let Some(py) = python() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+
+    let config = config_for(py, "examples/interpreters/unservable_request.py");
+    let out = drive(
+        "raise the extraction
+status
+quit
+",
+        &["--level", "d0", "--config", config.to_str().unwrap()],
+    );
+
+    assert!(
+        out.contains("cannot") || out.contains("nothing this machine"),
+        "the refusal should be explained:
+{out}"
+    );
+    assert!(
+        out.contains("link         alive"),
+        "and the next command should still run:
+{out}"
+    );
+    assert!(out.contains("closed"), "and the session close cleanly:
+{out}");
+    assert!(
+        !out.contains("NoCandidate"),
+        "a person should not be shown the raw error:
+{out}"
+    );
+}
+
+fn python() -> Option<&'static str> {
+    ["python3", "python"].into_iter().find(|candidate| {
+        Command::new(candidate)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    })
+}
+
+fn config_for(py: &str, script: &str) -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir()
+        .join(format!("adi-run-{}-{unique}.yaml", std::process::id()));
+    std::fs::write(
+        &path,
+        format!(
+            "root: .
+seams:
+  interpreter:
+    backend: process
+    command: {py}
+    args: [\"{script}\"]
+"
+        ),
+    )
+    .unwrap();
+    path
+}

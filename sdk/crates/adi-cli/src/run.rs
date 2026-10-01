@@ -140,18 +140,71 @@ pub fn run(
         let line = line.trim();
         now_ms += 60_000;
 
-        match line {
+        // A failed command is reported and the session continues. Propagating
+        // it ended the session on the first refusal, which is wrong twice over:
+        // a refusal is frequently the correct outcome, and a person who has
+        // just been refused is the one most likely to want to ask something
+        // else. Only a broken link ends a session, and that is handled below.
+        let outcome = match line {
             "" => continue,
             "quit" | "exit" => break,
-            "help" => help(),
-            "status" => status(&mut session, now_ms)?,
-            "cycle" => cycle(&mut session, now_ms)?,
-            _ => request(&mut session, interpreter.as_ref(), line, now_ms)?,
+            "help" => {
+                help();
+                Ok(())
+            }
+            "status" => status(&mut session, now_ms),
+            "cycle" => cycle(&mut session, now_ms),
+            _ => request(&mut session, interpreter.as_ref(), line, now_ms),
+        };
+
+        if let Err(error) = outcome {
+            report(error.as_ref());
+
+            // A session whose link is gone cannot do anything further, so
+            // continuing would offer a prompt that can only fail.
+            if is_fatal(error.as_ref()) {
+                println!("
+  the link to the appliance is gone, so the session ends here.");
+                break;
+            }
         }
     }
 
     println!("\nclosed.");
     Ok(())
+}
+
+/// Say what went wrong in terms a person can act on.
+///
+/// The underlying errors are precise and are written for a developer reading a
+/// log. A person at a prompt needs to know whether to try something else, and
+/// the raw Debug form of a Rust enum does not tell them.
+fn report(error: &(dyn std::error::Error + 'static)) {
+    let text = error.to_string();
+
+    // The refusals worth recognising, because each has a different thing to do
+    // about it. Matched on the message rather than the type so that this stays
+    // in the CLI and the session keeps its error vocabulary to itself.
+    if text.contains("no candidate") || text.contains("NoCandidate") {
+        println!("  cannot        nothing this machine declares can move that.");
+        println!("                `adi capabilities` lists what it can change.");
+    } else if text.contains("envelope") {
+        println!("  refused       that would breach a safety limit, so none of it ran.");
+        println!("                {text}");
+    } else if text.contains("appliance refused") {
+        println!("  refused       the appliance declined it: {text}");
+    } else if text.contains("both move") || text.contains("one iteration") {
+        println!("  refused       the plan changed one thing two ways, which would make");
+        println!("                the result impossible to attribute. Nothing ran.");
+    } else {
+        println!("  failed        {text}");
+    }
+}
+
+/// Whether the session can usefully continue.
+fn is_fatal(error: &(dyn std::error::Error + 'static)) -> bool {
+    let text = error.to_string();
+    text.contains("the link failed") || text.contains("went quiet")
 }
 
 fn help() {
