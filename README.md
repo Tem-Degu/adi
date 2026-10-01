@@ -17,9 +17,9 @@ Everything runs on the device. No internet connection, no account, no
 companion application.
 
 The intelligence is bounded to one domain, meaning the scope of what the
-machine exists to do. An espresso machine reasons about extraction. A
-greenhouse controller reasons about growth. Neither reasons about anything
-else. That boundary is what keeps the system small enough to run on appliance
+machine exists to do. An espresso machine reasons about extraction while 
+greenhouse controller reasons about growth. That boundary is what keeps the 
+system small enough to run on appliance
 hardware, specific enough to be useful, and narrow enough that its behaviour
 can be tested and certified.
 
@@ -67,9 +67,11 @@ decision it makes; see [Autonomy](#autonomy).
 A **tool** is one action the machine can perform: setting the grind,
 dispensing milk, ejecting the puck.
 
-Three things make one available: the mechanism, a handler that runs it, and one
-entry in a data file. The first two are ordinary appliance engineering and the
-third is the only new work. In sequence, with the two details that matter:
+Three things make one available: the mechanism, a handler that runs it, and
+one entry in a data file. The first two are work a firmware team already does.
+The third is what the protocol adds, and it is data rather than code.
+
+In sequence, with the two details that matter:
 
 **1. Build the mechanism.** A motor, a valve, a heater, driven from a pin.
 Ordinary appliance engineering.
@@ -99,8 +101,8 @@ By the time this is called the library has confirmed the tool exists, every
 argument is present, in range and in the declared unit, no interlock blocks
 it, the preconditions hold, and the sequence constraints are satisfied.
 
-**4. Declare it.** One entry in a data file. This is the only new work the
-protocol asks for, and it is not code.
+**4. Declare it.** One entry in a data file, stating the name, the
+parameters, their limits, and the conditions under which the tool may run.
 
 ```yaml
 tools:
