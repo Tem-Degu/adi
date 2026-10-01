@@ -1,10 +1,17 @@
 # Artificial Domain Intelligence
 
 Artificial Domain Intelligence is an approach to making physical machines
-capable within the thing they are built to do. A machine measures what it just
-produced, determines what was wrong with it, corrects itself, and accepts
-spoken instruction from the person using it. It acts on the machine directly
-rather than offering advice for the person to carry out.
+intelligent and capable within the thing they are built to do (their domain).
+A machine measures what it just produced, determines what was wrong with it,
+corrects itself, and accepts spoken instruction from the person using it. It
+acts on the machine directly rather than offering advice for the person to
+carry out.
+
+It also holds the knowledge of its domain, so a person can ask it questions
+and receive instruction without consulting anything else. Why the last result
+came out as it did, what a particular setting changes, how to prepare for what
+they are about to make. The machine answers from the same knowledge it uses to
+correct itself, so the explanation and the action agree.
 
 Everything runs on the device. No internet connection, no account, no
 companion application.
@@ -20,22 +27,6 @@ This repository contains the protocol that defines the integration, and a
 working implementation of both sides of it. The first domain is espresso.
 
 ---
-
-## The problem it addresses
-
-An appliance has sensors and actuators and no understanding of what it is
-producing. A person operating it has the understanding and no direct access to
-the mechanism. The gap between them is closed by experience, and most people
-do not have it.
-
-Existing approaches close that gap in two ways, neither sufficient. Connected
-appliances move the decision to a server, which requires a network, an account
-and the manufacturer's continued participation. Assistants describe what the
-person should do, leaving the person to perform it.
-
-Artificial Domain Intelligence places the reasoning on the device, in the
-domain the machine already operates in, with the authority to act within
-limits the manufacturer sets.
 
 ## How it works
 
@@ -71,14 +62,42 @@ A language model turns speech into a structured request and phrases the
 explanation afterwards. Three autonomy levels determine how much of the
 decision it makes; see [Autonomy](#autonomy).
 
-## What a manufacturer provides
+## Integrating a machine
 
-Two data files and an implementation of the actions in their existing
-firmware, in whatever language and on whatever release schedule they already
-use.
+A **tool** is one action the machine can perform: setting the grind,
+dispensing milk, ejecting the puck. Making one available to the intelligence
+takes five steps, of which only the fourth is new work.
 
-They implement no reasoning, no models and no domain knowledge. An action they
-invent works the day they declare it, without a release from this project.
+**1. Build the mechanism.** A motor, a valve, a heater, driven from a pin.
+Ordinary appliance engineering, unchanged.
+
+**2. Decide how the firmware knows it finished.** A limit switch, an encoder
+count, a measured mass. A timer that expired is not the same as an action that
+completed, and reporting one as the other is how the engine comes to believe
+something that did not happen.
+
+**3. Write a handler.** One function, called when a named instruction arrives.
+It starts the mechanism and returns; it does not block. Long operations report
+completion later.
+
+```c
+adip_action_t adip_on_invoke(const adip_invocation_t *inv,
+                             adip_reason_t *reason, void *user)
+{
+    if (adip_tool_index(ctx.dev, inv->tool) == TOOL_GRIND_SET) {
+        start_grind_move(setting_from(inv));
+        return ADIP_ACTION_RUNNING;
+    }
+    return ADIP_ACTION_DONE;
+}
+```
+
+By the time this is called the library has confirmed the tool exists, every
+argument is present, in range and in the declared unit, no interlock blocks
+it, the preconditions hold, and the sequence constraints are satisfied.
+
+**4. Declare it.** One entry in a data file. This is the only new work the
+protocol asks for, and it is not code.
 
 ```yaml
 tools:
@@ -95,10 +114,33 @@ tools:
     reversible: true
 ```
 
-The appliance library compiles that declaration into constant tables and
-handles framing, decoding, validation, the safety envelope and the failsafe.
-The manufacturer implements three platform functions and one handler that
-drives the mechanism.
+`adi generate-c` compiles that into constant tables, so a limit exists in one
+place and nothing can drift from it.
+
+**5. Optionally, describe its effect.** A separate file states how much the
+mechanism moves a result, which is what lets the engine size a correction
+rather than guess at one. A tool with no such entry remains callable; it is
+not selected automatically.
+
+```yaml
+responses:
+  - tool: "adi.espresso.grind.set_setting"
+    parameter: "setting"
+    variable: "shot_time"
+    per_unit: -1.4          # seconds of shot time per step, signed
+    unit: s
+    confidence: 0.75
+```
+
+The manufacturer implements no reasoning, no models and no domain knowledge. A
+tool they invent works the day they declare it, without a release from this
+project.
+
+Three platform functions complete the integration: a millisecond clock, a byte
+write, and a function that drives the machine to a safe state.
+
+See [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) for the full path,
+including the electrical steps and the failure cases.
 
 ## Autonomy
 
@@ -182,12 +224,34 @@ The appliance is a real build of the C library running as a separate process.
 Every value crosses the same framing, checksum, decoding, range validation and
 safety envelope that would run on a machine.
 
-`--level d0` is the deterministic level and requires no model. The default is
-D2, which requires a model backend and refuses rather than running at a level
-below the one it reports.
+### Running at each level
 
-Speech and the model-driven levels need model files and a configuration flag.
-See [`sdk/README.md`](./sdk/README.md).
+| | Command | Requires |
+|---|---|---|
+| D0 | `adi run --level d0` | nothing |
+| D1 | `adi run --level d1 --config <file>` | a model backend |
+| D2 | `adi run --level d2 --config <file>` | a model backend, and a declaration stating sequence constraints |
+
+D2 is the default, so `adi run` with no level attempts it and refuses if no
+model backend is configured. It does not fall back to a lower level, because a
+decision record naming a level that did not run would be false.
+
+A model backend is a program the engine starts and exchanges one message per
+line with. Backends are supplied, so obtaining the model files and pointing a
+configuration at them is the whole of the setup:
+
+```sh
+pip install -r requirements.txt
+cargo run -p adi-cli -- models check     # names each missing file and its source
+# obtain the files it names
+cargo run -p adi-cli -- run --config models/models.example-local.yaml
+```
+
+`adi models check` reads the folder and reports which seams are served, so the
+setup instructions cannot go out of date. See [`sdk/README.md`](./sdk/README.md)
+for the model configuration in full, including how to use a model of your own.
+
+### Tests
 
 To run the test suites and the conformance corpus:
 
