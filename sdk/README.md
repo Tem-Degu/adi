@@ -326,6 +326,9 @@ Cortex-M target.
   incorrect rule is least likely to be detected.
 - **Diagnosis considers one variable.** The knowledge layer resolves ratio and
   temperature targets, and `diagnose` does not yet use them.
+- **Decision records carry no provenance yet.** `DecisionRecord` has the
+  structure for tracing every value back to the knowledge layer that produced
+  it, and the session leaves it empty.
 - **No learning.** `Layer::User` is defined and nothing writes to it.
 - **No microcontroller port.** `libadip` is tested on a host. Milestone M6 in
   [`c/DESIGN.md`](./c/DESIGN.md) requires a target board, and the footprint

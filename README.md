@@ -66,10 +66,10 @@ decision it makes; see [Autonomy](#autonomy).
 
 A **tool** is one action the machine can perform: setting the grind,
 dispensing milk, ejecting the puck. Making one available to the intelligence
-takes five steps, of which only the fourth is new work.
+takes five steps:
 
 **1. Build the mechanism.** A motor, a valve, a heater, driven from a pin.
-Ordinary appliance engineering, unchanged.
+Ordinary appliance engineering.
 
 **2. Decide how the firmware knows it finished.** A limit switch, an encoder
 count, a measured mass. A timer that expired is not the same as an action that

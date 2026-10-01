@@ -1,27 +1,29 @@
 # Roadmap
 
-**StreetAI · Artificial Domain Intelligence**
+The build plan for Artificial Domain Intelligence, in phases with the test
+that completes each one.
 
-The authoritative build plan for the project.
+Phases marked DONE are implemented and covered by the test suites. The rest
+are stated so that the shape of the work, and what is not yet known, is
+visible rather than implied.
 
 ---
 
-## What we are building, in one paragraph
+## What is being built
 
 A domain-neutral SDK that turns a declared set of physical actions into an
-intelligent machine, plus espresso as the first domain implemented on top of it.
-The SDK is the product. Espresso is the proof and the first revenue. Every domain
-after espresso reuses the SDK unchanged and supplies only a profile.
+intelligent machine, with espresso as the first domain built on it. Every
+domain after espresso reuses the SDK unchanged and supplies only a profile.
 
 ---
 
 ## The architecture in three layers
 
-| Layer | What it is | Domain-neutral | Owner |
-|---|---|---|---|
-| **Safe Action Protocol** | The safety architecture: an AI may decide freely, but may act only through declared, bounded, individually safe actions, under a stateful envelope enforced by the device. | Yes | StreetAI |
-| **ADI-P** | The wire contract: capability declaration, skill, knowledge extensions, execution model. Specified in `PROTOCOL.md`. | Yes, except the registry | StreetAI |
-| **Domain profile** | Registry, knowledge base and diagnosis rules for one domain. | No, by definition | StreetAI, extended by manufacturers |
+| Layer | What it is | Domain-neutral |
+|---|---|---|
+| **Safe Action Protocol** | The safety architecture: an intelligence may decide freely, but may act only through declared, bounded, individually safe actions, under a stateful envelope the device enforces. | Yes |
+| **ADI-P** | The integration contract: capability declaration, skill, knowledge extensions, execution model, wire format. Specified in `PROTOCOL.md`. | Yes, except the registry |
+| **Domain profile** | Registry, knowledge base and diagnosis rules for one domain. Extended by manufacturers. | No, by definition |
 
 **The rule that enforces this:** the word "shot" must never appear in
 `adi-core`, `adi-protocol`, `adi-safety` or `adi-decision`. Not in a type, a
@@ -29,7 +31,7 @@ field, a variable or a comment. If it does, the abstraction has leaked.
 
 ---
 
-## Autonomy level
+## Autonomy levels
 
 The default is **D2**. This reverses an earlier decision to default to D1.
 
@@ -48,8 +50,8 @@ The model turns speech into structured intent at every level including D0, and
 explains afterwards at every level. What the level grades is what happens after
 intent.
 
-D2 is the default because a machine that can only do what someone anticipated
-in advance is a program with a microphone attached. The safety of a
+D2 is the default because a machine limited to what someone anticipated in
+advance cannot serve a request nobody wrote down. The safety of a
 model-chosen magnitude does not rest on trusting the model: the engine clamps it
 to the declared range and snaps it to the declared resolution, and the appliance
 validates it again independently. A plan failing any check is refused whole.
@@ -64,8 +66,8 @@ compose into an invalid sequence.
 
 Phases 1 to 4 need no hardware at all.
 
-**P1 to P4 are complete**, plus the wire, the session loop and the appliance
-SDK. See `sdk/README.md` for the current numbers and for what is still missing.
+**P1 to P4 are complete**, along with the wire format, the session loop and
+the appliance SDK. See `sdk/README.md` for what is not yet done.
 
 ### P1. Protocol types and conformance harness  DONE
 Rust workspace, protocol structs with serialisation, validators for declaration,
@@ -87,12 +89,18 @@ The domain-neutral loop: observe a cycle, resolve targets through the knowledge
 layers, diagnose, plan a correction from the skill's declared responses, clamp,
 record. Then espresso as the first profile implementing the `Domain` trait.
 
-*Gate:* textbook cycles diagnosed correctly, offline, no hardware. Decision
-records reconstruct every value back to the layer that produced it.
+*Gate:* textbook cycles diagnosed correctly, offline, with no hardware.
 
-### P4. The decision layer DONE (D1 awaits a model backend)
-D0, D1 and D2 selectors behind one trait. D1 wired to a model for tool selection
-with a closed output schema. Level is configuration, not a code path.
+The decision record carries the structure for tracing every value back to the
+layer that produced it, and the session does not yet populate it. Filling it
+belongs with P7, where values stop being estimates and provenance starts to
+matter.
+
+### P4. The decision layer DONE
+D0, D1 and D2 selectors behind one trait. D0 is deterministic; D1 and D2 are
+reached through a chooser, the component that asks a model which declared
+action serves a goal, with a closed output schema. The level is configuration
+rather than a code path.
 
 *Gate:* the same request resolves correctly at D0 and D1 on a machine whose
 sweetener tool is outside the registry. D2 refuses to run without stateful
@@ -111,33 +119,42 @@ Text interface. This is the first complete product tier.
 *Gate:* two-shot dial-in works on a real machine.
 
 ### P7. Data and calibration
-One hundred logged cycles with refractometer readings. Calibrate step sizes
-against a real grinder. Unglamorous, most likely to be skipped, most expensive to
-skip.
+One hundred logged cycles with refractometer readings, and step sizes
+calibrated against a real grinder. The declared response values in the skill
+are currently estimates, and this is what replaces them with measurements.
 
 *Gate:* declared response values match measured behaviour within stated
 confidence.
 
 ### P8. Channeling detection
-The headline capability and the least certain item in this plan. Label data by
-filming through a bottomless portafilter.
+The least certain item in this plan. Training data is labelled by filming
+through a bottomless portafilter.
 
 *Gate:* distinguishes channeling from a genuine grind error on held-out cycles.
 
 ### P9. Closed loop, cheaply
-Motorise the grind adjustment. Around one hundred dollars, and it turns the coach
-into a machine that corrects itself.
+Motorise the grind adjustment, which is what turns a machine that advises
+into one that corrects itself.
 
 *Gate:* "that was sour" produces an automatic regrind and a second cycle.
 
 ### P10. Language, local
-Rust linking whisper.cpp, llama.cpp and piper. One binary, no network.
+Speech recognition, understanding and synthesis running on the device with no
+network.
 
-*Gate:* the P6 demo runs with no connection of any kind.
+This is partly done. Models run as separate programs that the engine starts
+and exchanges one message per line with, and backends are supplied, so a
+developer obtains model files and writes no code. What remains is loading
+models inside the engine itself, which replaces two processes and a Python
+runtime with one binary. That matters for a cheaper module rather than for
+capability, so it is sequenced with P11.
+
+*Gate:* the P6 demonstration runs with no connection of any kind.
 
 ### P11. The module
-Off-the-shelf system-on-module, our firmware, our brand. Only when a manufacturer
-conversation requires it, ideally funded by them.
+An off-the-shelf system-on-module carrying the engine, so a manufacturer
+integrates one component rather than an application processor and a software
+stack.
 
 ### P12. The manufacturer package
 C reference SDK, declaration validator, conformance test suite. These three turn
@@ -145,18 +162,18 @@ C reference SDK, declaration validator, conformance test suite. These three turn
 
 Status:
 
-- **C reference SDK**: `sdk/c`, milestones M1 to M5 complete. Types, generated
-  tables, framing, decode, validation, dispatch, the stateful envelope and the
-  failsafe. 232 host checks. M6, a port to real hardware, needs a board.
+- **C reference SDK**: `sdk/c`. Types, generated tables, framing, decoding,
+  validation, dispatch, the stateful envelope, the failsafe, and the outbound
+  half: signals, events and the heartbeat. Tested on a host. A port to real
+  hardware needs a board and is the one milestone outstanding.
 - **Validator**: `adi validate`, plus `adi capabilities` to show what the
   engine can actually move on a given machine.
 - **Conformance suite**: `adi conformance`. Runs a corpus of input and expected
   decision pairs, reports each case, and fails the process on any regression.
   Wired into `cargo test` so it cannot rot.
-- **The wire**: `adi-wire` on the engine side and M7 on the appliance side, so
-  the two implementations actually exchange bytes rather than agreeing on
-  paper. `adi-cli/tests/loopback.rs` runs the engine against a real libadip
-  build as a child process.
+- **The wire**: specified in `PROTOCOL.md` section 10.2 and implemented on
+  both sides, so the two exchange bytes rather than agreeing on paper. The
+  test suite drives a real `libadip` build as a child process on every run.
 - **The session**: `adi-session` holds the link, sends the heartbeat and runs a
   cycle from observation to invocation, enforcing the envelope across a whole
   plan before any step is sent.
@@ -167,18 +184,23 @@ Status:
 
 ---
 
-## The second-profile discipline
+## Keeping the abstraction general
 
-You cannot design a good abstraction from one example. Alongside P3, maintain a
-second domain profile as **data only**, no product and no hardware. A greenhouse
-or reef tank is ideal, because the feedback loop is slow and the sensing is
-different, which is exactly where espresso assumptions break.
+An abstraction derived from one example fits that example. Building "for any
+appliance" from espresso alone produces something that looks general and fits
+only coffee.
 
-Every time something is added to the neutral crates, check it against that second
-profile. If it does not fit, it was espresso logic wearing a general name.
+The correction is a second domain profile, maintained as data only, with no
+product and no hardware behind it. A greenhouse suits this because its
+assumptions differ from espresso in the places that matter: cycles measured in
+weeks rather than seconds, feedback arriving long after the action, and
+operations that overlap rather than running one at a time.
 
-Cost: about a day, once. It is the difference between a platform and a coffee app
-with ambitions.
+Anything added to the neutral crates is checked against it. What does not fit
+was domain logic carrying a general name.
+
+`sdk/conformance/greenhouse/` holds that second profile. It has no product
+and no hardware, and exists to keep the neutral layer general.
 
 ---
 
@@ -205,7 +227,7 @@ or flow profile control.
 | P5, P6 | ~85% | Scale protocol is the main unknown |
 | P7, P8 | 50 to 65% | Noisy physical process, few samples, no ground truth without the refractometer |
 | P9, P10 | Moderate | Mechanical fitting and embedded model work |
-| P11, P12 | Needs a hardware contractor and manufacturer access |
+| P11, P12 | Depends on hardware and manufacturer integration rather than on software |
 
 The uncertainty in P7 and P8 is not a software risk. Extraction is a noisy
 physical process, sample counts are small, and there is no ground truth for
