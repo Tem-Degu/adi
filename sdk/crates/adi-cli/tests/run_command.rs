@@ -6,6 +6,10 @@
 //!
 //! Driven by feeding commands on standard input, which is how a person uses
 //! it. Skipped where the appliance has not been built.
+//!
+//! These run at D0 explicitly. The default is D2, which needs a chooser; what
+//! is being tested here is the session and the appliance rather than the
+//! autonomy levels, which have their own file.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -58,7 +62,7 @@ macro_rules! require_appliance {
 #[test]
 fn a_session_opens_against_a_real_appliance() {
     require_appliance!();
-    let out = drive("quit\n", &[]);
+    let out = drive("quit\n", &["--level", "d0"]);
 
     assert!(out.contains("EX-900"), "the machine should be named:\n{out}");
     assert!(out.contains("autonomy"), "the level should be stated:\n{out}");
@@ -71,7 +75,7 @@ fn a_session_opens_against_a_real_appliance() {
 #[test]
 fn a_cycle_is_observed_diagnosed_and_corrected() {
     require_appliance!();
-    let out = drive("cycle\nquit\n", &[]);
+    let out = drive("cycle\nquit\n", &["--level", "d0"]);
 
     assert!(out.contains("observing"), "{out}");
     assert!(out.contains("diagnosed"), "it should reach a diagnosis:\n{out}");
@@ -95,7 +99,7 @@ fn a_cycle_is_observed_diagnosed_and_corrected() {
 #[test]
 fn a_setting_named_for_its_variable_still_reaches_the_planner() {
     require_appliance!();
-    let out = drive("cycle\nquit\n", &[]);
+    let out = drive("cycle\nquit\n", &["--level", "d0"]);
 
     assert!(
         !out.contains("no present value"),
@@ -110,7 +114,7 @@ fn a_setting_named_for_its_variable_still_reaches_the_planner() {
 #[test]
 fn state_carries_across_cycles() {
     require_appliance!();
-    let out = drive("cycle\ncycle\nstatus\nquit\n", &[]);
+    let out = drive("cycle\ncycle\nstatus\nquit\n", &["--level", "d0"]);
 
     assert!(
         out.contains("cycles held  2"),
@@ -125,7 +129,7 @@ fn state_carries_across_cycles() {
 #[test]
 fn the_heartbeat_reaches_the_appliance() {
     require_appliance!();
-    let out = drive("status\nquit\n", &[]);
+    let out = drive("status\nquit\n", &["--level", "d0"]);
     assert!(out.contains("link         alive"), "{out}");
 }
 
@@ -134,7 +138,7 @@ fn the_heartbeat_reaches_the_appliance() {
 #[test]
 fn without_an_interpreter_a_spoken_request_says_so() {
     require_appliance!();
-    let out = drive("make me a lungo\nquit\n", &[]);
+    let out = drive("make me a lungo\nquit\n", &["--level", "d0"]);
 
     assert!(
         out.contains("no interpreter"),

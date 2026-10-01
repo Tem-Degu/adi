@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """A model backend that is not a model.
 
-This serves the interpreter seam through the process backend. The engine writes
+Serves two seams through the process backend: the interpreter, which turns a
+request into structured intent, and the chooser, which picks which declared
+action serves a goal and at D2 what value to send. The engine writes
 one JSON request per line on this program's standard input and reads one JSON
 answer per line from its standard output. Nothing else is required of it: no
 dependency on the SDK, no particular language, no particular runtime.
@@ -171,6 +173,69 @@ def interpret(request):
     )
 
 
+# --------------------------------------------------------------- choosing
+#
+# ADI-P 3.3 grades an engine by who answers this. At D1 the model picks the
+# tool and the engine computes the value; at D2 it proposes both.
+#
+# The reply names a candidate by its index in the list the engine supplied.
+# That list was derived from the machine's own declaration, so a chooser
+# cannot name a tool the machine does not have. At D2 the proposed value is
+# then clamped to the declared range, snapped to the declared resolution,
+# checked against the stateful envelope with the rest of the plan, and
+# validated again by the appliance.
+
+
+def choose(request):
+    """Pick a candidate per goal, and at D2 a value.
+
+    The rule below is the same one the engine applies at D0: take the most
+    confident candidate that serves the goal. A real model would weigh the
+    history, the material and what the person said. What matters here is the
+    shape of the answer, not the quality of the judgement.
+    """
+    candidates = request.get("candidates", [])
+    steps = []
+
+    for goal in request.get("goals", []):
+        variable = goal.get("variable")
+
+        serving = [c for c in candidates if c.get("variable") == variable]
+        if not serving:
+            # Every goal must be served or the whole plan refused. Returning
+            # fewer steps than goals is how a plan looks complete and is not,
+            # and the selector refuses on the count.
+            return {"steps": []}
+
+        best = max(serving, key=lambda c: c.get("confidence", 0.0))
+        step = {"candidate": best["index"]}
+
+        if request.get("level") == "d2":
+            # At D2 the value sent is the absolute setting, not a change.
+            #
+            # per_unit is the change in the variable per unit of the
+            # parameter, and is signed, so dividing the change the profile
+            # wants by it gives the change in the parameter. Adding that to
+            # the present setting gives the value to send. A model proposing
+            # a delta here would have it read as an absolute and clamped to
+            # the end of the range.
+            delta = goal.get("delta") or 0.0
+            per_unit = best.get("per_unit") or 0.0
+            current = best.get("current")
+
+            if per_unit == 0.0 or current is None:
+                # Nothing to size the correction from. Returning no steps
+                # refuses the plan, which is correct: a guess here becomes a
+                # physical action.
+                return {"steps": []}
+
+            step["value"] = round(current + delta / per_unit, 3)
+
+        steps.append(step)
+
+    return {"steps": steps}
+
+
 def main():
     for line in sys.stdin:
         line = line.strip()
@@ -179,14 +244,22 @@ def main():
 
         try:
             request = json.loads(line)
-            reply = interpret(request)
+            # One program, two seams. A selection request carries candidates;
+            # an interpretation request carries an utterance.
+            reply = choose(request) if "candidates" in request else interpret(request)
         except Exception as error:  # noqa: BLE001
             # A backend that crashes takes the seam down. One that asks leaves
             # the machine usable, and the reason reaches the record.
-            reply = answer(
-                "Sorry, something went wrong. Could you say that again?",
-                f"backend error: {error}",
-            )
+            # A chooser that fails returns no steps, which the selector
+            # refuses as an empty plan. An interpreter that fails asks.
+            if "candidates" in line:
+                sys.stderr.write(f"chooser error: {error}\n")
+                reply = {"steps": []}
+            else:
+                reply = answer(
+                    "Sorry, something went wrong. Could you say that again?",
+                    f"backend error: {error}",
+                )
 
         sys.stdout.write(json.dumps(reply) + "\n")
         sys.stdout.flush()

@@ -74,6 +74,10 @@ enum Command {
         /// Models configuration. Without it, spoken requests are unavailable.
         #[arg(long, short)]
         config: Option<PathBuf>,
+        /// Autonomy level: d0, d1 or d2. Defaults to d2, which needs a
+        /// chooser; without one, use d0.
+        #[arg(long)]
+        level: Option<String>,
     },
     /// Run the conformance corpus.
     Conformance {
@@ -121,8 +125,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ModelsCommand::Hash { path } => models::hash(path),
             ModelsCommand::Bench { corpus, interpreter } => bench::bench(corpus, interpreter),
         },
-        Command::Run { declaration, skill, appliance, config } => {
-            run::run(declaration, skill, appliance, config)
+        Command::Run { declaration, skill, appliance, config, level } => {
+            run::run(declaration, skill, appliance, config, level)
         }
         Command::Conformance { dir, interpreter } => conformance(dir, interpreter),
     }

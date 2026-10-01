@@ -109,8 +109,38 @@ impl<'a> Session<'a> {
         transport: Box<dyn Transport>,
     ) -> Result<Self, SessionError> {
         let selector = selector_for(level, declaration)?;
+        Ok(Self::with_parts(declaration, skill, domain, level, selector, transport))
+    }
 
-        Ok(Self {
+    /// Open a session with a selector built by the caller.
+    ///
+    /// The model-driven levels need a chooser, which `selector_for` has no way
+    /// to supply, so `open` can only ever build D0. This is how D1 and D2 are
+    /// reached, and until it existed neither level could run outside a unit
+    /// test however complete the selectors were.
+    ///
+    /// The level is taken from the selector rather than passed separately, so
+    /// a record cannot name a level the selector does not implement.
+    pub fn open_with_selector(
+        declaration: &'a Declaration,
+        skill: Option<&'a Skill>,
+        domain: &'a dyn Domain,
+        selector: Box<dyn ActionSelector>,
+        transport: Box<dyn Transport>,
+    ) -> Self {
+        let level = selector.level();
+        Self::with_parts(declaration, skill, domain, level, selector, transport)
+    }
+
+    fn with_parts(
+        declaration: &'a Declaration,
+        skill: Option<&'a Skill>,
+        domain: &'a dyn Domain,
+        level: AutonomyLevel,
+        selector: Box<dyn ActionSelector>,
+        transport: Box<dyn Transport>,
+    ) -> Self {
+        Self {
             declaration,
             skill,
             domain,
@@ -126,7 +156,7 @@ impl<'a> Session<'a> {
             last_heartbeat_ms: 0,
             heartbeat_interval_ms: declaration.session.heartbeat_interval_ms,
             control_timeout_ms: declaration.session.control_timeout_ms,
-        })
+        }
     }
 
     pub fn level(&self) -> AutonomyLevel {

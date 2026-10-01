@@ -31,13 +31,18 @@ field, a variable or a comment. If it does, the abstraction has leaked.
 
 ## Autonomy level
 
-We ship **D2**. This reverses an earlier decision to default to D1.
+The default is **D2**. This reverses an earlier decision to default to D1.
 
 | Level | Tool chosen by | Value chosen by | Status |
 |---|---|---|---|
-| D0 | Engine | Engine | Supported. The level a conformance corpus runs at |
-| D1 | Model, from declared tools | Engine | Specified, no model backend yet |
-| **D2** | **Model** | **Model** | **Default**, gated on the stateful envelope |
+| D0 | Engine | Engine | Runs with no model. The level the conformance corpus uses |
+| D1 | Model, from declared tools | Engine | Runs with a chooser |
+| **D2** | **Model** | **Model** | **Default.** Runs with a chooser, gated on the stateful envelope |
+
+A model-driven level needs a *chooser*, which is the component that asks a
+model which declared action serves a goal. `ProcessChooser` supplies one over
+an external program. Without a chooser, requesting D1 or D2 is refused rather
+than quietly served at D0.
 
 The model turns speech into structured intent at every level including D0, and
 explains afterwards at every level. What the level grades is what happens after

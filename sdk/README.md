@@ -133,8 +133,22 @@ advance is a program with a microphone attached. It refuses to initialise
 against a declaration without stateful invariants and rate limits, and that
 refusal is the point of the level system rather than an inconvenience.
 
-D1 currently has no model backend and `selector_for` says so rather than
-silently running at D0.
+A model-driven level needs a **chooser**: the component that asks a model which
+declared action serves a goal, and at D2 what value to send. `ProcessChooser`
+supplies one over an external program, configured exactly as the other model
+seams are.
+
+Requesting D1 or D2 without a chooser is refused rather than served at D0. A
+decision record naming a level that did not run would be false, and the record
+is what the audit argument rests on.
+
+```sh
+adi run --level d0                                         # no model required
+adi run --level d2 --config models/models.example-process.yaml
+```
+
+The chooser runs the same program as the interpreter, since an appliance with
+one model resident answers both questions from it.
 
 ## Build
 

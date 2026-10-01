@@ -70,6 +70,7 @@ dependencies = [
 name = "adi-models"
 version = "0.1.0"
 dependencies = [
+ "adi-core",
  "adi-decision",
  "adi-language",
  "adi-protocol",

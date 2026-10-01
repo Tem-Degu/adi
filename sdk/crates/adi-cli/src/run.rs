@@ -13,9 +13,14 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use adi_core::{Cycle, SubjectiveFeedback};
-use adi_decision::{AutonomyLevel, Interpreter, SelectionContext, Understood};
+use adi_decision::{
+    AutonomyLevel, Interpreter, ModelActionSelector, ModelToolSelector, SelectionContext,
+    Understood,
+};
 use adi_domain_espresso::Espresso;
-use adi_models::{Backend, ModelsConfig, ProcessInterpreter, ScriptedInterpreter, Seam};
+use adi_models::{
+    Backend, ModelsConfig, ProcessChooser, ProcessInterpreter, ScriptedInterpreter, Seam,
+};
 use adi_protocol::declaration::Declaration;
 use adi_protocol::ids::VariableId;
 use adi_protocol::skill::Skill;
@@ -27,6 +32,7 @@ pub fn run(
     skill_path: PathBuf,
     appliance_path: Option<PathBuf>,
     config_path: Option<PathBuf>,
+    level: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let declaration: Declaration = serde_yaml::from_str(&read(&declaration_path)?)?;
     let skill: Skill = serde_yaml::from_str(&read(&skill_path)?)?;
@@ -49,15 +55,57 @@ pub fn run(
 
     let transport = ChildAppliance::start(&appliance_path.to_string_lossy(), &[])?;
 
-    // D0 needs no model. The correction path is entirely deterministic, so a
-    // session opens and a cycle runs whether or not anything can hear.
-    let mut session = Session::open(
-        &declaration,
-        Some(&skill),
-        &domain,
-        AutonomyLevel::D0,
-        Box::new(transport),
-    )?;
+    // ADI-P 3.3 makes D2 the default. It needs a chooser, so without one the
+    // session opens at D0, which is deterministic and needs no model. The
+    // level is reported either way rather than assumed, because a record
+    // naming a level that did not run is the one thing 3.3 forbids.
+    let requested = parse_level(level.as_deref())?;
+    let chooser = load_chooser(config_path.as_deref(), requested)?;
+
+    let mut session = match (requested, chooser) {
+        (AutonomyLevel::D2, Some((chooser, label))) => {
+            println!("  chooser      {label}");
+            let selector = ModelActionSelector::new(chooser, &declaration)?;
+            Session::open_with_selector(
+                &declaration,
+                Some(&skill),
+                &domain,
+                Box::new(selector),
+                Box::new(transport),
+            )
+        }
+        (AutonomyLevel::D1, Some((chooser, label))) => {
+            println!("  chooser      {label}");
+            Session::open_with_selector(
+                &declaration,
+                Some(&skill),
+                &domain,
+                Box::new(ModelToolSelector { chooser }),
+                Box::new(transport),
+            )
+        }
+        (AutonomyLevel::D0, _) => Session::open(
+            &declaration,
+            Some(&skill),
+            &domain,
+            AutonomyLevel::D0,
+            Box::new(transport),
+        )?,
+        (wanted, None) => {
+            // Printed and exited rather than returned, because a Box<dyn
+            // Error> built from a String prints through Debug, which turns a
+            // multi-line explanation into one line of escape sequences.
+            eprintln!("
+{} needs a chooser, and none is configured.
+", wanted.as_str());
+            eprintln!("Supply one with --config:");
+            eprintln!("    cargo run -p adi-cli -- run --config models/models.example-process.yaml
+");
+            eprintln!("Or run deterministically with --level d0.");
+            std::process::exit(2);
+        }
+    };
+
     println!("  autonomy     {}", session.level().as_str());
 
     let interpreter = load_interpreter(config_path.as_deref(), &domain)?;
@@ -243,6 +291,56 @@ fn describe(target: &adi_protocol::intent::TargetSpec) -> String {
             }
         }
     }
+}
+
+/// Which level to run at.
+///
+/// ADI-P 3.3 makes D2 the default. Stated explicitly rather than inferred from
+/// what happens to be configured, so a developer who asked for a level and did
+/// not get it is told rather than left to read the banner.
+fn parse_level(requested: Option<&str>) -> Result<AutonomyLevel, Box<dyn std::error::Error>> {
+    Ok(match requested.map(str::to_lowercase).as_deref() {
+        None | Some("d2") => AutonomyLevel::D2,
+        Some("d1") => AutonomyLevel::D1,
+        Some("d0") => AutonomyLevel::D0,
+        Some(other) => return Err(format!("unknown level '{other}'; expected d0, d1 or d2").into()),
+    })
+}
+
+/// Start the chooser a model-driven level needs.
+///
+/// D0 needs none, so this returns nothing for it rather than starting a
+/// program that would never be asked anything.
+fn load_chooser(
+    config_path: Option<&Path>,
+    level: AutonomyLevel,
+) -> Result<Option<(ProcessChooser, String)>, Box<dyn std::error::Error>> {
+    if level == AutonomyLevel::D0 {
+        return Ok(None);
+    }
+
+    let Some(path) = config_path else {
+        return Ok(None);
+    };
+
+    let config = ModelsConfig::load(path)?;
+    let seam = config.seam(Seam::Interpreter);
+
+    // The chooser runs the same program as the interpreter. One model answers
+    // both questions, which is what an appliance with one model resident
+    // actually does.
+    if seam.backend != Backend::Process {
+        return Ok(None);
+    }
+
+    let command = seam.command.clone().ok_or("the process backend names no command")?;
+    let tag = if level == AutonomyLevel::D2 { "d2" } else { "d1" };
+    let label = format!("process ({command}) at {tag}");
+
+    Ok(Some((
+        ProcessChooser::start(&command, &seam.args, tag)?,
+        label,
+    )))
 }
 
 /// An interpreter and a description of where it came from, for the banner.

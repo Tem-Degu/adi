@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 adi-protocol = { workspace = true }
+adi-core = { workspace = true }
 adi-decision = { workspace = true }
 adi-language = { workspace = true }
 serde = { workspace = true }
