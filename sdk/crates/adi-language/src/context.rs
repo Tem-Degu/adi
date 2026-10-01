@@ -165,9 +165,10 @@ impl ModelContext {
                 .collect(),
             remembered: Vec::new(),
             history: Vec::new(),
+            // Every note, not a selection. A filter guesses what the question
+            // needs, and a wrong guess withholds the answer without saying so.
             notes: knowledge
-                .notes_for(utterance)
-                .into_iter()
+                .notes()
                 .map(|n| NoteLine {
                     id: n.id.clone(),
                     text: n.text.trim().to_string(),
@@ -206,7 +207,13 @@ impl ModelContext {
     /// The order is deliberate and runs from least to most load bearing. The
     /// utterance is never dropped: a request with no request is not a smaller
     /// request, it is a different one.
-    fn enforce(&mut self, budget: ContextBudget) {
+    /// Bring the context within a budget, reporting what was dropped.
+    ///
+    /// Public because a caller that assembles a context itself, as the process
+    /// backend does to avoid keeping the knowledge alive for a session, must
+    /// still obey the budget. It did not, and notes could overflow the model's
+    /// context with nothing reporting it.
+    pub fn enforce(&mut self, budget: ContextBudget) {
         if self.estimated_tokens() <= budget.max_tokens {
             return;
         }
@@ -214,6 +221,12 @@ impl ModelContext {
         // Notes first. They are prose and the largest thing here, and losing
         // them degrades an answer to "I don't have that information" while
         // losing anything else degrades a request that moves a machine.
+        //
+        // Reaching this at all means the notes do not fit the model this engine
+        // is configured for, which is a packaging fault rather than a runtime
+        // condition: whoever wrote them is responsible for the total size. The
+        // engine degrades instead of failing, and says so in `truncated` so the
+        // fault is visible rather than silent.
         //
         // Dropped oldest-layer-first rather than wholesale, so a vendor's note
         // about their own machine outlives a general one from the base.

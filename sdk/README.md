@@ -286,9 +286,16 @@ Audio is base64 of 16-bit signed, little endian, single channel samples.
 
 An interpreter has three outcomes rather than two. A request becomes an intent,
 an unresolvable one becomes a question back, and a question from the person
-becomes an answer, which actuates nothing. `notes` carries whatever the
-knowledge base supplies for answering, and `machine` the device identity, so a
-backend needs no access to either.
+becomes an answer, which actuates nothing. `machine` carries the device identity
+and `notes` every note the knowledge base holds, so a backend needs no access to
+either.
+
+Notes are sent whole, on every utterance, with no relevance filter: selecting by
+relevance guesses what a question needs and a wrong guess withholds the answer
+silently. **Keeping the total within the context of the smallest model you
+target is your responsibility.** The engine applies its budget, discards notes
+before anything a request depends on, and prints a warning when it has to, so
+exceeding the capacity is visible rather than silent.
 
 A chooser answers with an index into the candidate list the engine supplied, so
 it cannot name a tool the machine does not declare. `constraints` states the

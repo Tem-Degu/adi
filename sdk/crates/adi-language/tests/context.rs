@@ -256,3 +256,47 @@ fn the_default_budget_is_what_was_decided() {
     assert_eq!(budget.history, 3);
     assert_eq!(budget.max_tokens, 1024);
 }
+
+/// Notes are dropped before anything a request depends on.
+///
+/// Reaching this means the notes do not fit the model the engine is configured
+/// for, which is the author's fault rather than a runtime condition. The engine
+/// degrades and says so rather than overflowing the model's context silently.
+#[test]
+fn notes_are_the_first_thing_a_tight_budget_drops() {
+    let knowledge = knowledge();
+    let mut context = ModelContext::assemble(
+        "why",
+        &knowledge,
+        &[],
+        &SelectionContext {
+            history: &[],
+            cycle: None,
+            memory: None,
+            rejected: None,
+        },
+        ContextBudget::default(),
+    );
+
+    context.notes = vec![
+        adi_language::context::NoteLine { id: "a".into(), text: "x ".repeat(400) },
+        adi_language::context::NoteLine { id: "b".into(), text: "y ".repeat(400) },
+    ];
+    context.styles = vec!["adi.example.style.one".into()];
+
+    context.enforce(ContextBudget {
+        remembered_cycles: 3,
+        history: 2,
+        max_tokens: 200,
+    });
+
+    assert!(
+        context.truncated.contains(&"notes"),
+        "notes should be dropped and reported, got {:?}",
+        context.truncated
+    );
+    assert!(
+        !context.styles.is_empty(),
+        "and styles, which an intent needs, should survive"
+    );
+}

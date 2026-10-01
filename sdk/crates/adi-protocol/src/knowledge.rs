@@ -80,7 +80,18 @@ pub struct VariableDef {
 /// parts, anything they believe the model should know. The mechanism is
 /// specified here and the content is not.
 ///
-/// The rule that bounds it, and the reason it can be free text at all:
+/// Every note is supplied to the model on every utterance. There is no
+/// relevance filter, because a filter is a guess about what the question needs
+/// and a wrong guess withholds the answer silently. The model sees everything
+/// and decides.
+///
+/// The consequence is that the **author is responsible for the total size**. A
+/// model has a finite context, and notes that exceed it are truncated by the
+/// engine, which reports that it happened. Keeping them within the capacity of
+/// the smallest model the product targets is a design constraint, not something
+/// the protocol can resolve.
+///
+/// The rule that bounds the content, and the reason it can be free text at all:
 ///
 /// **A note may inform an answer. It may never determine an action.**
 ///
@@ -98,50 +109,7 @@ pub struct Note {
     /// Namespaced for a vendor, as every other identifier is. Named in an
     /// answer's `drew_on`, so a record can say what the machine drew on.
     pub id: String,
-    /// Words that should bring this note into context.
-    ///
-    /// Optional. A machine with a handful of notes needs none; one with sixty
-    /// does, because the context budget cannot hold them all and the ones
-    /// relevant to the question are the ones worth sending.
-    #[serde(default)]
-    pub keywords: Vec<String>,
-    /// Optionally, the tool, variable or style this is about, so the note
-    /// surfaces when that is under discussion without the person having used
-    /// any of its keywords.
-    #[serde(default)]
-    pub about: Option<String>,
     pub text: String,
-}
-
-impl Note {
-    /// Whether this note should be offered for an utterance.
-    ///
-    /// On the type rather than on `Knowledge`, because a caller that has
-    /// precomputed its context, as the process backend does to avoid keeping
-    /// the knowledge alive, needs the same rule and must not reimplement it.
-    ///
-    /// A note with neither keywords nor an `about` is always offered, which
-    /// suits a machine with a handful of them. One with either is offered when
-    /// it matches, which is what lets a machine carry many.
-    pub fn matches(&self, utterance: &str) -> bool {
-        if self.about.is_none() && self.keywords.is_empty() {
-            return true;
-        }
-
-        let lowered = utterance.to_lowercase();
-        let words: Vec<&str> = lowered
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| !w.is_empty())
-            .collect();
-
-        let mentions = |needle: &str| {
-            let needle = needle.to_lowercase();
-            words.contains(&needle.as_str()) || lowered.contains(&needle)
-        };
-
-        self.about.as_deref().is_some_and(&mentions)
-            || self.keywords.iter().any(|k| mentions(k))
-    }
 }
 
 /// The base domain knowledge, owned by StreetAI. Layer 0.
@@ -663,28 +631,12 @@ impl Knowledge {
         Ok(k)
     }
 
-    /// Every note, across layers.
+    /// Every note, across layers, in layer order.
     ///
-    /// For a caller that filters per utterance itself, which the process
-    /// backend does to avoid keeping the knowledge alive for the session.
+    /// All of them, every time. See [`Note`] for why there is no filter and
+    /// whose responsibility the total size is.
     pub fn notes(&self) -> impl Iterator<Item = &Note> {
         self.layers.iter().flat_map(|l| l.notes.iter())
-    }
-
-    /// Notes relevant to an utterance, in layer order.
-    ///
-    /// Selection is deliberately simple, because what belongs in a note is the
-    /// manufacturer's concern and the mechanism is this protocol's. See
-    /// [`Note::matches`].
-    ///
-    /// The caller applies the context budget. A machine with more notes than
-    /// fit has them truncated and the context says so.
-    pub fn notes_for(&self, utterance: &str) -> Vec<&Note> {
-        self.layers
-            .iter()
-            .flat_map(|l| l.notes.iter())
-            .filter(|n| n.matches(utterance))
-            .collect()
     }
 
     /// What a variable is, from whichever layer declares it.

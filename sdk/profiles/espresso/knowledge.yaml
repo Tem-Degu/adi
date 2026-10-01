@@ -153,19 +153,21 @@ preference_variables:
 # already says. Free text, and what belongs here is a judgement for whoever
 # writes the profile rather than something the protocol prescribes.
 #
+# Every note is sent to the model on every utterance. There is no relevance
+# filter, so keeping the total within the context of the smallest model the
+# product targets is the author's responsibility.
+#
 # The rule: a note may inform an answer and may never determine an action. No
 # targets and no effect magnitudes, because those belong in styles and in the
 # skill, where they are validated.
 notes:
   - id: "adi.espresso.note.sour_vs_bitter"
-    keywords: ["sour", "bitter", "acidic", "harsh", "taste"]
     text: >
       Sour usually means under-extraction: the water passed through too quickly
       to dissolve enough. Bitter usually means the opposite. Shot time is the
       usual indicator of which has happened.
 
   - id: "adi.espresso.note.channelling"
-    keywords: ["channel", "channelling", "channeling", "uneven", "spray"]
     text: >
       Channelling is water finding a path of least resistance through the puck
       rather than passing through it evenly. The result tastes both sour and
@@ -173,7 +175,6 @@ notes:
       touched. Distribution and tamping are the usual causes.
 
   - id: "adi.espresso.note.resting"
-    keywords: ["fresh", "resting", "rested", "roast", "beans", "old"]
     text: >
       Beans release carbon dioxide for a week or two after roasting, which
       disrupts extraction. Very fresh beans and stale beans both behave badly,

@@ -239,10 +239,11 @@ impl Interpreter for ProcessInterpreter {
             styles: self.knowledge_styles.clone(),
             materials: self.knowledge_materials.clone(),
             variables: self.variables.clone(),
+            // All of them. See knowledge::Note: there is no relevance filter,
+            // and the size of the set is the author's responsibility.
             notes: self
                 .notes
                 .iter()
-                .filter(|n| n.matches(utterance))
                 .map(|n| adi_language::context::NoteLine {
                     id: n.id.clone(),
                     text: n.text.trim().to_string(),
@@ -279,6 +280,17 @@ impl Interpreter for ProcessInterpreter {
                 tool: record.selected_tool.as_ref().map(|t| t.0.clone()),
             })
             .collect();
+
+        // The budget applies here as it does to an assembled context. Without
+        // this the notes went out whole, and a set larger than the model's
+        // context overflowed it with nothing saying so.
+        assembled.enforce(self.budget);
+
+        if assembled.truncated.contains(&"notes") {
+            eprintln!(
+                "adi: the notes exceed the configured context budget and were truncated.                  Reduce them to what the smallest model you target can hold."
+            );
+        }
 
         let variable_lines: Vec<VariableLine<'_>> = assembled
             .variables

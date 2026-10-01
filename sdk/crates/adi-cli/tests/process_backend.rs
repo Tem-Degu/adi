@@ -47,20 +47,16 @@ fn styles() -> Vec<String> {
     ]
 }
 
-/// One note with keywords and one without, so both selection paths are covered.
+/// Two notes, both of which reach the model on every utterance.
 fn notes() -> Vec<adi_protocol::knowledge::Note> {
     vec![
         adi_protocol::knowledge::Note {
             id: "x.example.note.basket".into(),
-            keywords: vec!["basket".into(), "portafilter".into()],
-            about: None,
             text: "A 58 mm basket, taking 18 to 20 g.".into(),
         },
         adi_protocol::knowledge::Note {
-            id: "x.example.note.general".into(),
-            keywords: Vec::new(),
-            about: None,
-            text: "Always offered, since it names nothing to match on.".into(),
+            id: "x.example.note.water".into(),
+            text: "Filtered water only; the reservoir has no softener.".into(),
         },
     ]
 }

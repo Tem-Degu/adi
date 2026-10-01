@@ -939,17 +939,23 @@ A knowledge layer MAY carry notes: free text the machine may answer from.
 ```yaml
 notes:
   - id: "x.acme.note.basket"
-    keywords: ["basket", "portafilter"]
     text: >
       A 58 mm basket, taking 18 to 20 g. Third-party baskets of the same
       diameter fit; a stepped basket will not seat correctly.
 ```
 
 `id` MUST be namespaced as §6.2 requires, and MUST NOT redefine a note from a
-lower layer. `keywords` and `about` are optional and govern retrieval: a note
-naming neither is always offered, and one naming either is offered when the
-utterance matches. `about` MAY name a declared tool, variable or style, so a
-note surfaces when that subject is under discussion.
+lower layer.
+
+An engine MUST supply every note to the model, on every utterance. There is no
+relevance filter, because selecting by relevance is a guess about what a
+question needs and a wrong guess withholds the answer without reporting it.
+
+The author is therefore responsible for the total size. A model has a finite
+context, and the notes must fit within the capacity of the smallest model the
+product targets, alongside everything else §9.4.1 requires. An engine MUST apply
+its context budget to notes and MUST report when it has truncated them, so that
+exceeding the capacity is a visible fault rather than a silent degradation.
 
 What belongs in a note is the author's judgement. This specification states the
 mechanism and does not prescribe the content.
@@ -966,9 +972,8 @@ belongs in a style and a magnitude belongs in the skill, because those are
 validated and subject to §6.4; prose is neither, and a quantity stated in two
 places will diverge.
 
-An engine MUST apply its context budget to notes, and SHOULD discard notes before
-discarding anything an intent depends on. A degraded answer is preferable to a
-degraded request.
+An engine SHOULD discard notes before discarding anything an intent depends on.
+A degraded answer is preferable to a degraded request.
 
 ## 7. Semantic registry, espresso v1
 

@@ -145,7 +145,15 @@ def answer_question(request, words):
     that invented a fact about the machine would be stating something nothing
     can check.
     """
-    asked = {"what", "which", "how", "why", "when", "where", "who", "is", "does", "can"}
+    # Crude by design. A real model distinguishes a question from an
+    # instruction from the whole utterance; this looks for an opener, and
+    # anything it misses falls through to the request path and is clarified
+    # rather than guessed at, which is the safe direction to fail in.
+    asked = {
+        "what", "which", "how", "why", "when", "where", "who", "whose",
+        "is", "are", "am", "was", "were", "does", "do", "did",
+        "can", "could", "should", "will", "would", "tell",
+    }
     if not (words & asked):
         return None
 
@@ -154,17 +162,34 @@ def answer_question(request, words):
     if machine and ({"model", "machine", "firmware", "version", "you"} & words):
         return {"answer": {"text": machine, "drew_on": []}}
 
-    # Then the manufacturer's notes. Already filtered by relevance before
-    # arriving, so the first is the best available.
+    # Then the manufacturer's notes. Every note arrives on every utterance, so
+    # choosing among them is the backend's job. A real model reads them all and
+    # picks what bears on the question; this matches on words, because the point
+    # here is the shape of the reply rather than the quality of the language.
     notes = request.get("notes", [])
-    if notes:
+
+    # Words of three letters or fewer are dropped. Without that, "it" and "was"
+    # match almost any note and the longest one wins every question, which is
+    # what happened the first time this was written.
+    distinctive = {w for w in words if len(w) > 3}
+
+    best = None
+    for note in notes:
+        overlap = len(set(re.findall(r"[a-z]+", note["text"].lower())) & distinctive)
+        if not overlap:
+            continue
+        # More matches wins; on a tie the shorter note, which is the more
+        # specific of two that mention the same thing.
+        rank = (overlap, -len(note["text"]))
+        if best is None or rank > best[0]:
+            best = (rank, note)
+    if best:
         return {
             "answer": {
-                "text": notes[0]["text"],
-                "drew_on": [notes[0]["id"]],
+                "text": best[1]["text"],
+                "drew_on": [best[1]["id"]],
             }
         }
-
     # A question with nothing to answer it from. Saying so is correct; supplying
     # something plausible is the failure this path exists to avoid.
     return {
