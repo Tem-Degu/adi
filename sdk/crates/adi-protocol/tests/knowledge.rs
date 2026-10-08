@@ -275,3 +275,39 @@ fn a_vendor_style_may_target_a_vendor_variable() {
         .add(extension.into_layer(Layer::Vendor))
         .expect("a vendor may target its own variable");
 }
+
+/// An envelope entry naming a tool the declaration does not declare is refused
+/// by validation, not merely by the code generator.
+///
+/// The generator checked this and validation did not, so a declaration could
+/// pass `adi validate` and fail `adi generate-c`. That is the wrong way round:
+/// validation is the cheap check run on every edit. The case that produces it is
+/// a manufacturer copying an example, deleting a tool they do not have, and
+/// leaving an interlock that still names it.
+#[test]
+fn an_envelope_naming_an_undeclared_tool_is_refused() {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/declarations/ex900.yaml"),
+    )
+    .expect("the shipped example");
+
+    let mut declaration: adi_protocol::Declaration =
+        serde_yaml::from_str(&text).expect("it parses");
+
+    assert!(declaration.validate().is_ok(), "unedited, it is valid");
+
+    // Delete a tool the envelope refers to, as someone adapting it would.
+    let ejector = adi_protocol::ids::SemanticId::from("adi.espresso.puck.eject");
+    declaration.tools.retain(|t| t.id != ejector);
+
+    let err = declaration
+        .validate()
+        .expect_err("an envelope naming a deleted tool must be refused");
+
+    let text = err.to_string();
+    assert!(
+        text.contains("puck.eject"),
+        "the message should name the missing tool: {text}"
+    );
+}

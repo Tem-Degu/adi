@@ -149,6 +149,8 @@ pub enum ProtocolError {
     MissingRequiredTool { level: String, tool: String },
     #[error("'{parameter}' on tool '{tool}' declares no resolution; ADI-P 4.2 requires one on every numeric parameter")]
     MissingResolution { tool: String, parameter: String },
+    #[error("{context} names tool '{tool}', which this declaration does not declare")]
+    UndeclaredToolInEnvelope { context: String, tool: String },
     #[error("procedure '{procedure}' fixes outcome variable '{variable}'")]
     OutcomeHardcoded { procedure: String, variable: String },
     #[error(transparent)]
@@ -181,6 +183,46 @@ impl Declaration {
         for signal in &self.signals {
             if !signal.id.is_well_formed() {
                 return Err(ProtocolError::MalformedId(signal.id.0.clone()));
+            }
+        }
+
+        // Every tool an envelope entry names must be declared.
+        //
+        // The code generator checked this and validation did not, so a
+        // declaration could pass `adi validate` and fail `adi generate-c`,
+        // which is the wrong way round: validation is the cheap check a person
+        // runs on every edit, and the generator is the one they run once.
+        //
+        // The common case is a manufacturer copying an example declaration,
+        // deleting a tool they do not have, and leaving an interlock or an
+        // accumulating limit that still refers to it.
+        let declared: Vec<&str> = self.tools.iter().map(|t| t.id.as_str()).collect();
+        let check = |context: &str, id: &str| -> Result<(), ProtocolError> {
+            if id != "*" && !declared.contains(&id) {
+                return Err(ProtocolError::UndeclaredToolInEnvelope {
+                    context: context.to_string(),
+                    tool: id.to_string(),
+                });
+            }
+            Ok(())
+        };
+
+        for interlock in &self.envelope.interlocks {
+            for blocked in &interlock.blocks {
+                check(&format!("interlock '{}'", interlock.id), blocked)?;
+            }
+        }
+        for invariant in &self.envelope.invariants {
+            for tool in invariant.accumulates.keys() {
+                check(&format!("invariant '{}'", invariant.id), tool)?;
+            }
+            for tool in &invariant.reset_on {
+                check(&format!("invariant '{}'", invariant.id), tool)?;
+            }
+        }
+        for limit in &self.envelope.rate_limits {
+            for tool in &limit.tools {
+                check(&format!("rate limit '{}'", limit.id), tool)?;
             }
         }
 
