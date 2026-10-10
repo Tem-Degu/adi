@@ -16,14 +16,43 @@ Everything runs on the device. No internet connection, no account, no
 companion application.
 
 The intelligence is bounded to one domain, meaning the scope of what the
-machine exists to do. An espresso machine reasons about extraction while
+machine exists to do. An espresso machine reasons about extraction while a
 greenhouse controller reasons about growth. That boundary is what keeps the
-system small enough to run on appliance
-hardware, specific enough to be useful, and narrow enough that its behaviour
-can be tested and certified.
+system small enough to run on appliance hardware, specific enough to be useful,
+and narrow enough that its behaviour can be tested and certified.
 
 This repository contains the protocol that defines the integration, and a
 working implementation of both sides of it. The first domain is espresso.
+
+## Try it
+
+Requires a Rust toolchain and a C compiler. Nothing else, and no network.
+
+```sh
+cd sdk
+cargo build --release
+cd c && make example && cd ..
+
+cargo run -p adi-cli -- run --level d0
+```
+
+Type `cycle`:
+
+```
+> cycle
+  observing    an 18 s shot, described as sour
+  diagnosed    shot_time
+  chose        adi.espresso.grind.set_setting
+  sent         setting = 20 Step
+  accepted     by the appliance
+  explains     Diagnosed shot_time and set setting to 20.
+```
+
+The appliance is a real build of the C library running as a separate process.
+That value crossed the same framing, checksum, decoding, range validation and
+safety envelope that would run on a machine.
+
+[Running it](#running-it) covers the other levels, speech, and the tests.
 
 ---
 
