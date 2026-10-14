@@ -404,6 +404,18 @@ python check-neutrality.py
 cargo run -p adi-cli -- conformance conformance/espresso/cases --interpreter conformance/espresso/interpreter.yaml
 ```
 
+The appliance library can be built and tested for an appliance chip without
+one, which is where the footprint above comes from:
+
+```sh
+cd c
+make test                 # on this host
+make arm-size             # footprint for Cortex-M4
+make arm-test             # every suite, on an emulated Cortex-M3
+```
+
+The last two need `arm-none-eabi-gcc` and `qemu-system-arm`. Both are free.
+
 ## Documents
 
 | File | Contents |
