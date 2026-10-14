@@ -1,46 +1,40 @@
-# ---------------------------------------------------------------- build output
-sdk/target/
-sdk/c/build/
-__pycache__/
-*.pyc
 
-# ---------------------------------------------------------------- NOT PUBLIC
 #
-# These are excluded from the public repository, not merely from version
-# control.
-#
-# If you split this into a public repo, verify with:
 #     git ls-files | grep -Ei 'investor|wefunder|deck|whitepaper|build-guide'
-# which must return nothing.
-
-# Fundraising and commercial material
-Decks/
-
-# The deck build scripts, which contain the full slide copy: market figures,
-# the use-of-funds split and the team placeholders. The .pptx files are the
-# output; these are the source, and they are no less private for it.
-tools/
-
-uae-investor-targets.txt
-
-# Superseded internal documents. Both contradict the current work.
-WHITEPAPER.md
-BUILD-GUIDE.md
-
+# ---------------------------------------------------------------- NOT PUBLIC
+# ---------------------------------------------------------------- build output
 # ---------------------------------------------------------------- local
-.claude/settings.local.json
-
+# Fundraising and commercial material
+# If you split this into a public repo, verify with:
+# Superseded internal documents. Both contradict the current work.
+# The deck build scripts, which contain the full slide copy: market figures,
+# These are excluded from the public repository, not merely from version
 # Working notes for picking the project back up. Internal, and it names the
+# control.
 # files that must never be published, so it must not be published either.
-CONTEXT.md
-TODO.md
-PLAN.md
-MODELS-PLAN.md
-PATH-A-RUST.md
-FIXES-PLAN.md
-KNOWLEDGE-PLAN.md
-DEMO-BUILD.md
+# output; these are the source, and they are no less private for it.
+# the use-of-funds split and the team placeholders. The .pptx files are the
+# which must return nothing.
 *.bak
+*.pyc
 *~
 .DS_Store
+.claude/settings.local.json
+BUILD-GUIDE.md
+CONTEXT.md
+DEMO-BUILD.md
+Decks/
+FIXES-PLAN.md
+KNOWLEDGE-PLAN.md
+MODELS-PLAN.md
+PATH-A-RUST.md
+PLAN.md
+TODO.md
 Thumbs.db
+WHITEPAPER.md
+__pycache__/
+sdk/c/build/
+sdk/c/build/
+sdk/target/
+tools/
+uae-investor-targets.txt

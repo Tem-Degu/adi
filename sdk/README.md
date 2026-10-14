@@ -533,10 +533,20 @@ messages over a transport, and a cycle runs end to end: observe, diagnose,
 plan, check the safety envelope, invoke, record, remember. All three autonomy
 levels run against a real appliance.
 
-The appliance library occupies roughly 12 KB of flash with no static or heap
-allocation, against the 16 KB budget stated in [`c/DESIGN.md`](./c/DESIGN.md).
-That figure is measured on x86-64 and is expected to be smaller on a
-Cortex-M target.
+The appliance library occupies **7198 B of flash on a Cortex-M4** with no
+static or heap allocation, against the 16 KB budget stated in
+[`c/DESIGN.md`](./c/DESIGN.md). A product adds its own generated tables.
+
+The full appliance test suite, 322 checks, passes on an emulated Cortex-M3:
+
+```sh
+cd c
+mingw32-make arm-size     # footprint for Cortex-M4
+mingw32-make arm-test     # every suite, on an emulated Cortex-M3
+```
+
+Both need `arm-none-eabi-gcc` and `qemu-system-arm`, and neither needs a
+board.
 
 ### Current limitations
 
@@ -560,10 +570,12 @@ Cortex-M target.
   "half the sugar of last time" resolves correctly. What is missing is
   accumulation: `Layer::User` is defined, resolves correctly, and nothing writes
   to it, so twenty sweeter drinks do not change where the next one starts.
-- **No microcontroller port.** `libadip` is developed and tested on a host.
-  The remaining milestone in [`c/DESIGN.md`](./c/DESIGN.md) is a reference
-  port, which requires a target board. The footprint above is an x86-64
-  measurement.
+- **No port to physical hardware.** `libadip` compiles for Cortex-M and its
+  full test suite passes on an emulated Cortex-M3, so the arithmetic and the
+  logic are known to survive a 32-bit core. What emulation cannot establish is
+  real timing, which matters for the reply deadline and the failsafe interval,
+  and the port functions against real peripherals. The remaining milestone in
+  [`c/DESIGN.md`](./c/DESIGN.md) is a reference port to a board.
 - **The decoder has not been fuzzed**, and no MISRA review has been performed.
 
 `serde_yaml` 0.9 is unmaintained upstream. No part of the design depends on

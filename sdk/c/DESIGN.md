@@ -251,13 +251,21 @@ doing about twice the work, and holding it to a figure chosen before half its
 job existed would mean trimming safety-relevant code to meet a figure chosen
 before the work was understood.
 
-The measurement is not the target. Every figure in section 9 is x86-64 and
-labelled indicative for good reason: this is branch-heavy integer code with no
-floating point, and Thumb-2 typically emits it 25 to 30 percent smaller. 12052 B
-here is likely 8 to 9 KB on a Cortex-M, which was comfortable under the old
-number and remains so. That stays a projection until M6 puts it on a board, and
-M6 is where this budget gets confirmed or corrected against a real target rather
-than a host.
+The measurement is not the target. The figures in section 9 are x86-64, which
+is the development host and not the target. The target figure is now measured
+rather than projected:
+
+| Target | Runtime, excluding generated tables |
+|---|---|
+| x86-64 | 12212 B |
+| Cortex-M4, `-Os -mthumb` | **7198 B** |
+
+41 percent smaller, which is more than the 25 to 30 percent this document
+previously estimated. Thumb-2 encodes branch-heavy integer code densely, and
+there is no floating point to pull in library support.
+
+`mingw32-make arm-size` reproduces it. A real product adds its own generated
+tables, which for the example declaration are 2320 B on x86-64.
 
 16 KB keeps the claim that matters: this belongs on the cheap side of an
 appliance, not on an applications processor.
@@ -304,7 +312,7 @@ Runtime footprint after M2, x86-64 host, indicative:
 | `adip_tables.o` | 408 B | 0 | 0 |
 | **total** | **5436 B** | **0** | **0** |
 
-Under half the 12 KB budget with the hardest part done, and still no RAM.
+Under half the 16 KB budget with the hardest part done, and still no RAM.
 
 **M3. Dispatch and reply. DONE.** Context, feed, poll, dispatch, the handler
 contract, asynchronous completion.
@@ -435,7 +443,8 @@ compare a value against the thing it had just been stamped from. It could never
 fire, and its comment claimed it caught an engine sending grams where
 millilitres were declared.
 
-Footprint after M6: 12212 B text, 0 data, 0 bss. The budget was raised from 12
+Footprint after M6: 12212 B text, 0 data, 0 bss on x86-64, 7198 B on a
+Cortex-M4. The budget was raised from 12
 to 16 KB in section 8, with the reasoning, rather than met by squeezing.
 
 **M7. Port and integrate.** Reference port for one real MCU, then run the

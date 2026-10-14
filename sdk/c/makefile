@@ -114,3 +114,69 @@ size: $(OBJ) | $(BUILD)
 
 clean:
 	rm -rf $(BUILD)
+
+# ---------------------------------------------------------------- ARM target
+#
+# Runs the same test sources on an emulated Cortex-M3, which is the kind of
+# core an appliance actually uses. The host tests prove the logic; these prove
+# it survives a 32-bit core, where the library's 64-bit fixed-point arithmetic
+# is synthesised from smaller operations rather than performed directly.
+#
+#   mingw32-make arm-size    footprint for Cortex-M4
+#   mingw32-make arm-test    run every suite under QEMU
+#
+# Needs arm-none-eabi-gcc and qemu-system-arm. Both are free; neither needs a
+# board. Override the paths if they are not on PATH.
+
+ARMCC   ?= arm-none-eabi-gcc
+ARMSIZE ?= arm-none-eabi-size
+QEMU    ?= qemu-system-arm
+
+ARMBUILD = $(BUILD)/arm
+ARMCPU  ?= cortex-m3
+ARMFLAGS = -std=c99 -Os -mcpu=$(ARMCPU) -mthumb -Iinclude -Igenerated $(WARN)
+ARMLINK  = --specs=nano.specs -nostartfiles -T arm/lm3s6965.ld
+ARMLIBS  = -lc -lnosys
+
+ARMTESTS = $(ARMBUILD)/test_m1.elf $(ARMBUILD)/test_m2.elf $(ARMBUILD)/test_m3.elf \
+           $(ARMBUILD)/test_m4.elf $(ARMBUILD)/test_m5.elf $(ARMBUILD)/test_signals.elf
+
+$(ARMBUILD):
+	mkdir -p $(ARMBUILD)
+
+# M1 and M2 need no runtime; the rest do, and define the port functions
+# themselves.
+$(ARMBUILD)/test_m1.elf: | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(CORE) $(GEN) $(T1) -o $@ $(ARMLIBS)
+
+$(ARMBUILD)/test_m2.elf: | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(CORE) $(NEUTRAL) $(T2) -o $@ $(ARMLIBS)
+
+$(ARMBUILD)/test_m3.elf: | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T3) -o $@ $(ARMLIBS)
+
+$(ARMBUILD)/test_m4.elf: | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T4) -o $@ $(ARMLIBS)
+
+$(ARMBUILD)/test_m5.elf: | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T5) -o $@ $(ARMLIBS)
+
+$(ARMBUILD)/test_signals.elf: | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T6) -o $@ $(ARMLIBS)
+
+arm: $(ARMTESTS)
+
+# QEMU reports the suite's own exit status, so a failure fails the make.
+arm-test: $(ARMTESTS)
+	@for t in $(ARMTESTS); do \
+	  echo "--- $$t"; \
+	  $(QEMU) -M lm3s6965evb -nographic -semihosting -kernel $$t || exit 1; \
+	done
+
+# The runtime alone, without any machine's generated tables, which is the
+# figure comparable to the host build.
+arm-size: | $(ARMBUILD)
+	@for f in $(RUNTIME); do \
+	  $(ARMCC) $(ARMFLAGS) -ffreestanding -c $$f -o $(ARMBUILD)/`basename $$f .c`.o; \
+	done
+	$(ARMSIZE) -t $(ARMBUILD)/adip_*.o | tail -1

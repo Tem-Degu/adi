@@ -288,18 +288,19 @@ fn a_vendor_style_may_target_a_vendor_variable() {
 fn an_envelope_naming_an_undeclared_tool_is_refused() {
     let text = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/declarations/ex900.yaml"),
+            .join("../../examples/declarations/neutral-machine.yaml"),
     )
-    .expect("the shipped example");
+    .expect("the neutral fixture");
 
     let mut declaration: adi_protocol::Declaration =
         serde_yaml::from_str(&text).expect("it parses");
 
     assert!(declaration.validate().is_ok(), "unedited, it is valid");
 
-    // Delete a tool the envelope refers to, as someone adapting it would.
-    let ejector = adi_protocol::ids::SemanticId::from("adi.espresso.puck.eject");
-    declaration.tools.retain(|t| t.id != ejector);
+    // Delete a tool the envelope refers to, as someone adapting a declaration
+    // would. The neutral fixture's rate limit names this one.
+    let limited = adi_protocol::ids::SemanticId::from("adi.example.process.start");
+    declaration.tools.retain(|t| t.id != limited);
 
     let err = declaration
         .validate()
@@ -307,7 +308,7 @@ fn an_envelope_naming_an_undeclared_tool_is_refused() {
 
     let text = err.to_string();
     assert!(
-        text.contains("puck.eject"),
+        text.contains("process.start"),
         "the message should name the missing tool: {text}"
     );
 }

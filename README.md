@@ -301,13 +301,14 @@ with no allocation, no recursion and no floating point, so an M0 is enough.
 
 | | |
 |---|---|
-| Flash | around 12 KB, measured on x86-64 |
+| Flash | 7198 B, measured on Cortex-M4, plus your generated tables |
 | RAM | no static or heap allocation. One context of 496 bytes, plus the frame buffers you size |
 | Integration | three platform functions and one handler |
 
-The flash figure is a host measurement. The same code on a Cortex-M is expected
-to be smaller, since this is branch-heavy integer work that Thumb-2 encodes
-compactly, and that stays an expectation until it runs on a board.
+The full appliance test suite, 322 checks, passes on an emulated Cortex-M3.
+What emulation does not establish is real timing, which matters for the reply
+deadline and the failsafe interval, or the platform functions against real
+peripherals.
 
 ### The module side
 
@@ -411,7 +412,7 @@ cargo run -p adi-cli -- conformance conformance/espresso/cases --interpreter con
 | [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | The path through the protocol for a firmware engineer: mechanism, driver, handler, declaration, and the optional skill entry. |
 | [`ROADMAP.md`](./ROADMAP.md) | The build plan, in phases. |
 | [`sdk/README.md`](./sdk/README.md) | The implementation: layout, build, model configuration and current limitations. |
-| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, around 12 KB of flash. |
+| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, 7198 B of flash on a Cortex-M4. |
 
 ## Status
 
@@ -421,8 +422,9 @@ plan, check the safety envelope, invoke, record, explain, remember. All three
 autonomy levels run against a real appliance, and all four model seams are
 reached in a session.
 
-The appliance library occupies roughly 12 KB of flash with no static or heap
-allocation, measured on x86-64.
+The appliance library occupies 7198 B of flash on a Cortex-M4, with no static
+or heap allocation, and its full test suite passes on an emulated Cortex-M3.
+Both are reproducible without a board: see [`sdk/README.md`](./sdk/README.md).
 
 Answering a question is not safe in the way acting is. An action is checked
 against the declaration, clamped to the declared range and validated
@@ -444,7 +446,9 @@ Not yet done:
   llama.cpp directly are not implemented.
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic.
-- **No microcontroller port.** `libadip` is developed and tested on a host.
+- **No port to physical hardware.** `libadip` compiles for Cortex-M and
+  passes its tests under emulation. Real timing and real peripherals remain
+  unverified.
 
 ## Licence
 
