@@ -34,10 +34,17 @@ The protocol, one JSON object per line in each direction:
 
 Audio is base64 of 16-bit signed, little endian, single channel samples.
 
-NOT YET VERIFIED against real models. Written from the library documentation
-and not run, because the machine it was written on cannot hold the weights.
-Expect to correct something on first use, particularly the confidence
-derivation below.
+VERIFIED against Moonshine base and Piper en_GB-alba-medium on an x86-64 host.
+Speech is synthesised at about twelve times real time; a short utterance is
+transcribed in about two seconds.
+
+Two API corrections were needed, noted at each site: Piper no longer provides
+synthesize_stream_raw, and Moonshine adds the batch dimension itself, so it
+must be given a flat array rather than one already shaped [batch, samples].
+
+The confidence derivation below remains a stand-in. It was not calibrated
+against recordings of real speech in a kitchen, which is where a transcript
+becomes unreliable.
 
 Copyright 2026 StreetAI. Licensed under the Apache License, Version 2.0.
 """
@@ -92,8 +99,11 @@ class Transcriber:
         if not samples:
             return {"text": "", "confidence": 0.0}
 
+        # Flat, not reshaped to [batch, samples]. The library adds the batch
+        # dimension itself, so handing it a two-dimensional array produced a
+        # three-dimensional one and failed its own shape assertion. The
+        # confidence estimate below works on either shape.
         audio = np.array(samples, dtype=np.float32) / 32768.0
-        audio = audio.reshape(1, -1)
 
         text = self.moonshine.transcribe(audio, self.model_path)
         text = text[0] if isinstance(text, (list, tuple)) else str(text)
@@ -151,11 +161,23 @@ class Speaker:
         if not text.strip():
             return {"audio": "", "sample_rate": self.rate}
 
-        samples = []
-        for chunk in self.voice.synthesize_stream_raw(text):
-            samples.extend(struct.unpack(f"<{len(chunk) // 2}h", chunk))
+        # synthesize yields AudioChunk objects, each carrying the samples in
+        # several forms. The raw signed 16-bit bytes are taken directly rather
+        # than converted from floats, because that is the format the wire
+        # expects and converting twice loses nothing but gains nothing either.
+        #
+        # An earlier version called synthesize_stream_raw, which this library
+        # no longer provides. The sample rate is read from the chunk rather
+        # than from the configuration, since a chunk states the rate it was
+        # actually produced at.
+        raw = bytearray()
+        rate = self.rate
+        for chunk in self.voice.synthesize(text):
+            raw.extend(chunk.audio_int16_bytes)
+            rate = chunk.sample_rate
 
-        return {"audio": encode(samples), "sample_rate": self.rate}
+        samples = struct.unpack(f"<{len(raw) // 2}h", bytes(raw))
+        return {"audio": encode(samples), "sample_rate": rate}
 
 
 # ---------------------------------------------------------------------- main

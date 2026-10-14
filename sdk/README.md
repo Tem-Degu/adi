@@ -307,11 +307,20 @@ microphone and a platform library, which is a packaging concern for a product
 rather than part of the protocol. What the SDK demonstrates is that text reaches
 the seam and audio comes back.
 
-| Seam | Model | Licence |
-|---|---|---|
-| Interpreter | Qwen 3 1.7B or 4B, GGUF | Apache-2.0 |
-| Transcriber | Moonshine base, or Whisper base | MIT |
-| Speaker | Piper | MIT |
+| Seam | Model | Licence | Status |
+|---|---|---|---|
+| Interpreter | Qwen 3 4B Q4_K_M, GGUF | Apache-2.0 | verified, see latency below |
+| Transcriber | Moonshine base | MIT | verified |
+| Speaker | Piper, en_GB-alba-medium | MIT | verified |
+
+Verified means the shipped backend was run against the real weights and
+produced correct output on this corpus. `models/manifest.yaml` carries the
+checksums and what each was measured to do.
+
+Qwen 3 1.7B is listed in the manifest and **not recommended**. On the shipped
+corpus it reached 3 of 18, and it never asked a question where asking was the
+correct answer. That is the wrong direction to fail in, because an ambiguous
+request then becomes a physical action.
 
 Llama models are not listed. The Llama licence requires permission from Meta
 above a usage threshold and withholds multimodal rights from companies
@@ -320,26 +329,42 @@ inherit either condition.
 
 ### Selecting hardware
 
-Interpreter latency on a processor without an accelerator is the constraint
-that governs whether a voice interaction is usable, and published figures are
-measured on other hardware with other prompts.
+**Interpreter latency is the open problem in this SDK, and it is unsolved.**
+
+Measured on four shared cloud cores with no accelerator, each backend kept
+running as the engine keeps them:
+
+| Seam | Model | Steady-state latency | Verdict |
+|---|---|---|---|
+| Speaker | Piper medium | **0.2 s** for 3 s of speech, 12x realtime | comfortable |
+| Transcriber | Moonshine base | around 2 s for a short utterance | acceptable |
+| Interpreter | Qwen 3 4B Q4 | **18 s median, 24 s worst** | **unusable for speech** |
+
+A person waiting on a machine tolerates perhaps two seconds. The interpreter is
+an order of magnitude outside that, and the smaller model is half the latency
+with a third of the accuracy, so it does not help.
+
+What this means in practice:
+
+- **The deterministic path is unaffected.** Observing a cycle, diagnosing it,
+  planning a correction and enforcing the envelope involve no model. That runs
+  in milliseconds and is what a machine does unattended.
+- **Explaining is unaffected.** The explainer needs no model, and the speaker
+  is fast.
+- **Spoken requests are not yet viable** on a processor of this class. An
+  accelerator, a smaller task-specific model, or a different approach to the
+  interpreter seam is required, and none of those has been measured.
+
+Measure on the board you intend to ship before committing to a voice
+interface:
 
 ```sh
 adi models bench
 ```
 
-This runs the evaluation corpus in `eval/espresso/` against the configured
-interpreter on the host it is invoked on, and reports how often the answer was
-correct and what each request cost. Run it before selecting a board.
-
-Three tiers are published as a default for anyone who does not wish to
-evaluate:
-
-| Tier | Board class | Interpreter |
-|---|---|---|
-| Minimal | Raspberry Pi 5, 8 GB | Qwen 3 1.7B Q4 |
-| Standard | RK3588 class | Qwen 3 4B Q4 |
-| Custom | Measured with `adi models bench` | Any |
+This runs the corpus in `eval/espresso/` against the configured interpreter on
+the host it is invoked on, and reports how often the answer was correct and
+what each request cost.
 
 ### Using a different model
 
@@ -415,9 +440,11 @@ protocol and contain no models. They are the specification by example, and are
 used by the test suite.
 
 `examples/interpreters/qwen_interpreter.py` and
-`examples/interpreters/speech_backends.py` run real models, and are configured by `models/models.example-local.yaml`. They have
-been written from the libraries' documentation and **not yet verified against
-real weights**, because the machine they were written on cannot hold them.
+`examples/interpreters/speech_backends.py` run real models, and are configured
+by `models/models.example-local.yaml`. Both have been **run against real
+weights** and corrected where they were wrong. See the table above for what
+each was measured to do, and `models/manifest.yaml` for the checksums of the
+files used.
 
 `models/models.example-process.yaml` configures the reference set.
 

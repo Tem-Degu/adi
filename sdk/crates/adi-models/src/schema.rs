@@ -27,6 +27,22 @@
 /// Hand this to a constrained decoder, or validate against it afterwards, or
 /// both. The engine validates regardless of how the output was produced: a
 /// decoder that guarantees the shape does not guarantee the contents.
+///
+/// **Narrow it per machine before handing it to a decoder.** Where an
+/// identifier belongs, this says `{"type": "string"}`, because the schema
+/// cannot know which styles and variables a given machine declares and the
+/// engine validates the answer against the declaration afterwards.
+///
+/// A decoder can do better than validate afterwards. Given the declared
+/// styles as an enum and the declared variables as named properties, a model
+/// cannot emit an identifier the machine does not have, rather than emitting
+/// one and having it refused. This is not theoretical: against the shipped
+/// corpus, an unnarrowed schema produced `adi.espresso.style.cortado` for a
+/// machine declaring no such style, while the instruction text had already
+/// said to name only what was listed.
+///
+/// `examples/interpreters/qwen_interpreter.py::schema_for` does this, and is
+/// the reference for a backend written in another language.
 pub const UNDERSTOOD_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Understood",

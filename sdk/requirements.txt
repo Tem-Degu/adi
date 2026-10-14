@@ -15,7 +15,11 @@
 llama-cpp-python>=0.3,<0.4
 
 # Hearing: Moonshine through ONNX Runtime.
-useful-moonshine-onnx>=0.2,<1.0
+#
+# Pinned exactly because this package versions by release date rather than by
+# semantic version. A range such as >=0.2,<1.0 matches nothing it publishes,
+# and the install fails before anything is downloaded.
+useful-moonshine-onnx==20251121
 
 # Speaking: Piper, which handles phonemisation internally.
 piper-tts>=1.2,<2.0

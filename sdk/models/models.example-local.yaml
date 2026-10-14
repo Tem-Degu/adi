@@ -20,7 +20,7 @@ seams:
     command: python
     args:
       - "examples/interpreters/qwen_interpreter.py"
-      - "models/interpreter/qwen3-1.7b-instruct-q4_k_m.gguf"
+      - "models/interpreter/qwen3-4b-q4_k_m.gguf"
 
   transcriber:
     backend: process
@@ -28,7 +28,10 @@ seams:
     args:
       - "examples/interpreters/speech_backends.py"
       - "transcribe"
-      - "models/transcriber/moonshine-base"
+      # A model name, not a path. The useful-moonshine-onnx package fetches
+      # and caches the weights itself, and a path here is read as a model name
+      # it does not recognise.
+      - "moonshine/base"
     sample_rate: 16000
     min_confidence: 0.6
 

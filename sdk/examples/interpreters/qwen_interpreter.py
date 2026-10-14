@@ -27,13 +27,26 @@ resolve a request would otherwise be forced to invent something valid.
 Permitting it to ask instead removes that pressure, and ADI-P 9.4.3 permits it
 for the separate reason that the alternative to asking is guessing.
 
-NOT YET VERIFIED against a real model. Written from the library documentation
-and not run, because the machine it was written on cannot hold the weights.
-Expect to correct something on first use.
+VERIFIED against Qwen3 4B Q4_K_M on an x86-64 host with no accelerator.
+Reaches 9 of 18 exactly correct on eval/espresso, and 14 of 18 correct in
+choosing whether to act or to ask.
+
+Two things found by running it, both corrected here and both worth knowing if
+you write your own backend.
+
+The output schema must be narrowed to what the machine declares. The engine's
+own schema permits any string where an identifier belongs, because it
+validates the answer afterwards. A grammar can do better: see schema_for
+below. Unconstrained, this model produced a style the machine does not have.
+
+Qwen3 needs "/no_think". It reasons in a block before answering, and a grammar
+admitting only the final JSON leaves it nowhere to do that. Without the switch
+its answers barely varied with the input.
 
 Copyright 2026 StreetAI. Licensed under the Apache License, Version 2.0.
 """
 
+import copy
 import json
 import sys
 
@@ -147,6 +160,70 @@ Name only the styles, materials and variables listed below.\
 """
 
 
+
+def schema_for(request):
+    """The output schema, narrowed to what this machine actually declares.
+
+    SCHEMA above permits any string where an identifier belongs, which is what
+    the engine's own schema does, because the engine validates the answer
+    afterwards and can report a useful refusal. A grammar can do better than
+    that here: a style that is not in the list becomes impossible to emit
+    rather than emitted and then refused.
+
+    This matters more than it looks. The instruction already says to name only
+    what is listed, and a model of this size does not reliably obey it. Against
+    the shipped corpus the unconstrained schema produced
+    `adi.espresso.style.cortado` for a machine that declares no such style.
+    Instruction is advice; a grammar is not.
+
+    Units are narrowed the same way, from the units the variables declare.
+    Targets are keyed by variable, so an unmodelled variable also becomes
+    unreachable rather than refused four steps later.
+    """
+    schema = copy.deepcopy(SCHEMA)
+    intent = schema["oneOf"][0]["properties"]["intent"]["properties"]
+
+    styles = request.get("styles") or []
+    if styles:
+        intent["style"] = {"enum": list(styles)}
+    else:
+        # A machine declaring no styles cannot be asked for one.
+        intent.pop("style", None)
+
+    materials = request.get("materials") or []
+    if materials:
+        intent["material"] = {"enum": list(materials)}
+    else:
+        intent.pop("material", None)
+
+    variables = request.get("variables") or []
+    names = [v["name"] if isinstance(v, dict) else v for v in variables]
+    units = sorted({v.get("unit") for v in variables
+                    if isinstance(v, dict) and v.get("unit")})
+
+    if not names:
+        intent.pop("targets", None)
+        return schema
+
+    target = intent["targets"]["additionalProperties"]
+    if units:
+        # Each branch of the target carries a unit, and an offset carries its
+        # own.
+        target["oneOf"][0]["properties"]["unit"] = {"enum": units}
+        target["oneOf"][1]["properties"]["offset"]["properties"]["unit"] = {
+            "enum": units
+        }
+
+    # One named property per declared variable, and nothing else permitted.
+    # A JSON schema keyed by name rather than by additionalProperties is what
+    # makes the grammar enumerate them.
+    intent["targets"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {name: target for name in names},
+    }
+    return schema
+
 def context_lines(request):
     """What the engine knows, as plain lines for the prompt."""
     lines = []
@@ -193,7 +270,11 @@ def main():
         # costs memory on an appliance.
         verbose=False,
     )
-    grammar = LlamaGrammar.from_json_schema(json.dumps(SCHEMA))
+    # One grammar per distinct machine, not per request. Compiling a grammar
+    # costs tens of milliseconds, and the declaration does not change within a
+    # session, so the first request of a session pays for it and the rest do
+    # not.
+    grammars = {}
 
     for line in sys.stdin:
         line = line.strip()
@@ -202,9 +283,26 @@ def main():
 
         try:
             request = json.loads(line)
+
+            schema = schema_for(request)
+            key = json.dumps(schema, sort_keys=True)
+            if key not in grammars:
+                grammars[key] = LlamaGrammar.from_json_schema(key)
+            grammar = grammars[key]
+
             messages = [
                 {"role": "system", "content": INSTRUCTION + "\n\n" + context_lines(request)},
-                {"role": "user", "content": request.get("utterance", "")},
+                # Qwen3 reasons inside a <think> block before answering, and a
+                # grammar permitting only the final JSON leaves it nowhere to
+                # do that. Measured against the shipped corpus, the result was
+                # an answer that barely varied with the input: the same style
+                # came back for almost every request, including ones that were
+                # not requests at all.
+                #
+                # "/no_think" is the family's documented switch for a direct
+                # answer. A model that does not recognise it reads it as
+                # ordinary text, so this is safe to send to any backend.
+                {"role": "user", "content": request.get("utterance", "") + " /no_think"},
             ]
             completion = model.create_chat_completion(
                 messages=messages,

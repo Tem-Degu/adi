@@ -23,29 +23,45 @@ models:
   # rights from companies domiciled in the European Union. A manufacturer
   # licensing this SDK should not inherit either condition.
 
-  - id: "qwen3-1.7b-instruct-q4_k_m"
+  - id: "qwen3-4b-q4_k_m"
     seam: interpreter
-    file: "interpreter/qwen3-1.7b-instruct-q4_k_m.gguf"
-    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
-    bytes: 1100000000
-    source: "https://huggingface.co/Qwen/Qwen3-1.7B-Instruct-GGUF"
+    file: "interpreter/qwen3-4b-q4_k_m.gguf"
+    sha256: "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+    bytes: 2497280256
+    source: "https://huggingface.co/Qwen/Qwen3-4B-GGUF"
     licence: "Apache-2.0"
     notes: >
-      The minimal tier. Sized so that a board in the class of a Raspberry Pi 5
-      can answer in seconds rather than tens of seconds. Multilingual, which
-      matters for an appliance sold outside one market.
+      The recommended interpreter, and the smallest measured to behave
+      acceptably. On the shipped corpus it reaches 9 of 18 exactly correct and
+      14 of 18 correct in choosing whether to act or to ask, which is the
+      distinction that matters for safety.
 
-  - id: "qwen3-4b-instruct-q4_k_m"
+      Latency is the open problem. On four shared cloud cores it answers in
+      about 18 seconds, which is unusable for speech. Measure with `adi models
+      bench` on the board you intend to ship before committing to a voice
+      interface.
+
+      Pass `/no_think` with the request, as the shipped backend does. Qwen3
+      reasons in a block before answering, and a grammar permitting only the
+      final JSON leaves it nowhere to do so; without the switch its answers
+      barely varied with the input.
+
+  - id: "qwen3-1.7b-q4_k_m"
     seam: interpreter
-    file: "interpreter/qwen3-4b-instruct-q4_k_m.gguf"
-    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
-    bytes: 2600000000
-    source: "https://huggingface.co/Qwen/Qwen3-4B-Instruct-GGUF"
+    file: "interpreter/qwen3-1.7b-q4_k_m.gguf"
+    sha256: "d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5"
+    bytes: 1282439264
+    source: "https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF"
     licence: "Apache-2.0"
     notes: >
-      The standard tier. Better instruction following, and materially slower on
-      a processor without an accelerator. Measure with `adi models bench`
-      before choosing it.
+      Listed for completeness and not recommended. Measured on the shipped
+      corpus it reaches 3 of 18, and it never chose to ask a question where
+      asking was the correct answer, which is the failure direction that turns
+      an ambiguous request into a physical action.
+
+      Half the latency of the 4B, which is still too slow for speech, so the
+      smaller model buys nothing worth having. Qwen publishes no Q4 build of
+      this model; this is the llama.cpp project's own.
 
   # ----------------------------------------------------------------- transcriber
   #
@@ -55,15 +71,27 @@ models:
 
   - id: "moonshine-base-en"
     seam: transcriber
+    # Fetched by the useful-moonshine-onnx package on first use, not placed
+    # here by hand. The backend is configured with the model name
+    # "moonshine/base" rather than a path, and the package caches the weights
+    # under the user's Hugging Face cache. The path below is where it would go
+    # if a future backend loaded the file directly; `adi models check` will
+    # report it absent, which for this entry is expected.
     file: "transcriber/moonshine-base.onnx"
     sha256: "0000000000000000000000000000000000000000000000000000000000000000"
     bytes: 62000000
     source: "https://huggingface.co/UsefulSensors/moonshine-base"
     licence: "MIT"
     notes: >
-      English only. Built for this constraint rather than adapted to it, and
-      smaller than a Whisper model of comparable accuracy. Requires 16 kHz
-      audio.
+      The recommended transcriber, and verified working. English only, built
+      for that constraint rather than adapted to it, and smaller than a
+      Whisper model of comparable accuracy.
+
+      Requires 16 kHz audio. The engine resamples nothing, so a capture
+      pipeline delivering another rate must convert before handing audio over.
+
+      Configure the backend with the name "moonshine/base", not a file path.
+      The package fetches and caches the weights itself.
 
   - id: "whisper-base-en"
     seam: transcriber
@@ -82,7 +110,7 @@ models:
   - id: "piper-en-gb-alba-medium"
     seam: speaker
     file: "speaker/en_GB-alba-medium.onnx"
-    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    sha256: "401369c4a81d09fdd86c32c5c864440811dbdcc66466cde2d64f7133a66ad03b"
     bytes: 63000000
     source: "https://huggingface.co/rhasspy/piper-voices"
     licence: "MIT"
