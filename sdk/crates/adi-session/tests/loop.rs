@@ -97,6 +97,17 @@ impl Domain for TestDomain {
             explanation: "outside the target range".into(),
         }
     }
+    /// This profile reads both its variables from declared signals, so the
+    /// decision record can say what the machine actually saw. A profile that
+    /// does not answer gets a record without measured inputs rather than a
+    /// record naming a signal it never read.
+    fn signal_for(&self, variable: &VariableId) -> Option<SemanticId> {
+        match variable.0.as_str() {
+            "cycle_time" => Some(SemanticId::from("adi.example.signal.elapsed")),
+            "output_ratio" => Some(SemanticId::from("adi.example.signal.output")),
+            _ => None,
+        }
+    }
     fn feedback_vocabulary(&self) -> &[&str] {
         &["good", "bad"]
     }
@@ -425,5 +436,143 @@ fn an_unavailable_level_refuses_to_open_rather_than_falling_back() {
     assert!(
         opened.is_err(),
         "D1 has no model backend, so the session must not open at D0 instead"
+    );
+}
+
+// ------------------------------------------------- the record, ADI-P 9.3.5
+
+// ADI-P 9.3 requirement 5: a decision must be reconstructable from its
+// record. These assert the fields are populated, not merely present. Every one
+// of them existed, typed and tested, and the engine wrote nothing into them.
+
+/// `cause` must hold the diagnosed cause, and it held the variable the
+/// correction moves. The difference is the difference between "the shot
+/// channeled" and "the grind changed": one is the reason and the other is the
+/// consequence, and a record carrying only the consequence answers nothing.
+#[test]
+fn a_record_states_why_rather_than_what() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(-4.0));
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(agreeable(4)))
+        .expect("opens");
+
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+
+    let record = &session.history()[0];
+    assert_eq!(record.cause, "off_target", "the diagnosed cause");
+    assert_ne!(
+        record.cause, "cycle_time",
+        "not the variable the correction moves"
+    );
+    assert_eq!(record.rule_id, "off_target", "the rule that produced it");
+    assert_eq!(
+        record.explanation, "outside the target range",
+        "the profile composes this on every diagnosis and it was discarded"
+    );
+}
+
+/// Requirement 5 again, on the part the specification is most explicit about:
+/// "the dose came from the vendor default, the temperature from the user's
+/// learned preference" is the level of detail required, so each value carries
+/// its own layer and its own kind.
+#[test]
+fn a_record_accounts_for_every_value_that_fed_it() {
+    use adi_core::ValueSource;
+
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(-4.0));
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(agreeable(4)))
+        .expect("opens");
+
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+
+    let inputs = &session.history()[0].inputs;
+    assert!(!inputs.is_empty(), "the record must account for its inputs");
+
+    // What the machine saw.
+    let measured: Vec<_> = inputs
+        .iter()
+        .filter(|i| matches!(i.source, ValueSource::Measured { .. }))
+        .collect();
+    assert_eq!(measured.len(), 1, "one measured value fed this decision");
+    assert_eq!(measured[0].value.value, 30.0);
+
+    // What its knowledge said to aim at, and which layer said it.
+    let from_knowledge: Vec<_> = inputs
+        .iter()
+        .filter(|i| matches!(i.source, ValueSource::Knowledge { .. }))
+        .collect();
+    assert_eq!(from_knowledge.len(), 1);
+    assert_eq!(
+        from_knowledge[0].value.value, 26.0,
+        "observed 30 and wanted 4 less, so the engine was aiming at 26"
+    );
+    assert_eq!(from_knowledge[0].layer, adi_protocol::knowledge::Layer::Base);
+
+    // What the manufacturer declared the mechanism does. Without this the
+    // arithmetic cannot be replayed: the step is the desired change divided
+    // by it.
+    let from_skill: Vec<_> = inputs
+        .iter()
+        .filter(|i| matches!(i.source, ValueSource::SkillResponse { .. }))
+        .collect();
+    assert_eq!(from_skill.len(), 1);
+    assert_ne!(from_skill[0].value.value, 0.0);
+}
+
+/// A profile that cannot say which signal a variable came from gets a record
+/// without measured inputs. Naming a signal that was never read would put a
+/// measurement in the record that was never taken, and the record is read when
+/// something has already gone wrong.
+#[test]
+fn a_silent_profile_records_no_measurement_rather_than_a_guess() {
+    use adi_core::ValueSource;
+
+    struct Quiet(TestDomain);
+    impl Domain for Quiet {
+        fn profile_id(&self) -> &str {
+            self.0.profile_id()
+        }
+        fn variables(&self) -> &[VariableId] {
+            self.0.variables()
+        }
+        fn knowledge(&self) -> &Knowledge {
+            self.0.knowledge()
+        }
+        fn derive(&self, c: &mut Cycle) {
+            self.0.derive(c)
+        }
+        fn diagnose(&self, c: &Cycle, t: &ResolvedTargets) -> Diagnosis {
+            self.0.diagnose(c, t)
+        }
+        fn feedback_vocabulary(&self) -> &[&str] {
+            self.0.feedback_vocabulary()
+        }
+        // signal_for deliberately not implemented: the trait default is None.
+    }
+
+    let (d, s) = (declaration(), skill());
+    let dom = Quiet(TestDomain::new(-4.0));
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(agreeable(4)))
+        .expect("opens");
+
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+
+    let inputs = &session.history()[0].inputs;
+    assert!(
+        !inputs
+            .iter()
+            .any(|i| matches!(i.source, ValueSource::Measured { .. })),
+        "no signal was declared, so nothing may be recorded as measured"
+    );
+    assert!(
+        inputs
+            .iter()
+            .any(|i| matches!(i.source, ValueSource::SkillResponse { .. })),
+        "the rest of the account is unaffected"
     );
 }

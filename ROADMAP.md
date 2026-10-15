@@ -96,10 +96,11 @@ record. Then espresso as the first profile implementing the `Domain` trait.
 
 *Gate:* textbook cycles diagnosed correctly, offline, with no hardware.
 
-The decision record carries the structure for tracing every value back to the
-layer that produced it, and the session does not yet populate it. Filling it
-belongs with P7, where values stop being estimates and provenance starts to
-matter.
+The decision record traces every value back to the layer that produced it:
+what the machine measured, what its knowledge said to aim at, and what the
+manufacturer declared the mechanism would do, each recorded as the kind of
+thing it is. What a model was shown and what it returned is not yet recorded,
+which ADI-P 9.3 requirement 4 asks for at D1 and D2.
 
 ### P4. The decision layer DONE
 D0, D1 and D2 selectors behind one trait. D0 is deterministic; D1 and D2 are

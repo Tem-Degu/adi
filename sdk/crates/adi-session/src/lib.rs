@@ -37,6 +37,44 @@ use adi_wire::{Message, Outcome};
 pub use child::ChildAppliance;
 pub use transport::{Recorded, Transport};
 
+/// What a set of corrections was decided from, carried to the record.
+///
+/// ADI-P 9.3 requirement 5 obliges the engine to retain the inputs to every
+/// decision. All of this was in scope where the plan was made and went out of
+/// scope before it was recorded, which is why the records held an empty input
+/// list while every value in them was correct.
+///
+/// Borrowed rather than cloned: it lives for one call, between deciding and
+/// recording, and a decision record that cost a copy of the cycle would be a
+/// reason to stop writing them.
+struct Grounds<'a> {
+    /// The diagnoses the plan answers, one per goal.
+    diagnoses: &'a [adi_core::Diagnosis],
+    /// The observed cycle, on the observation path. A request has none, which
+    /// is why the measured entries are absent there rather than empty.
+    cycle: Option<&'a Cycle>,
+    /// The resolved knowledge, which carries the layer behind each target.
+    resolution: Option<&'a adi_protocol::knowledge::Resolution>,
+    /// True on the request path. A value the person asked for did not come
+    /// from knowledge, and recording it as though it had would misattribute
+    /// the decision to the manufacturer.
+    operator_asked: bool,
+}
+
+impl<'a> Grounds<'a> {
+    /// The diagnosis that asked for this variable to move.
+    ///
+    /// Matched by variable rather than by position: a plan can serve several
+    /// goals, and the selector is free to order its steps as it likes, so
+    /// zipping the two lists would attach the wrong reason to the right
+    /// action. That is a failure the record exists to prevent.
+    fn diagnosis_for(&self, variable: &adi_protocol::ids::VariableId) -> Option<&adi_core::Diagnosis> {
+        self.diagnoses
+            .iter()
+            .find(|d| d.target_variable.as_ref() == Some(variable))
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
     #[error("the link failed: {0}")]
@@ -256,7 +294,16 @@ impl<'a> Session<'a> {
             &current,
         )?;
 
-        self.perform(corrections, &cycle.cycle_id)
+        self.perform(
+            corrections,
+            &cycle.cycle_id,
+            &Grounds {
+                diagnoses: std::slice::from_ref(&diagnosis),
+                cycle: Some(&cycle),
+                resolution: Some(&resolution),
+                operator_asked: false,
+            },
+        )
     }
 
     /// Serve a request. The path a spoken instruction takes once it has become
@@ -299,7 +346,19 @@ impl<'a> Session<'a> {
             &BTreeMap::new(),
         )?;
 
-        self.perform(corrections, "request")
+        self.perform(
+            corrections,
+            "request",
+            &Grounds {
+                diagnoses: &goals,
+                // A request is served without observing a cycle, so there is
+                // nothing measured to attribute. The engine knows what it was
+                // asked for and not what the machine last did.
+                cycle: None,
+                resolution: None,
+                operator_asked: true,
+            },
+        )
     }
 
     /// Move the envelope's clock forward.
@@ -326,6 +385,7 @@ impl<'a> Session<'a> {
         &mut self,
         corrections: Vec<adi_core::Correction>,
         cycle_id: &str,
+        grounds: &Grounds<'_>,
     ) -> Result<Turn, SessionError> {
         let mut invocations = Vec::new();
         for correction in &corrections {
@@ -354,7 +414,7 @@ impl<'a> Session<'a> {
             performed.push(invocation.clone());
         }
 
-        let records = self.record(&corrections, &invocations, cycle_id);
+        let records = self.record(&corrections, &invocations, cycle_id, grounds);
         self.history.extend(records.iter().cloned());
 
         Ok(Turn {
@@ -403,39 +463,169 @@ impl<'a> Session<'a> {
         Err(SessionError::Silent)
     }
 
+    /// Account for a set of corrections. ADI-P 9.3 requirements 5 and 6.
+    ///
+    /// Requirement 5 is the demanding one: the record must hold the inputs, the
+    /// knowledge layer behind each value used, and the rule that produced the
+    /// decision, in enough detail to reconstruct it. Everything it needs was
+    /// already computed by the time the plan was sent, and was being discarded
+    /// here.
     fn record(
         &self,
         corrections: &[adi_core::Correction],
         invocations: &[Invocation],
         cycle_id: &str,
+        grounds: &Grounds<'_>,
     ) -> Vec<DecisionRecord> {
         corrections
             .iter()
             .zip(invocations)
             .enumerate()
-            .map(|(n, (correction, invocation))| DecisionRecord {
-                cycle_id: cycle_id.to_string(),
-                decision_id: format!("{cycle_id}/{n}"),
-                autonomy_level: self.level.as_str(),
-                cause: correction.variable.0.clone(),
-                rule_id: String::new(),
-                selected_tool: Some(correction.tool.clone()),
-                selected_by: self.level.selected_by(),
-                inputs: Vec::new(),
-                arguments: invocation.numeric_arguments.clone(),
-                // Recorded only where the declared range would not allow what
-                // the engine wanted. Without this the record says the machine
-                // acted, and nothing distinguishes a small correction from a
-                // mechanism that is at its limit and cannot move.
-                clamped_from: correction
-                    .clamped_from
-                    .map(|wanted| {
-                        BTreeMap::from([(correction.parameter.clone(), wanted.value)])
-                    })
-                    .unwrap_or_default(),
-                explanation: String::new(),
+            .map(|(n, (correction, invocation))| {
+                let diagnosis = grounds.diagnosis_for(&correction.variable);
+
+                DecisionRecord {
+                    cycle_id: cycle_id.to_string(),
+                    decision_id: format!("{cycle_id}/{n}"),
+                    autonomy_level: self.level.as_str(),
+                    // The diagnosed cause, which is what 9.3 asks for. This
+                    // field held the variable the correction moves, so the
+                    // record of a channeling shot read "grind_setting": the
+                    // thing changed rather than the reason for changing it,
+                    // and the reason is the entire point of the field.
+                    cause: diagnosis
+                        .map(|d| d.cause.clone())
+                        .unwrap_or_else(|| correction.variable.0.clone()),
+                    // This profile identifies each rule by the cause it
+                    // produces: one rule, one cause, so these are the same
+                    // string rather than one standing in for the other. A
+                    // profile whose rules and causes diverge gives `Diagnosis`
+                    // an identifier of its own, and until one exists adding
+                    // that field would be designing from no examples.
+                    rule_id: diagnosis.map(|d| d.cause.clone()).unwrap_or_default(),
+                    selected_tool: Some(correction.tool.clone()),
+                    selected_by: self.level.selected_by(),
+                    inputs: self.provenance(correction, grounds),
+                    arguments: invocation.numeric_arguments.clone(),
+                    // Recorded only where the declared range would not allow
+                    // what the engine wanted. Without this the record says the
+                    // machine acted, and nothing distinguishes a small
+                    // correction from a mechanism at its limit that cannot
+                    // move.
+                    clamped_from: correction
+                        .clamped_from
+                        .map(|wanted| {
+                            BTreeMap::from([(correction.parameter.clone(), wanted.value)])
+                        })
+                        .unwrap_or_default(),
+                    // Composed by the profile on every diagnosis and discarded
+                    // here until now. It is what the language layer phrases,
+                    // and never an actuation input.
+                    explanation: diagnosis
+                        .map(|d| d.explanation.clone())
+                        .unwrap_or_default(),
+                }
             })
             .collect()
+    }
+
+    /// Every value that fed one correction, each carrying its own layer.
+    ///
+    /// 9.3 is explicit that one layer for the whole record will not do. "The
+    /// dose came from the vendor default, the temperature from the user's
+    /// learned preference" is the level of detail it requires, so attribution
+    /// is per value.
+    ///
+    /// Three kinds of thing enter a correction and each is recorded as what it
+    /// is: what the machine saw, what its knowledge said to aim at, and what
+    /// the manufacturer declared the mechanism would do. Collapsing them would
+    /// lose the difference between a measurement and an instruction, which is
+    /// the first thing anyone reading this after an incident needs.
+    fn provenance(
+        &self,
+        correction: &adi_core::Correction,
+        grounds: &Grounds<'_>,
+    ) -> Vec<adi_core::ValueProvenance> {
+        use adi_core::{ValueProvenance, ValueSource};
+        use adi_protocol::knowledge::Layer;
+
+        let variable = &correction.variable;
+        let mut inputs = Vec::new();
+
+        // What was measured. Recorded only where the profile says which signal
+        // the variable came from and the cycle carries a value: a measurement
+        // named in the record and never taken is worse than one left out.
+        if let (Some(cycle), Some(signal)) = (grounds.cycle, self.domain.signal_for(variable)) {
+            if let Some(observed) = cycle.value(variable) {
+                inputs.push(ValueProvenance {
+                    variable: variable.clone(),
+                    value: observed,
+                    // A measurement comes from the machine rather than from a
+                    // knowledge layer. Base is the honest answer: no extension
+                    // changes what a sensor read.
+                    layer: Layer::Base,
+                    source: ValueSource::Measured { signal },
+                });
+            }
+        }
+
+        // What the knowledge said to aim at, and which layer said it. This is
+        // the entry requirement 5 exists for.
+        if let Some(resolution) = grounds.resolution {
+            if let Some(target) = resolution.targets.get(variable.0.as_str()) {
+                let delta = grounds
+                    .diagnosis_for(variable)
+                    .and_then(|d| d.desired_delta)
+                    .unwrap_or(0.0);
+
+                // The aim point: where the engine was trying to put the
+                // variable, rather than the bound it compared against. A range
+                // has two ends, and recording either alone would imply the
+                // profile targeted it.
+                if let Some(observed) = grounds.cycle.and_then(|c| c.value(variable)) {
+                    inputs.push(ValueProvenance {
+                        variable: variable.clone(),
+                        value: Quantity::new(observed.value + delta, observed.unit),
+                        layer: target.layer,
+                        source: ValueSource::Knowledge {
+                            key: variable.0.clone(),
+                        },
+                    });
+                }
+            }
+        }
+
+        // A requested value came from the person rather than from knowledge,
+        // and the difference matters: anyone asking why the machine did that is
+        // owed "because it was asked to" where that is the answer.
+        if grounds.operator_asked {
+            inputs.push(ValueProvenance {
+                variable: variable.clone(),
+                value: correction.absolute,
+                layer: Layer::Base,
+                source: ValueSource::Operator,
+            });
+        }
+
+        // What the manufacturer declared this mechanism does: the response that
+        // sized the correction. Without it the arithmetic cannot be replayed,
+        // because the step taken is the desired change divided by this.
+        if let Some(response) = self
+            .skill
+            .and_then(|s| s.response(&correction.tool, variable))
+        {
+            inputs.push(ValueProvenance {
+                variable: variable.clone(),
+                value: Quantity::new(response.per_unit, correction.delta.unit),
+                layer: Layer::Base,
+                source: ValueSource::SkillResponse {
+                    tool: correction.tool.clone(),
+                    parameter: correction.parameter.clone(),
+                },
+            });
+        }
+
+        inputs
     }
 
     /// What the machine produced, kept so a later request phrased against it

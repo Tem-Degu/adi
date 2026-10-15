@@ -133,6 +133,29 @@ impl Domain for Espresso {
         rules::diagnose(cycle, targets)
     }
 
+    /// Where each modelled variable was read from, for the decision record.
+    ///
+    /// Four of these come from the one mass curve, which is why the engine
+    /// cannot infer this: `derive` reads a single trace and produces the yield,
+    /// the shot time and both flow figures from it. The two settings are
+    /// reported by the machine on their own signals.
+    ///
+    /// `extraction_yield` is absent deliberately. Nothing in this profile
+    /// derives it from a signal, and naming one here would put a measurement in
+    /// the record that was never taken.
+    fn signal_for(&self, variable: &VariableId) -> Option<adi_protocol::ids::SemanticId> {
+        use registry::{signals, vars};
+        let signal = match variable.0.as_str() {
+            vars::YIELD_MASS | vars::SHOT_TIME | vars::FLOW_PEAK | vars::FLOW_VARIANCE
+            | vars::RATIO => signals::MASS,
+            vars::GRIND_SETTING => signals::GRIND_SETTING,
+            vars::DOSE_MASS => signals::DOSE_MASS,
+            vars::BREW_TEMPERATURE => signals::GROUP_TEMP,
+            _ => return None,
+        };
+        Some(adi_protocol::ids::SemanticId::from(signal))
+    }
+
     fn feedback_vocabulary(&self) -> &[&str] {
         registry::FEEDBACK_VOCABULARY
     }

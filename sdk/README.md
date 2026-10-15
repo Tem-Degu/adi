@@ -588,11 +588,12 @@ board.
   incorrect rule is least likely to be detected.
 - **Diagnosis considers one variable.** The knowledge layer resolves ratio and
   temperature targets, and `diagnose` does not yet use them.
-- **Decision records carry no provenance yet.** `DecisionRecord` has the
-  structure for tracing every value back to the knowledge layer that produced
-  it, and the session leaves it empty. Today the answer would be the base layer
-  for nearly every value, since no machine ships a vendor extension and nothing
-  writes the user layer. It becomes a real question when those exist.
+- **A decision record does not hold what a model was shown.** Every value that
+  fed a decision is now recorded with the layer behind it, which is ADI-P 9.3
+  requirement 5. Requirement 4 asks for more at D1 and D2: the record must also
+  hold what the model was given and what it returned, and it does not. Until it
+  does, a decision made with a model is reconstructable in its arithmetic and
+  not in its selection.
 - **No learning.** The machine remembers recent cycles and acts on them, so
   "half the sugar of last time" resolves correctly. What is missing is
   accumulation: `Layer::User` is defined, resolves correctly, and nothing writes

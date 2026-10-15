@@ -66,6 +66,23 @@ pub trait Domain {
         None
     }
 
+    /// Which declared signal a modelled variable was derived from, where the
+    /// profile can say.
+    ///
+    /// ADI-P 9.3 requirement 5 obliges the engine to retain the inputs to every
+    /// decision, and a measured input is only meaningful alongside the signal it
+    /// was read from. The engine cannot work that out for itself: `derive` turns
+    /// traces into variables by rules the profile owns, and in espresso four
+    /// variables come from one mass curve. Only the profile knows.
+    ///
+    /// Defaulted to `None`, which costs a profile that does not answer nothing
+    /// worse than a record without measured provenance. Returning a signal the
+    /// variable did not come from would be worse than returning nothing, since
+    /// the record is read when something has already gone wrong.
+    fn signal_for(&self, _variable: &VariableId) -> Option<adi_protocol::ids::SemanticId> {
+        None
+    }
+
     /// The knowledge this machine reasons from: the domain base plus whatever
     /// vendor, deployment and user layers were accepted.
     ///

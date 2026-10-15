@@ -435,3 +435,62 @@ fn a_rejected_extension_adds_no_variable() {
     assert_eq!(before, after);
 }
 
+/// ADI-P 9.3 requirement 5: a measured input is only meaningful alongside the
+/// signal it was read from, and only the profile knows which that is. Four of
+/// these come from the one mass curve, which is exactly why the engine cannot
+/// work it out for itself.
+#[test]
+fn every_derived_variable_names_the_signal_it_came_from() {
+    use adi_core::domain::Domain;
+    use adi_protocol::ids::VariableId;
+
+    let d = adi_domain_espresso::Espresso::new();
+
+    for (variable, expected) in [
+        ("yield_mass", "adi.espresso.signal.mass"),
+        ("shot_time", "adi.espresso.signal.mass"),
+        ("flow_peak", "adi.espresso.signal.mass"),
+        ("flow_variance", "adi.espresso.signal.mass"),
+        ("ratio", "adi.espresso.signal.mass"),
+        ("grind_setting", "adi.espresso.signal.grind_setting"),
+        ("dose_mass", "adi.espresso.signal.dose_mass"),
+        ("brew_temperature", "adi.espresso.signal.group_temp"),
+    ] {
+        let got = d.signal_for(&VariableId::from(variable));
+        assert_eq!(
+            got.as_ref().map(|s| s.0.as_str()),
+            Some(expected),
+            "{variable}"
+        );
+    }
+
+    // Nothing in this profile derives extraction_yield from a signal. Naming
+    // one would put a measurement in the record that was never taken, and the
+    // record is read when something has already gone wrong.
+    assert!(d
+        .signal_for(&VariableId::from("extraction_yield"))
+        .is_none());
+
+    // Every signal named above must be one the profile actually declares.
+    // A mapping to a signal the machine never reports would be a measurement
+    // nobody can go back and check.
+    let declared = [
+        adi_domain_espresso::registry::signals::MASS,
+        adi_domain_espresso::registry::signals::FLOW,
+        adi_domain_espresso::registry::signals::PRESSURE,
+        adi_domain_espresso::registry::signals::GROUP_TEMP,
+        adi_domain_espresso::registry::signals::ELAPSED,
+        adi_domain_espresso::registry::signals::GRIND_SETTING,
+        adi_domain_espresso::registry::signals::DOSE_MASS,
+    ];
+    for variable in d.variables() {
+        if let Some(signal) = d.signal_for(variable) {
+            assert!(
+                declared.contains(&signal.0.as_str()),
+                "{} names an undeclared signal {}",
+                variable.0,
+                signal.0
+            );
+        }
+    }
+}
