@@ -1,0 +1,96 @@
+# Every check this project has, on Linux.
+#
+# Until this existed, the whole of the Rust engine had only ever been built on
+# one Windows laptop. Nothing in the crates is platform-specific, which is why
+# this was expected to pass first time and is exactly why it was worth running:
+# an expectation nobody has tested is the kind that holds until a stranger
+# clones the repository.
+#
+# The appliance library is a separate matter. It is C99 with no platform
+# dependency by design, and the ARM job compiles it for a Cortex-M and runs the
+# suite under emulation, so the claim that it runs on a microcontroller is
+# checked by a machine rather than asserted in a document.
+
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # A warning in this project is a defect. The C build already treats them that
+  # way and the Rust side should not be softer.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  engine:
+    name: engine (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sdk
+
+      - name: Build
+        working-directory: sdk
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        working-directory: sdk
+        run: cargo test --workspace
+
+      - name: Clippy
+        working-directory: sdk
+        run: cargo clippy --workspace --all-targets
+
+      # The one rule: nothing outside the espresso profile may name espresso.
+      # A neutrality regression is silent, compiles, and passes every test.
+      - name: Neutrality
+        working-directory: sdk
+        run: python3 check-neutrality.py
+
+      - name: Validate the example declarations
+        working-directory: sdk
+        run: |
+          cargo run -p adi-cli -- validate examples/declarations/ex900.yaml \
+            --skill examples/declarations/ex900.skill.yaml
+          cargo run -p adi-cli -- validate examples/declarations/neutral-machine.yaml \
+            --skill examples/declarations/neutral-machine.skill.yaml
+
+      - name: Conformance
+        working-directory: sdk
+        run: cargo run -p adi-cli -- conformance conformance/espresso/cases
+
+  appliance:
+    name: appliance library (host and Cortex-M3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi qemu-system-arm
+
+      - name: Host
+        working-directory: sdk/c
+        run: make test
+
+      # The reason this job exists. The library's arithmetic is fixed-point and
+      # every range check rests on it being exact, which is a claim about a
+      # 32-bit core and cannot be settled on an x86-64 host.
+      - name: Cortex-M3, under emulation
+        working-directory: sdk/c
+        run: make arm-test
+
+      - name: Footprint
+        working-directory: sdk/c
+        run: make arm-size
