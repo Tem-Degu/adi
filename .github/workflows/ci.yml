@@ -17,6 +17,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Runnable by hand from the Actions tab. Without this the only way to get a
+  # run is to push something, so a workflow that was never triggered, because
+  # Actions had not been enabled on the repository yet, can only be started by
+  # inventing a commit.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
