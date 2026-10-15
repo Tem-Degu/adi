@@ -12,9 +12,8 @@ receive instruction without consulting anything else. What model it is, why a
 result came out as it did, what a particular setting changes. It answers from
 what the manufacturer supplied and from the declaration it already reasons over.
 
-Everything runs on the device. No internet connection, no account, no
-companion application. A hosted model can serve the speech seams where a network
-is available, and the reasoning that moves the machine never leaves it.
+Everything is designed to run on the device. No internet connection, no account, no
+companion application.
 
 The intelligence is bounded to one domain, meaning the scope of what the
 machine exists to do. An espresso machine reasons about extraction while a
@@ -30,8 +29,7 @@ toaster, a printer and a washing machine, grouped together](./assets/appliances.
 
 ## Try it
 
-Requires a Rust toolchain and a C compiler, and nothing else. The build
-fetches crates; after that nothing here reaches a network, and no account,
+Requires a Rust toolchain and a C compiler. The build fetches crates; after that nothing here reaches a network, and no account,
 API key or model download is involved.
 
 ```sh
@@ -179,7 +177,7 @@ A description may influence which tool a model picks and never what value is
 sent, so one that is wrong or out of date cannot reach the actuator. Keep the
 numbers out of it: how far the mechanism moves an outcome belongs in step 5.
 
-**5. Optionally, describe its effect.** A separate file states how much the
+**5. Describe its effect.** A separate file states how much the
 mechanism moves a result, which is what lets the engine size a correction
 instead of guessing at one. A tool with no such entry remains callable; it is
 not selected automatically.
@@ -194,10 +192,13 @@ responses:
     confidence: 0.75
 ```
 
-**6. Optionally, declare an outcome of your own.** A response has to name an
+**6. Declare an outcome of your own.** A response has to name an
 outcome the engine models, and a tool doing something the profile never
 considered moves none of them. Declare one in your own namespace and the engine
-can select your tool for a goal on it.
+can select your tool for a goal on it. Skip this where your tool moves
+something the profile already models: a second grinder still moves
+`shot_time`, and naming it twice would leave the engine treating one outcome
+as two.
 
 ```yaml
 variables:
@@ -229,7 +230,7 @@ works the day they declare it, without a release from this project.
 Three platform functions complete the integration: a millisecond clock, a byte
 write, and a function that drives the machine to a safe state.
 
-### Which document you need
+### Documents you should read to get started
 
 Two guides, in order.
 
