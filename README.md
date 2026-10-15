@@ -13,7 +13,8 @@ result came out as it did, what a particular setting changes. It answers from
 what the manufacturer supplied and from the declaration it already reasons over.
 
 Everything runs on the device. No internet connection, no account, no
-companion application.
+companion application. A hosted model can serve the speech seams where a network
+is available, and the reasoning that moves the machine never leaves it.
 
 The intelligence is bounded to one domain, meaning the scope of what the
 machine exists to do. An espresso machine reasons about extraction while a
@@ -343,10 +344,22 @@ request**.
 | Standard | RK3588 class | Qwen 3 4B Q4 | A premium appliance, where the voice interaction should feel immediate |
 | Custom | Whatever you measure | Any | Measured with `adi models bench` |
 
-Published latency figures are measured on other hardware with other prompts, so
-they do not transfer. `adi models bench` runs the evaluation corpus against your
+No board in that table has been measured. The only figures this project has
+taken are in [`sdk/README.md`](./sdk/README.md), on four shared cloud cores with
+no accelerator, where the interpreter took **18 seconds**. That is not a usable
+wait for speech.
+
+Published latency figures come from other hardware and other prompts, so they do
+not transfer. `adi models bench` runs the evaluation corpus against your
 configured interpreter on the board and reports how often the answer was correct
 and what each request cost. Run it before committing to a board.
+
+ADI is designed to run fully locally and needs no network, account or key. Where
+a network is available, a hosted model can serve the interpreter or either
+speech seam, which is the only route to a quick spoken response that needs no
+new hardware. See **Using a hosted model** in
+[`sdk/README.md`](./sdk/README.md). D0 uses no model at all, so the
+deterministic path is unaffected.
 
 Storage depends on which models are installed. A speech recogniser, an
 interpreter and a synthesiser together are roughly 1 to 3 GB at the quantisations

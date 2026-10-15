@@ -351,9 +351,11 @@ What this means in practice:
   in milliseconds and is what a machine does unattended.
 - **Explaining is unaffected.** The explainer needs no model, and the speaker
   is fast.
-- **Spoken requests are not yet viable** on a processor of this class. An
-  accelerator, a smaller task-specific model, or a different approach to the
-  interpreter seam is required, and none of those has been measured.
+- **Spoken requests are not yet viable** on a processor of this class, from a
+  model running on it. An accelerator, a smaller task-specific model, or a
+  different approach to the interpreter seam is required, and none of those has
+  been measured. A hosted model is the fourth option and is available today;
+  see [Using a hosted model](#using-a-hosted-model).
 
 Measure on the board you intend to ship before committing to a voice
 interface:
@@ -451,6 +453,38 @@ files used.
 **Implement the trait.** `adi-language` defines the four seams as traits. A
 manufacturer shipping at volume implements them directly against their own
 runtime.
+
+### Using a hosted model
+
+ADI is designed to run fully locally. No account, no key, no network, and the
+figures above were measured without an accelerator.
+
+Where a network is available, a hosted model can serve any of the four seams.
+The reason to use one is the interpreter latency above. A seam is a program that
+reads one JSON request per line and writes one answer, so a script calling an
+API is a complete implementation: no SDK dependency, any language, no change to
+this engine.
+
+Three things to get right.
+
+**Put a timeout in your script.** The engine blocks waiting for a backend's
+reply and imposes no limit of its own. A local model is slow and then finishes;
+a stalled connection may never answer. While the engine waits it stops sending
+heartbeats, so after `control_timeout_ms` the appliance decides the link is dead
+and enters its safe state. That behaviour is correct and the cause will not be
+obvious. Use a few seconds, and return a `clarify` when it expires.
+
+**Constrain the output to the schema, narrowed to the machine.** Instruction is
+advice; a grammar is not. Hosted models expose this as structured output or a
+JSON schema, and it should be built from the declaration each request carries.
+See `schema_for` in `examples/interpreters/qwen_interpreter.py`.
+
+**Decide what leaves the building.** On the speech seams that is audio of
+whoever is in the room.
+
+D0 uses no model at all, so none of this touches the deterministic path. A
+machine with its network removed still corrects itself. It loses speech, not
+intelligence.
 
 ### Wiring a microphone and a speaker
 
