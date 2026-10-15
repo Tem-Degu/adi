@@ -260,13 +260,13 @@ rather than projected:
 | Target | Runtime, excluding generated tables |
 |---|---|
 | x86-64 | 12212 B |
-| Cortex-M4, `-Os -mthumb` | **7198 B** |
+| Cortex-M4, `-Os -mthumb` | **7198 B** (7200 B on gcc 13.2) |
 
 41 percent smaller, which is more than the 25 to 30 percent this document
 previously estimated. Thumb-2 encodes branch-heavy integer code densely, and
 there is no floating point to pull in library support.
 
-`mingw32-make arm-size` reproduces it. A real product adds its own generated
+`make arm-size` reproduces it. A real product adds its own generated
 tables, which for the example declaration are 2320 B on x86-64.
 
 16 KB keeps the claim that matters: this belongs on the cheap side of an

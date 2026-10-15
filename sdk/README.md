@@ -124,7 +124,7 @@ depends on the domain.
 Check with:
 
 ```sh
-python check-neutrality.py
+python3 check-neutrality.py
 ```
 
 Comments are stripped before searching, so the check flags structural
@@ -244,7 +244,7 @@ they are validated, and a figure written twice will diverge.
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets
-python check-neutrality.py
+python3 check-neutrality.py
 
 cargo run -p adi-cli -- validate examples/declarations/ex900.yaml \
                                  --skill examples/declarations/ex900.skill.yaml
@@ -560,7 +560,7 @@ messages over a transport, and a cycle runs end to end: observe, diagnose,
 plan, check the safety envelope, invoke, record, remember. All three autonomy
 levels run against a real appliance.
 
-The appliance library occupies **7198 B of flash on a Cortex-M4** with no
+The appliance library occupies **about 7.2 KB of flash on a Cortex-M4** with no
 static or heap allocation, against the 16 KB budget stated in
 [`c/DESIGN.md`](./c/DESIGN.md). A product adds its own generated tables.
 
@@ -568,8 +568,8 @@ The full appliance test suite, 322 checks, passes on an emulated Cortex-M3:
 
 ```sh
 cd c
-mingw32-make arm-size     # footprint for Cortex-M4
-mingw32-make arm-test     # every suite, on an emulated Cortex-M3
+make arm-size     # footprint for Cortex-M4
+make arm-test     # every suite, on an emulated Cortex-M3
 ```
 
 Both need `arm-none-eabi-gcc` and `qemu-system-arm`, and neither needs a

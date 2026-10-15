@@ -29,10 +29,14 @@ toaster, a printer and a washing machine, grouped together](./assets/appliances.
 
 ## Try it
 
-Requires a Rust toolchain and a C compiler. Nothing else, and no network.
+Requires a Rust toolchain and a C compiler, and nothing else. The build
+fetches crates; after that nothing here reaches a network, and no account,
+API key or model download is involved.
 
 ```sh
-cd sdk
+git clone https://github.com/Tem-Degu/adi.git
+cd adi/sdk
+
 cargo build --release
 cd c && make example && cd ..
 
@@ -318,7 +322,7 @@ with no allocation, no recursion and no floating point, so an M0 is enough.
 
 | | |
 |---|---|
-| Flash | 7198 B, measured on Cortex-M4, plus your generated tables |
+| Flash | about 7.2 KB on Cortex-M4, plus your generated tables |
 | RAM | no static or heap allocation. One context of 496 bytes, plus the frame buffers you size |
 | Integration | three platform functions and one handler |
 
@@ -361,7 +365,9 @@ supply.
 Requires a Rust toolchain and a C compiler.
 
 ```sh
-cd sdk
+git clone https://github.com/Tem-Degu/adi.git
+cd adi/sdk
+
 cargo build --release
 cd c && make example && cd ..
 
@@ -424,7 +430,7 @@ To run the test suites and the conformance corpus:
 
 ```sh
 cargo test --workspace
-python check-neutrality.py
+python3 check-neutrality.py
 cargo run -p adi-cli -- conformance conformance/espresso/cases --interpreter conformance/espresso/interpreter.yaml
 ```
 
@@ -449,7 +455,7 @@ Ordered by when you need them rather than by importance.
 | [`sdk/README.md`](./sdk/README.md) | To run it | The implementation: layout, build, model configuration and current limitations. |
 | [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) | First, on real hardware | Getting `libadip` onto your board and talking to an engine: the declaration, the generated tables, the three port functions, the transport, and the first heartbeat. Stops before any mechanism is callable. |
 | [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | Next, once the link works | One mechanism from a pin to something the engine can reason about: driver, handler, declaration entry, and the optional skill entry. Includes the electrical steps and the failure cases. |
-| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | Alongside both | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, 7198 B of flash on a Cortex-M4. Why it is shaped the way it is, and what it does not do. |
+| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | Alongside both | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, about 7.2 KB of flash on a Cortex-M4. Why it is shaped the way it is, and what it does not do. |
 | [`PROTOCOL.md`](./PROTOCOL.md) | As the reference | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. Normative; the two guides above are the practical paths through it. |
 | [`ROADMAP.md`](./ROADMAP.md) | For where this is going | The build plan, in phases. |
 
@@ -465,7 +471,7 @@ plan, check the safety envelope, invoke, record, explain, remember. All three
 autonomy levels run against a real appliance, and all four model seams are
 reached in a session.
 
-The appliance library occupies 7198 B of flash on a Cortex-M4, with no static
+The appliance library occupies about 7.2 KB of flash on a Cortex-M4, with no static
 or heap allocation, and its full test suite passes on an emulated Cortex-M3.
 Both are reproducible without a board: see [`sdk/README.md`](./sdk/README.md).
 
