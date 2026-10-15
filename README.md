@@ -1,5 +1,11 @@
 # Artificial Domain Intelligence
 
+![An espresso machine, a dishwasher, a multicooker, a countertop oven, a
+toaster, a printer and a washing machine, grouped together](./assets/appliances.jpg)
+
+*The kind of machine this is for. Each one already measures what it is doing
+and already has a processor. What it lacks is the reasoning to use either.*
+
 Artificial Domain Intelligence is an approach to making physical machines
 intelligent and capable within the thing they are built to do (their domain).
 A machine measures what it just produced, determines what was wrong with it,
