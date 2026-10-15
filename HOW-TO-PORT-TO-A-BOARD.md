@@ -428,38 +428,47 @@ _setmode(_fileno(stdout), _O_BINARY);
 
 ### Against the real board
 
-**The SDK ships no serial transport.** `Transport` has two implementations:
-a child process over stdin and stdout, and a recorded double for tests. So
-`adi run` cannot open a UART today, and you have two ways round it.
-
-**A bridge, which needs no Rust.** `adi run --appliance` spawns a program and
-speaks to its stdin and stdout. A program that forwards those to a serial port
-is therefore a working binding, and the engine cannot tell the difference:
+Point the engine at the port instead of at a program:
 
 ```sh
-# a bridge of about twenty lines, or an off-the-shelf one
+cd sdk
 cargo run -p adi-cli -- run --level d0 \
   --declaration path/to/your.yaml \
-  --appliance ./serial-bridge        # argv: /dev/ttyUSB0 115200
+  --serial /dev/ttyUSB0 --baud 115200
 ```
 
-Nothing in the engine changes, and the framing already tolerates bytes arriving
-in pieces, which is what a serial port gives you.
+On Windows the port is `COM3` or similar. `--baud` defaults to 115200.
+`--serial` and `--appliance` are two different appliances, so giving both is
+refused rather than resolved in favour of one.
 
-**Or implement `Transport` directly.** It is two methods, `send` and `recv`
-with a timeout, and `Ok(None)` from `recv` means nothing arrived yet rather
-than an error. For a product you will want this anyway.
+Opening the port proves nothing by itself. A port that opens is not a machine
+listening, which is what the next step is for.
 
-Either way, then type `status`, which sends a heartbeat and prints what came
-back.
+If it will not open at all, the three usual causes are the port name, something
+else already holding it open, which a serial monitor does, and on Linux not
+being in the `dialout` group.
 
-### What a working link looks like
+### Then ask it something
 
-The engine reports the device identity from your declaration and a reply to
-the heartbeat. That is the whole of it. If `status` answers, your framing,
-your CRC, your clock and your write path are all correct.
+Type `status`. It sends a heartbeat and prints what came back.
+
+If that answers, your framing, your CRC, your clock and your write path are all
+correct. That is the whole of what first contact proves, and it is most of the
+work.
+
+### If you would rather own the transport
+
+`Transport` is two methods, `send` and `recv` with a timeout, where `Ok(None)`
+from `recv` means nothing arrived yet rather than an error. A product will want
+its own implementation eventually, over whatever link it actually ships, and
+`sdk/crates/adi-cli/src/serial.rs` is about a hundred lines and is the model to
+copy. The reassembly is the part worth reading: a frame arrives in pieces, two
+frames arrive in one read, and the line is noisy at power on.
 
 ### When it does not work
+
+Nothing below is exotic. Each line is a mistake that produces a symptom
+pointing somewhere else.
 
 | Symptom | Where to look |
 |---|---|
@@ -469,6 +478,7 @@ your CRC, your clock and your write path are all correct.
 | Connects, then drops after a second | `heartbeat_interval_ms` versus a main loop that blocks longer than it |
 | Invocations refused | Preconditions and interlocks still at their default, which is the safe reading, so nothing is invocable. Set them. |
 | Safe state entered unexpectedly | `adip_port_millis` stopping while interrupts are disabled |
+| Nothing over serial, fine over stdio | Baud mismatch, or TX and RX not crossed |
 
 ### Before you believe it
 

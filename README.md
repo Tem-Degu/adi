@@ -366,7 +366,14 @@ cargo run -p adi-cli -- run --level d0
 ```
 
 This starts the example appliance as a separate process, opens a session
-against it, and presents a prompt. Typing `cycle` observes a finished cycle:
+against it, and presents a prompt. For a board running your own firmware,
+give the port instead:
+
+```sh
+cargo run -p adi-cli -- run --level d0 --serial /dev/ttyUSB0 --baud 115200
+```
+
+Typing `cycle` observes a finished cycle:
 
 ```
 > cycle

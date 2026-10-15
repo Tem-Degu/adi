@@ -588,6 +588,11 @@ board.
   incorrect rule is least likely to be detected.
 - **Diagnosis considers one variable.** The knowledge layer resolves ratio and
   temperature targets, and `diagnose` does not yet use them.
+- **One transport binding, plus a serial port.** `Transport` is implemented
+  for an appliance started as a child process over standard input and output,
+  and for a serial port. BLE and USB are a product's own to write, which is two
+  methods against a trait; `sdk/crates/adi-cli/src/serial.rs` is the worked
+  example.
 - **A decision record does not hold what a model was shown.** Every value that
   fed a decision is now recorded with the layer behind it, which is ADI-P 9.3
   requirement 5. Requirement 4 asks for more at D1 and D2: the record must also

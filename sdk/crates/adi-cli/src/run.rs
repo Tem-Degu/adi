@@ -30,10 +30,14 @@ use adi_protocol::skill::Skill;
 use adi_protocol::units::{Quantity, Unit};
 use adi_session::{ChildAppliance, Session};
 
+use crate::serial::SerialAppliance;
+
 pub fn run(
     declaration_path: PathBuf,
     skill_path: PathBuf,
     appliance_path: Option<PathBuf>,
+    serial_path: Option<String>,
+    baud: u32,
     config_path: Option<PathBuf>,
     level: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -46,25 +50,50 @@ pub fn run(
     // binary that was never going to be used.
     let requested = parse_level(level.as_deref())?;
 
-    let appliance_path = appliance_path
-        .map(|given| resolve_executable(&given))
-        .unwrap_or_else(default_appliance);
-
-    if !appliance_path.exists() {
-        return Err(format!(
-            "no appliance at {}\n\nBuild it first:\n    cd sdk/c && make example",
-            appliance_path.display()
-        )
-        .into());
+    // One link or the other, never both. A machine on a cable and a process on
+    // this computer are different appliances, and quietly preferring one would
+    // let someone debug a board while talking to the example build.
+    if serial_path.is_some() && appliance_path.is_some() {
+        return Err("give --serial or --appliance, not both: they are two \
+                    different appliances"
+            .into());
     }
 
     println!(
         "  machine      {} {}",
         declaration.device.vendor, declaration.device.model
     );
-    println!("  appliance    {}", appliance_path.display());
 
-    let transport = ChildAppliance::start(&appliance_path.to_string_lossy(), &[])?;
+    let transport: Box<dyn adi_session::Transport> = match &serial_path {
+        Some(path) => {
+            println!("  appliance    {path} at {baud} baud");
+            // A port that opens is not evidence of a machine. Nothing is sent
+            // here; `status` is what settles whether anything is listening.
+            Box::new(SerialAppliance::open(path, baud)?)
+        }
+        None => {
+            let appliance_path = appliance_path
+                .map(|given| resolve_executable(&given))
+                .unwrap_or_else(default_appliance);
+
+            if !appliance_path.exists() {
+                return Err(format!(
+                    "no appliance at {}\n\nBuild it first:\n    cd sdk/c && make example\n\n\
+                     Or reach a real board over a serial port:\n    \
+                     adi run --serial {} --baud 115200",
+                    appliance_path.display(),
+                    if cfg!(windows) { "COM3" } else { "/dev/ttyUSB0" }
+                )
+                .into());
+            }
+
+            println!("  appliance    {}", appliance_path.display());
+            Box::new(ChildAppliance::start(
+                &appliance_path.to_string_lossy(),
+                &[],
+            )?)
+        }
+    };
 
     // ADI-P 3.3 makes D2 the default. It needs a chooser, so without one the
     // session opens at D0, which is deterministic and needs no model. The
@@ -81,7 +110,7 @@ pub fn run(
                 Some(&skill),
                 &domain,
                 Box::new(selector),
-                Box::new(transport),
+                transport,
             )
         }
         (AutonomyLevel::D1, Some((chooser, label))) => {
@@ -91,7 +120,7 @@ pub fn run(
                 Some(&skill),
                 &domain,
                 Box::new(ModelToolSelector { chooser }),
-                Box::new(transport),
+                transport,
             )
         }
         (AutonomyLevel::D0, _) => Session::open(
@@ -99,7 +128,7 @@ pub fn run(
             Some(&skill),
             &domain,
             AutonomyLevel::D0,
-            Box::new(transport),
+            transport,
         )?,
         (wanted, None) => {
             // Printed and exited rather than returned, because a Box<dyn

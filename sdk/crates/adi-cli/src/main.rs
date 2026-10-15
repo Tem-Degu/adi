@@ -7,6 +7,7 @@ mod conformance;
 mod genc;
 mod bench;
 mod run;
+mod serial;
 mod models;
 
 use std::path::PathBuf;
@@ -61,16 +62,31 @@ enum Command {
     },
     /// Open a live session against a real appliance and drive it.
     ///
-    /// Starts the appliance, connects, and accepts commands. This is the only
-    /// command that runs the engine rather than inspecting it.
+    /// Connects, then accepts commands. This is the only command that runs the
+    /// engine rather than inspecting it.
+    ///
+    /// Two links. By default the appliance is started as a child process and
+    /// spoken to over its standard input and output, which is the local IPC
+    /// binding and the right one while the firmware is a host build. Give
+    /// --serial instead once it is on a board, since a machine on a cable is
+    /// already running and cannot be launched.
     Run {
         #[arg(long, default_value = "examples/declarations/ex900.yaml")]
         declaration: PathBuf,
         #[arg(long, default_value = "examples/declarations/ex900.skill.yaml")]
         skill: PathBuf,
-        /// Defaults to the example built by `cd c && make example`.
+        /// An appliance to start as a child process. Defaults to the example
+        /// built by `cd c && make example`.
         #[arg(long)]
         appliance: Option<PathBuf>,
+        /// A serial port a real appliance is listening on, for example
+        /// /dev/ttyUSB0 or COM3. Use this instead of --appliance once the
+        /// firmware is on a board.
+        #[arg(long, conflicts_with = "appliance")]
+        serial: Option<String>,
+        /// Line rate for --serial.
+        #[arg(long, default_value_t = 115_200)]
+        baud: u32,
         /// Models configuration. Without it, spoken requests are unavailable.
         #[arg(long, short)]
         config: Option<PathBuf>,
@@ -114,7 +130,22 @@ enum ModelsCommand {
     },
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::process::ExitCode {
+    match dispatch() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            // Printed through Display rather than returned from main, which
+            // reports it through Debug: a `String` error then arrives quoted
+            // with its newlines escaped, so the one place a message most needs
+            // to be readable is the one place it is not. Several errors here
+            // carry the command to run next.
+            eprintln!("error: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn dispatch() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         Command::Validate { path, skill } => validate(path, skill),
@@ -125,8 +156,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ModelsCommand::Hash { path } => models::hash(path),
             ModelsCommand::Bench { corpus, interpreter } => bench::bench(corpus, interpreter),
         },
-        Command::Run { declaration, skill, appliance, config, level } => {
-            run::run(declaration, skill, appliance, config, level)
+        Command::Run { declaration, skill, appliance, serial, baud, config, level } => {
+            run::run(declaration, skill, appliance, serial, baud, config, level)
         }
         Command::Conformance { dir, interpreter } => conformance(dir, interpreter),
     }
