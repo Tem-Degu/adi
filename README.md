@@ -356,8 +356,7 @@ and what each request cost. Run it before committing to a board.
 
 ADI is designed to run fully locally and needs no network, account or key. Where
 a network is available, a hosted model can serve the interpreter or either
-speech seam, which is the only route to a quick spoken response that needs no
-new hardware. See **Using a hosted model** in
+speech seam. See **Using a hosted model** in
 [`sdk/README.md`](./sdk/README.md). D0 uses no model at all, so the
 deterministic path is unaffected.
 
