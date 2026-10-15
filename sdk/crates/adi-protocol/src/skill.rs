@@ -200,6 +200,40 @@ impl Skill {
             .collect()
     }
 
+    /// Vendor tools this skill makes selectable that say nothing about what
+    /// they are for.
+    ///
+    /// A registry identifier means the same thing on every machine, so the
+    /// profile supplies its description. A vendor identifier means nothing to
+    /// anyone: a model handed `x.acme.aux.actuate_3` with a magnitude and a
+    /// confidence cannot tell what it does, and on a machine with two tools
+    /// serving one outcome it cannot choose between them on anything but the
+    /// numbers.
+    ///
+    /// The rule applies only where a response exists, because that is what
+    /// makes a tool selectable. A vendor tool the engine can call but never
+    /// choose is the manufacturer's own business.
+    ///
+    /// Lives here rather than in the command line tool because a rule only the
+    /// tool enforces is a rule no test can see. This one went unnoticed in a
+    /// shipped example for exactly that reason.
+    pub fn undescribed_vendor_tools(&self, declaration: &crate::Declaration) -> Vec<String> {
+        let mut found: Vec<String> = self
+            .responses
+            .iter()
+            .filter_map(|response| declaration.tool(&response.tool))
+            .filter(|tool| tool.id.0.starts_with("x.") && tool.description.is_none())
+            .map(|tool| tool.id.0.clone())
+            .collect();
+
+        // Sorted before deduplicating. `dedup` removes only consecutive
+        // repeats, so a skill declaring responses for A, B and then A again
+        // would have reported A twice.
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
     pub fn retention_for(&self, tool: &SemanticId) -> Option<&Retention> {
         self.dynamics
             .iter()

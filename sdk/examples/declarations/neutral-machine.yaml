@@ -122,16 +122,26 @@ tools:
   # therefore refused for a preference request.
   - id: "x.example.aux.additive"
     name: "additive"
+    description: >
+      Adds a measured volume of a secondary input. Changes the character of the
+      result rather than how it was produced, and moves nothing the process
+      measures, which is what lets a preference be served by it.
     parameters:
       amount: { type: number, unit: ml, min: 0, max: 60, resolution: 1 }
     preconditions: ["state == idle"]
     effects: ["additive_volume"]
     reversible: false
 
-  # A vendor tool, outside the registry. Callable, but not selectable until a
-  # skill response describes it.
+  # A vendor tool, outside the registry. Callable from the declaration alone;
+  # selectable only once a skill response says what moving it does. Both are
+  # present here, which is why it must also carry a description: a registry
+  # tool takes one from the profile and this has no profile to take it from.
   - id: "x.example.aux.actuate"
     name: "auxiliary"
+    description: >
+      Sets an auxiliary mechanism to a level, in whole steps. Higher is more.
+      Outside the registry, so nothing else on this machine states what it is
+      for and this line is all a model has to go on.
     parameters:
       level: { type: integer, unit: g, min: 0, max: 20, resolution: 1 }
     preconditions: ["state == idle"]

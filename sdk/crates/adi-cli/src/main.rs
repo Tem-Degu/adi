@@ -207,27 +207,13 @@ fn validate(
         }
     }
 
-    // A vendor tool the engine may select must say what it is for.
-    //
-    // A registry identifier means the same on every machine and the profile
-    // supplies its description. A vendor identifier means nothing to anyone: a
-    // model handed "x.acme.aux.actuate_3" with a magnitude and a confidence has
-    // no way to tell what it does, and on a machine with two tools serving one
-    // outcome it cannot choose between them on anything but the numbers.
+    // A vendor tool the engine may select must say what it is for. The rule
+    // itself is in adi-protocol, so the tests can see it too; this is only the
+    // reporting.
     if let Some(skill_path) = &skill_path {
         let skill = load_skill(skill_path)?;
-        let mut undescribed = Vec::new();
+        let undescribed = skill.undescribed_vendor_tools(&declaration);
 
-        for response in &skill.responses {
-            let Some(tool) = declaration.tool(&response.tool) else {
-                continue;
-            };
-            if tool.id.0.starts_with("x.") && tool.description.is_none() {
-                undescribed.push(tool.id.0.clone());
-            }
-        }
-
-        undescribed.dedup();
         if !undescribed.is_empty() {
             eprintln!(
                 "declaration: FAILED  these vendor tools are selectable and carry no description:"
