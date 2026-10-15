@@ -13,9 +13,11 @@ A manufacturer's firmware engineer should be able to make their machine speak
 ADI-P in a day, without adopting another language, build system or release
 schedule, and without writing a parser or a validator.
 
-`HOW-TO-ADD-A-TOOL.md` describes that path from the engineer's side. This
-document describes what the library does on their behalf, and why it is
-shaped as it is.
+Two documents describe that path from the engineer's side:
+`../../HOW-TO-PORT-TO-A-BOARD.md` for getting the library onto a board and
+answering a heartbeat, then `../../HOW-TO-ADD-A-TOOL.md` for making a mechanism
+callable. This document describes what the library does on their behalf, and
+why it is shaped as it is.
 
 ## 2. What "correct" means here
 
@@ -498,6 +500,9 @@ integrators will require the latter.
 ## 11. Deliberately out of scope for v1
 
 - **Transport drivers.** No UART, no BLE, no USB. The caller owns the wire.
+  The framing, the length check and the CRC are inside the library, so what the
+  caller owns is moving bytes and nothing more;
+  `../../HOW-TO-PORT-TO-A-BOARD.md` works one through.
 - **Declaration parsing on device.** Section 3.
 - **Procedures.** Section 8.3 of the spec is an escape hatch, and the device can
   execute the steps as ordinary invocations until a customer needs otherwise.

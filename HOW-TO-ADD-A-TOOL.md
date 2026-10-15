@@ -6,6 +6,12 @@ This document explains how to make a mechanism on your machine callable by an
 Artificial Domain Intelligence engine. It is written for the engineer who will
 do the work, and assumes no prior knowledge of ADI.
 
+It assumes one thing about your setup: that the library is already on your
+board, or on your desk as a host build, and that an engine can reach it. If it
+cannot yet, start with
+[`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md), which ends where
+this begins.
+
 The specification is [`PROTOCOL.md`](./PROTOCOL.md). This guide is the
 practical path through it.
 

@@ -41,11 +41,11 @@ Type `cycle`:
 ```
 > cycle
   observing    an 18 s shot, described as sour
-  diagnosed    shot_time
+  diagnosed    under_extracted
   chose        adi.espresso.grind.set_setting
   sent         setting = 20 Step
   accepted     by the appliance
-  explains     Diagnosed shot_time and set setting to 20.
+  explains     That ran 18 seconds against a target of 25 to 32. It is under-extracted, so slow the flow down.
 ```
 
 The appliance is a real build of the C library running as a separate process.
@@ -221,8 +221,22 @@ works the day they declare it, without a release from this project.
 Three platform functions complete the integration: a millisecond clock, a byte
 write, and a function that drives the machine to a safe state.
 
-See [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) for the full path,
-including the electrical steps and the failure cases.
+### Which document you need
+
+Two guides, in order.
+
+[`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) is first. It covers
+getting the library onto your hardware and answering a heartbeat: the
+declaration, the generated tables, the three functions above, the transport, and
+what a working link looks like. It stops before any mechanism is callable.
+
+[`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) is next, and assumes the link
+works. It takes one mechanism from a pin to something the engine can reason
+about, including the electrical steps and the failure cases.
+
+You can do a good deal of both before any board exists. The example appliance
+is a host build of the same C library, driven over stdin and stdout, which is a
+real transport binding rather than a simulation.
 
 ## Autonomy
 
@@ -357,7 +371,7 @@ against it, and presents a prompt. Typing `cycle` observes a finished cycle:
 ```
 > cycle
   observing    an 18 s shot, described as sour
-  diagnosed    shot_time
+  diagnosed    under_extracted
   chose        adi.espresso.grind.set_setting
   sent         setting = 20 Step
   accepted     by the appliance
@@ -418,13 +432,20 @@ The last two need `arm-none-eabi-gcc` and `qemu-system-arm`. Both are free.
 
 ## Documents
 
-| File | Contents |
-|---|---|
-| [`PROTOCOL.md`](./PROTOCOL.md) | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. |
-| [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | The path through the protocol for a firmware engineer: mechanism, driver, handler, declaration, and the optional skill entry. |
-| [`ROADMAP.md`](./ROADMAP.md) | The build plan, in phases. |
-| [`sdk/README.md`](./sdk/README.md) | The implementation: layout, build, model configuration and current limitations. |
-| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, 7198 B of flash on a Cortex-M4. |
+Ordered by when you need them rather than by importance.
+
+| File | Read it | Contents |
+|---|---|---|
+| [`sdk/README.md`](./sdk/README.md) | To run it | The implementation: layout, build, model configuration and current limitations. |
+| [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) | First, on real hardware | Getting `libadip` onto your board and talking to an engine: the declaration, the generated tables, the three port functions, the transport, and the first heartbeat. Stops before any mechanism is callable. |
+| [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | Next, once the link works | One mechanism from a pin to something the engine can reason about: driver, handler, declaration entry, and the optional skill entry. Includes the electrical steps and the failure cases. |
+| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | Alongside both | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, 7198 B of flash on a Cortex-M4. Why it is shaped the way it is, and what it does not do. |
+| [`PROTOCOL.md`](./PROTOCOL.md) | As the reference | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. Normative; the two guides above are the practical paths through it. |
+| [`ROADMAP.md`](./ROADMAP.md) | For where this is going | The build plan, in phases. |
+
+A firmware engineer integrating a machine needs the two guides and the parts of
+`PROTOCOL.md` they refer to. Reading the specification front to back first is a
+reasonable thing to do and is not the shortest route.
 
 ## Status
 
