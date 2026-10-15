@@ -175,12 +175,28 @@ that omits it. Your identifier means nothing to anyone else, so a model offered
 
 A description may influence which tool a model picks and never what value is
 sent, so one that is wrong or out of date cannot reach the actuator. Keep the
-numbers out of it: how far the mechanism moves an outcome belongs in step 5.
+numbers out of it: how far the mechanism moves an outcome belongs in step 6.
 
-**5. Describe its effect.** A separate file states how much the
-mechanism moves a result, which is what lets the engine size a correction
-instead of guessing at one. A tool with no such entry remains callable; it is
-not selected automatically.
+**5. Declare the outcome it moves, if the profile has no name for it.** The
+engine reasons about outcomes, not tools: a spoken request names one and a
+correction targets one, so a tool that moves nothing named is unreachable.
+Skip this where the profile already names it, since a second grinder still
+moves `shot_time` and a second name for it would leave the engine treating one
+outcome as two.
+
+```yaml
+variables:
+  x.acme.tray_state:
+    unit: none
+    description: >
+      How clean the drip tray is, from 0 for soiled to 1 for clean.
+```
+
+**6. State how far your tool moves it.** This is what lets the engine size a
+correction instead of guessing at one, and it is what makes the tool reachable
+at all: without this entry the engine will never select it and no spoken
+request can arrive at it. The tool stays callable from your own panel or app,
+because the appliance accepts invocations the engine did not originate.
 
 ```yaml
 responses:
@@ -191,24 +207,6 @@ responses:
     unit: s
     confidence: 0.75
 ```
-
-**6. Declare an outcome of your own.** A response has to name an
-outcome the engine models, and a tool doing something the profile never
-considered moves none of them. Declare one in your own namespace and the engine
-can select your tool for a goal on it. Skip this where your tool moves
-something the profile already models: a second grinder still moves
-`shot_time`, and naming it twice would leave the engine treating one outcome
-as two.
-
-```yaml
-variables:
-  x.acme.tray_state:
-    unit: none
-    description: >
-      How clean the drip tray is, from 0 for soiled to 1 for clean.
-```
-
-This is what makes a new capability reachable.
 
 **7. Optionally, say what you know.** Free text the machine may answer from.
 
