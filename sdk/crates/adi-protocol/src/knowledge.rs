@@ -883,6 +883,25 @@ impl Knowledge {
         ids
     }
 
+    /// Every variable any layer declares, across all layers.
+    ///
+    /// ADI-P 9.4.1 requires an interpreter be given the declared variables with
+    /// their units and meanings, and names the vendor case specifically: a bare
+    /// identifier can be mapped onto a request only where the model was trained
+    /// on the domain, which "is never true of a variable a manufacturer
+    /// introduced". A profile holding only its base list leaves exactly that
+    /// variable unreachable by language while it remains reachable by the
+    /// deterministic path, which is the harder failure to notice.
+    ///
+    /// Sorted, so the order a model sees does not depend on which layer
+    /// happened to declare what.
+    pub fn variable_ids(&self) -> Vec<&VariableId> {
+        let mut ids: Vec<&VariableId> =
+            self.layers.iter().flat_map(|l| l.variables.keys()).collect();
+        ids.sort_unstable();
+        ids
+    }
+
     pub fn layers(&self) -> &[KnowledgeLayer] {
         &self.layers
     }

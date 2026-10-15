@@ -362,3 +362,76 @@ fn milk_volume_is_a_preference_and_grind_is_not() {
     assert!(k.is_preference("milk_volume"));
     assert!(!k.is_preference("grind_setting"));
 }
+
+/// ADI-P 9.4.1: the engine must supply the interpreter with the declared
+/// variables and their meanings, and 6.3 permits a vendor to introduce one.
+///
+/// The two requirements meet here. `variables()` is what the CLI builds the
+/// interpreter context from, so a vendor variable missing from it is reachable
+/// by the deterministic path and unnameable in a spoken request. That is the
+/// quiet half of a failure: the capability works, and nobody can ask for it.
+#[test]
+fn a_vendor_variable_reaches_the_profile() {
+    use adi_core::domain::Domain;
+    let mut d = adi_domain_espresso::Espresso::new();
+    let before = d.variables().len();
+
+    let mut e: KnowledgeExtension = serde_yaml::from_str(SPEC_EXAMPLE).unwrap();
+    e.variables.insert(
+        adi_protocol::ids::VariableId::from("x.example.tray_state"),
+        adi_protocol::knowledge::VariableDef {
+            unit: Unit::None,
+            description: "How clean the drip tray is.".into(),
+        },
+    );
+    d.add_extension(e, Layer::Vendor).expect("a valid extension");
+
+    let declared = d.variables();
+    assert_eq!(declared.len(), before + 1);
+    assert!(declared
+        .iter()
+        .any(|v| v.0 == "x.example.tray_state"));
+
+    // And with its meaning, which is the half 9.4.1 is explicit about: a bare
+    // identifier is useless to a model that was never trained on this machine.
+    let def = d
+        .knowledge()
+        .variable(&adi_protocol::ids::VariableId::from("x.example.tray_state"))
+        .expect("the definition must be reachable alongside the name");
+    assert_eq!(def.description, "How clean the drip tray is.");
+}
+
+/// ADI-P 6.5 again, for the variable list specifically. A rejected extension
+/// must leave the profile as it was, and a list rebuilt before the layer was
+/// accepted would have reintroduced exactly the partial state 6.5 forbids.
+#[test]
+fn a_rejected_extension_adds_no_variable() {
+    use adi_core::domain::Domain;
+    let mut d = adi_domain_espresso::Espresso::new();
+    let before: Vec<String> = d.variables().iter().map(|v| v.0.clone()).collect();
+
+    let mut e: KnowledgeExtension = serde_yaml::from_str(SPEC_EXAMPLE).unwrap();
+    e.variables.insert(
+        adi_protocol::ids::VariableId::from("x.example.tray_state"),
+        adi_protocol::knowledge::VariableDef {
+            unit: Unit::None,
+            description: "How clean the drip tray is.".into(),
+        },
+    );
+    // Widens the base ceiling, which 6.4 forbids, so the whole layer fails.
+    e.constraints.insert(
+        "brew_temperature".into(),
+        adi_protocol::Range {
+            min: 80.0,
+            max: 110.0,
+            resolution: None,
+            unit: Unit::C,
+        },
+    );
+
+    assert!(d.add_extension(e, Layer::Vendor).is_err());
+
+    let after: Vec<String> = d.variables().iter().map(|v| v.0.clone()).collect();
+    assert_eq!(before, after);
+}
+

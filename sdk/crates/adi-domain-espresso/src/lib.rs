@@ -53,15 +53,21 @@ impl Espresso {
 
     pub fn try_new() -> Result<Self, EspressoError> {
         let base: KnowledgeBase = serde_yaml::from_str(BASE_KNOWLEDGE)?;
+        let knowledge = Knowledge::new(base.into_layer())?;
 
-        // Read from the knowledge base rather than held here. The two used to be
+        // Read from the knowledge rather than held here. The two used to be
         // separate, a list in this file and a table in PROTOCOL.md 7.3, with
         // nothing checking they agreed.
-        let variables: Vec<VariableId> = base.variables.keys().cloned().collect();
+        //
+        // Taken through the same call `add_extension` uses, so that a profile
+        // built from the base alone and one that has accepted a layer derive
+        // this list the same way.
+        let variables: Vec<VariableId> =
+            knowledge.variable_ids().into_iter().cloned().collect();
 
         Ok(Self {
             variables,
-            knowledge: Knowledge::new(base.into_layer())?,
+            knowledge,
         })
     }
 
@@ -78,6 +84,25 @@ impl Espresso {
         let base: KnowledgeBase = serde_yaml::from_str(BASE_KNOWLEDGE)?;
         extension.validate(&base)?;
         self.knowledge.add(extension.into_layer(layer))?;
+
+        // An extension may introduce variables of its own (ADI-P 6.3), and
+        // until this list is rebuilt they exist in the knowledge and are
+        // invisible to `variables()`. The consequence is narrow and easy to
+        // miss: the planner works from the skill's declared responses, so a
+        // vendor variable is already actuable, while the interpreter context
+        // is built from this list, so the same variable cannot be named in a
+        // request. ADI-P 9.4.1 requires it be supplied.
+        //
+        // Rebuilt only after `add` has returned, so a rejected extension
+        // leaves the profile as it was. Section 6.5 requires that, and
+        // updating this list before the layer was accepted would have
+        // reintroduced the partial state the rule exists to prevent.
+        self.variables = self
+            .knowledge
+            .variable_ids()
+            .into_iter()
+            .cloned()
+            .collect();
         Ok(())
     }
 
