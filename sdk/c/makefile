@@ -135,7 +135,8 @@ QEMU    ?= qemu-system-arm
 ARMBUILD = $(BUILD)/arm
 ARMCPU  ?= cortex-m3
 ARMFLAGS = -std=c99 -Os -mcpu=$(ARMCPU) -mthumb -Iinclude -Igenerated $(WARN)
-ARMLINK  = --specs=nano.specs -nostartfiles -T arm/lm3s6965.ld
+ARMLD    = arm/lm3s6965.ld
+ARMLINK  = --specs=nano.specs -nostartfiles -T $(ARMLD)
 ARMLIBS  = -lc -lnosys
 
 ARMTESTS = $(ARMBUILD)/test_m1.elf $(ARMBUILD)/test_m2.elf $(ARMBUILD)/test_m3.elf \
@@ -146,25 +147,32 @@ $(ARMBUILD):
 
 # M1 and M2 need no runtime; the rest do, and define the port functions
 # themselves.
-$(ARMBUILD)/test_m1.elf: | $(ARMBUILD)
+$(ARMBUILD)/test_m1.elf: arm/startup.c $(ARMLD) $(CORE) $(GEN) $(T1) | $(ARMBUILD)
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(CORE) $(GEN) $(T1) -o $@ $(ARMLIBS)
 
-$(ARMBUILD)/test_m2.elf: | $(ARMBUILD)
+$(ARMBUILD)/test_m2.elf: arm/startup.c $(ARMLD) $(CORE) $(NEUTRAL) $(T2) | $(ARMBUILD)
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(CORE) $(NEUTRAL) $(T2) -o $@ $(ARMLIBS)
 
-$(ARMBUILD)/test_m3.elf: | $(ARMBUILD)
+$(ARMBUILD)/test_m3.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T3) | $(ARMBUILD)
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T3) -o $@ $(ARMLIBS)
 
-$(ARMBUILD)/test_m4.elf: | $(ARMBUILD)
+$(ARMBUILD)/test_m4.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T4) | $(ARMBUILD)
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T4) -o $@ $(ARMLIBS)
 
-$(ARMBUILD)/test_m5.elf: | $(ARMBUILD)
+$(ARMBUILD)/test_m5.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T5) | $(ARMBUILD)
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T5) -o $@ $(ARMLIBS)
 
-$(ARMBUILD)/test_signals.elf: | $(ARMBUILD)
+$(ARMBUILD)/test_signals.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T6) | $(ARMBUILD)
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T6) -o $@ $(ARMLIBS)
 
 arm: $(ARMTESTS)
+
+# Every ARM rule lists its sources. They were order-only before, with nothing
+# but the build directory as a prerequisite, so once a .elf existed make
+# considered it current and never rebuilt it. `make arm-test` then ran whatever
+# was compiled first and reported it as a pass, which is worse than failing:
+# the suite that exists to check this code on a 32-bit core was checking an
+# older copy of it.
 
 # QEMU reports the suite's own exit status, so a failure fails the make.
 arm-test: $(ARMTESTS)

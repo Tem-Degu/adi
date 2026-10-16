@@ -260,7 +260,7 @@ rather than projected:
 | Target | Runtime, excluding generated tables |
 |---|---|
 | x86-64 | 12212 B |
-| Cortex-M4, `-Os -mthumb` | **7198 B** (7200 B on gcc 13.2) |
+| Cortex-M4, `-Os -mthumb` | **7298 B** on gcc 14.2 |
 
 41 percent smaller, which is more than the 25 to 30 percent this document
 previously estimated. Thumb-2 encodes branch-heavy integer code densely, and
@@ -445,7 +445,7 @@ compare a value against the thing it had just been stamped from. It could never
 fire, and its comment claimed it caught an engine sending grams where
 millilitres were declared.
 
-Footprint after M6: 12212 B text, 0 data, 0 bss on x86-64, 7198 B on a
+Footprint after M6: 12212 B text, 0 data, 0 bss on x86-64, 7298 B on a
 Cortex-M4. The budget was raised from 12
 to 16 KB in section 8, with the reasoning, rather than met by squeezing.
 

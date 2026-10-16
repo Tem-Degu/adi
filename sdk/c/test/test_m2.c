@@ -211,6 +211,26 @@ static void test_framing(void)
           "CRC-16/CCITT-FALSE known answer");
 }
 
+/*
+ * A call with both of dispense's parameters, substance first on the wire.
+ *
+ * substance is an enum and volume is a number, so this is the shape that makes
+ * reading an argument by position wrong: args[0] carries text and no value.
+ */
+static void build_dispense(builder_t *b, uint32_t id, int32_t ml)
+{
+    b->pos = 0;
+    b_map(b, 4u);
+    b_uint(b, 0u); b_uint(b, ADIP_KIND_INVOCATION);
+    b_uint(b, 1u); b_text(b, "adi.example.additive.dispense");
+    b_uint(b, 2u); b_uint(b, id);
+    b_uint(b, 3u);
+    b_map(b, 2u);
+    b_text(b, "substance"); b_text(b, "a");
+    b_text(b, "volume");
+    b_quantity(b, unit_for("adi.example.additive.dispense", "volume"), ml, 0);
+}
+
 /* ----------------------------------------------------------------- decoding */
 
 static void test_decoding(void)
@@ -246,6 +266,49 @@ static void test_decoding(void)
     build_num_call(&b, "adi.example.input.by_mass", 1u, "nonsense", 1, 0);
     r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
     CHECK_REASON(r, ADIP_REASON_OUT_OF_RANGE, "an undeclared argument");
+
+    /* ----- reading an argument back out, by name -----
+     *
+     * Every manufacturer's handler starts by doing this, and until adip_arg_num
+     * existed each of them had to write it, from documentation that showed a
+     * helper and never defined it.
+     */
+    {
+        adip_num_t got;
+
+        build_dispense(&b, 7u, 25);
+        r = adip_decode_invocation(dev, b.buf, b.pos, &inv);
+        CHECK_REASON(r, ADIP_REASON_NONE, "a two argument call decodes");
+        CHECK(inv.arg_count == 2, "both arguments arrived");
+
+        CHECK(adip_arg_num(&inv, "volume", &got), "volume is found by name");
+        CHECK(adip_num_cmp(got, ADIP_NUM(25, 0, ADIP_UNIT_ML)) == ADIP_CMP_EQ,
+              "and carries the value that was sent");
+
+        /* The hazard this function exists to remove. args[0] is substance,
+         * which is text, so a handler reading by position gets no number here
+         * and the wrong number on any tool where both parameters are numeric. */
+        CHECK(inv.args[0].is_text == 1u,
+              "the first argument on the wire is not the first number");
+
+        /* An enum has no numeric value, and a zero would look like one. */
+        CHECK(!adip_arg_num(&inv, "substance", &got),
+              "a text argument is reported as absent, not as zero");
+
+        /* A parameter this tool does not have. */
+        CHECK(!adip_arg_num(&inv, "pressure", &got),
+              "an undeclared parameter is absent");
+
+        /* Nothing is written when the answer is false, so a caller that
+         * ignores the return value keeps whatever default it had. */
+        got = ADIP_NUM(99, 0, ADIP_UNIT_ML);
+        (void)adip_arg_num(&inv, "pressure", &got);
+        CHECK(adip_num_cmp(got, ADIP_NUM(99, 0, ADIP_UNIT_ML)) == ADIP_CMP_EQ,
+              "and leaves the output untouched");
+
+        CHECK(!adip_arg_num(NULL, "volume", &got), "a null invocation is refused");
+        CHECK(!adip_arg_num(&inv, "volume", NULL), "a null output is refused");
+    }
 
     /* Truncation at every length must be refused, never accepted or crash. */
     {

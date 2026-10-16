@@ -594,11 +594,11 @@ messages over a transport, and a cycle runs end to end: observe, diagnose,
 plan, check the safety envelope, invoke, record, remember. All three autonomy
 levels run against a real appliance.
 
-The appliance library occupies **about 7.2 KB of flash on a Cortex-M4** with no
+The appliance library occupies **about 7.3 KB of flash on a Cortex-M4** with no
 static or heap allocation, against the 16 KB budget stated in
 [`c/DESIGN.md`](./c/DESIGN.md). A product adds its own generated tables.
 
-The full appliance test suite, 322 checks, passes on an emulated Cortex-M3:
+The full appliance test suite, 332 checks, passes on an emulated Cortex-M3:
 
 ```sh
 cd c

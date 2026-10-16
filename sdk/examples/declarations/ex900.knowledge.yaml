@@ -1,0 +1,30 @@
+# A manufacturer's own knowledge, layered over the espresso profile.
+#
+# ADI-P 6. This is the third of the three files a machine may supply: the
+# declaration says what it can do, the skill says how much each mechanism moves
+# an outcome, and this says what this manufacturer knows that the profile does
+# not.
+#
+# Load it with `--knowledge`. Without it the engine runs on base knowledge
+# alone, which is what every machine without one does.
+
+namespace: "x.acme"
+extension_version: "1.0"
+extends:
+  domain_profile: "espresso/v1"
+  base_min_version: "1.0"
+
+# An outcome the espresso profile does not model. Declaring it is what lets a
+# request name it and a correction target it; see ADI-P 6.3.
+variables:
+  x.acme.tray_state:
+    unit: none
+    description: >
+      How clean the drip tray is, from 0 for soiled to 1 for clean.
+
+# Free text the machine may answer from, and may never act on. ADI-P 6.7.
+notes:
+  - id: "x.acme.note.basket"
+    text: >
+      A 58 mm basket, taking 18 to 20 g. A stepped basket will not seat
+      correctly and will channel.

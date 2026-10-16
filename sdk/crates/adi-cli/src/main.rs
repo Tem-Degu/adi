@@ -30,6 +30,10 @@ enum Command {
         /// Also validate a skill against the declaration.
         #[arg(long)]
         skill: Option<PathBuf>,
+        /// Also validate a knowledge extension against the domain profile.
+        /// ADI-P 6.
+        #[arg(long)]
+        knowledge: Option<PathBuf>,
     },
     /// Show what the engine can do with a machine: tools, and which variables
     /// it can actually move.
@@ -37,6 +41,9 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         skill: Option<PathBuf>,
+        /// Count a knowledge extension's own variables as movable. ADI-P 6.
+        #[arg(long)]
+        knowledge: Option<PathBuf>,
     },
     /// Compile a declaration into C tables for the appliance-side SDK.
     ///
@@ -87,6 +94,10 @@ enum Command {
         /// Line rate for --serial.
         #[arg(long, default_value_t = 115_200)]
         baud: u32,
+        /// A knowledge extension to load over the domain profile: this
+        /// manufacturer's own outcomes, styles, defaults and notes. ADI-P 6.
+        #[arg(long)]
+        knowledge: Option<PathBuf>,
         /// Models configuration. Without it, spoken requests are unavailable.
         #[arg(long, short)]
         config: Option<PathBuf>,
@@ -148,16 +159,25 @@ fn main() -> std::process::ExitCode {
 fn dispatch() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Validate { path, skill } => validate(path, skill),
-        Command::Capabilities { path, skill } => capabilities(path, skill),
+        Command::Validate { path, skill, knowledge } => validate(path, skill, knowledge),
+        Command::Capabilities { path, skill, knowledge } => capabilities(path, skill, knowledge),
         Command::GenerateC { path, out, name } => generate_c(path, out, name),
         Command::Models { what } => match what {
             ModelsCommand::Check { config, manifest } => models::check(config, manifest),
             ModelsCommand::Hash { path } => models::hash(path),
             ModelsCommand::Bench { corpus, interpreter } => bench::bench(corpus, interpreter),
         },
-        Command::Run { declaration, skill, appliance, serial, baud, config, level } => {
-            run::run(declaration, skill, appliance, serial, baud, config, level)
+        Command::Run { declaration, skill, appliance, serial, baud, knowledge, config, level } => {
+            run::run(run::Options {
+                declaration_path: declaration,
+                skill_path: skill,
+                appliance_path: appliance,
+                serial_path: serial,
+                baud,
+                knowledge_path: knowledge,
+                config_path: config,
+                level,
+            })
         }
         Command::Conformance { dir, interpreter } => conformance(dir, interpreter),
     }
@@ -173,10 +193,38 @@ fn load_skill(path: &PathBuf) -> Result<Skill, Box<dyn std::error::Error>> {
     Ok(serde_yaml::from_str(&text)?)
 }
 
+/// The espresso profile, with a manufacturer's own knowledge over it.
+///
+/// ADI-P 6.5: a failing extension is rejected with a reason and the engine
+/// continues on the knowledge it already has. So a bad extension is reported
+/// and does not stop the command, which is the behaviour a machine in the
+/// field must have and is therefore the behaviour the tools should show.
+fn load_domain(
+    knowledge_path: Option<&PathBuf>,
+) -> Result<adi_domain_espresso::Espresso, Box<dyn std::error::Error>> {
+    let mut domain = adi_domain_espresso::Espresso::new();
+
+    if let Some(path) = knowledge_path {
+        let text = std::fs::read_to_string(path)?;
+        let extension: adi_protocol::knowledge::KnowledgeExtension =
+            serde_yaml::from_str(&text)?;
+        match domain.add_extension(extension, adi_protocol::knowledge::Layer::Vendor) {
+            Ok(()) => println!("knowledge: ok  ({})", path.display()),
+            Err(e) => eprintln!("knowledge: REJECTED  {e}
+
+  The machine keeps working on base knowledge. ADI-P 6.5."),
+        }
+    }
+
+    Ok(domain)
+}
+
 fn validate(
     path: PathBuf,
     skill_path: Option<PathBuf>,
+    knowledge_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = load_domain(knowledge_path.as_ref())?;
     let declaration = load_declaration(&path)?;
     match declaration.validate() {
         Ok(()) => println!("declaration: ok  ({} {})", declaration.device.vendor, declaration.device.model),
@@ -260,9 +308,14 @@ fn validate(
 fn capabilities(
     path: PathBuf,
     skill_path: Option<PathBuf>,
+    knowledge_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use adi_core::domain::Domain;
+
     let declaration = load_declaration(&path)?;
     let skill = skill_path.map(|p| load_skill(&p)).transpose()?;
+    let domain = load_domain(knowledge_path.as_ref())?;
+    let modelled: Vec<String> = domain.variables().iter().map(|v| v.0.clone()).collect();
 
     println!("tools the engine may invoke:");
     for tool in declaration.engine_tools() {
@@ -279,8 +332,29 @@ fn capabilities(
             .collect();
         seen.sort();
         seen.dedup();
+        let mut ignored = Vec::new();
         for variable in seen {
-            println!("  {variable}");
+            if modelled.contains(&variable) {
+                println!("  {variable}");
+            } else {
+                ignored.push(variable);
+            }
+        }
+
+        // A response naming a variable the profile does not model is skipped
+        // by the planner rather than refused, so the tool it describes is
+        // never selected and nothing says why. Declaring the variable in a
+        // knowledge extension is what makes it reachable; see ADI-P 6.3.
+        if !ignored.is_empty() {
+            println!("
+named by the skill and not modelled, so ignored:");
+            for variable in ignored {
+                println!("  {variable}");
+            }
+            if knowledge_path.is_none() {
+                println!("
+  Declare these in a knowledge extension and pass --knowledge.");
+            }
         }
 
         println!("\nvendor tools with no declared response (callable, not selectable):");

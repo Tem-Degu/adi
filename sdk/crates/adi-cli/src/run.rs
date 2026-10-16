@@ -32,18 +32,80 @@ use adi_session::{ChildAppliance, Session};
 
 use crate::serial::SerialAppliance;
 
-pub fn run(
-    declaration_path: PathBuf,
-    skill_path: PathBuf,
-    appliance_path: Option<PathBuf>,
-    serial_path: Option<String>,
-    baud: u32,
-    config_path: Option<PathBuf>,
-    level: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+/// Everything `adi run` was asked for.
+///
+/// Gathered into one value because the list grew past the point where a
+/// positional argument list is readable, and a caller passing two `Option`
+/// paths in the wrong order would compile.
+pub struct Options {
+    pub declaration_path: PathBuf,
+    pub skill_path: PathBuf,
+    /// An appliance to start as a child process.
+    pub appliance_path: Option<PathBuf>,
+    /// A serial port a real appliance is listening on. Mutually exclusive
+    /// with `appliance_path`.
+    pub serial_path: Option<String>,
+    pub baud: u32,
+    /// A manufacturer's own knowledge, layered over the domain profile.
+    pub knowledge_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
+    pub level: Option<String>,
+}
+
+pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
+    let Options {
+        declaration_path,
+        skill_path,
+        appliance_path,
+        serial_path,
+        baud,
+        knowledge_path,
+        config_path,
+        level,
+    } = options;
+
     let declaration: Declaration = serde_yaml::from_str(&read(&declaration_path)?)?;
     let skill: Skill = serde_yaml::from_str(&read(&skill_path)?)?;
-    let domain = Espresso::new();
+    let mut domain = Espresso::new();
+
+    // A skill naming tools this machine does not declare is usually the
+    // default skill arriving beside somebody else's declaration. The engine
+    // survives it, since the planner cannot resolve a tool that is not
+    // declared, and the result is a machine that reports no capable tool for
+    // everything and gives no hint why. Warned rather than refused, because a
+    // partially matching skill is ordinary while a machine is being built.
+    let strangers: Vec<&str> = skill
+        .responses
+        .iter()
+        .filter(|r| declaration.tool(&r.tool).is_none())
+        .map(|r| r.tool.0.as_str())
+        .collect();
+    if !strangers.is_empty() {
+        eprintln!(
+            "warning: the skill names {} this declaration does not have, including {}.\n\
+             \x20        Pass --skill alongside --declaration if they belong together.",
+            if strangers.len() == 1 { "a tool".to_string() } else { format!("{} tools", strangers.len()) },
+            strangers[0]
+        );
+    }
+
+    // ADI-P 6: a manufacturer's own knowledge. Optional, and absent means the
+    // base profile alone, which is what every earlier version did.
+    if let Some(path) = &knowledge_path {
+        let extension: adi_protocol::knowledge::KnowledgeExtension =
+            serde_yaml::from_str(&read(path)?)?;
+        match domain.add_extension(extension, adi_protocol::knowledge::Layer::Vendor) {
+            Ok(()) => println!("  knowledge    {}", path.display()),
+            // 6.5 is explicit: a failing extension is rejected with a reason
+            // and the engine continues on the knowledge it already has. A bad
+            // extension degrades a machine to standard behaviour and never
+            // stops it working, so this reports and carries on.
+            Err(e) => eprintln!(
+                "  knowledge    rejected: {e}\n\
+                 \x20              continuing on base knowledge"
+            ),
+        }
+    }
 
     // Checked before anything is started. An argument that cannot be honoured
     // should be refused on its own terms, not after a failure to find a

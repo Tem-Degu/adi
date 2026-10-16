@@ -117,6 +117,23 @@ typedef struct {
 } adip_invocation_t;
 
 /*
+ * Read one numeric argument out of an invocation, by the parameter name the
+ * declaration gives it.
+ *
+ * Returns true and writes *out when the named parameter is present and
+ * numeric; false otherwise, leaving *out untouched.
+ *
+ * BY NAME, NOT BY POSITION. inv->args is in the order the sender encoded,
+ * which is not the order the declaration lists, and each argument carries the
+ * parameter it belongs to in its `index` field. Reading inv->args[0] works
+ * for a tool with one parameter and silently reads the wrong value for a tool
+ * with two, which compiles, runs, and drives the wrong mechanism. That is why
+ * this exists rather than being left to each manufacturer to write.
+ */
+bool adip_arg_num(const adip_invocation_t *inv, const char *name,
+                  adip_num_t *out);
+
+/*
  * Decode one CBOR invocation payload.
  *
  * On success the tool is resolved and every argument is matched to a declared

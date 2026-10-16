@@ -164,15 +164,28 @@ to fill in.
 adip_action_t adip_on_invoke(const adip_invocation_t *inv,
                              adip_reason_t *reason, void *user)
 {
+    adip_num_t passes;
+
     if (adip_tool_index(ctx.dev, inv->tool) != TOOL_TRAY_WIPE) {
+        return ADIP_ACTION_DONE;
+    }
+    if (!adip_arg_num(inv, "passes", &passes)) {
         return ADIP_ACTION_DONE;
     }
 
     /* Start the movement and return. Do not wait for it. */
-    start_wipe(passes_from(inv));
+    start_wipe(passes);
     return ADIP_ACTION_RUNNING;
 }
 ```
+
+**Read arguments by name, never by position.** `inv->args` is in the order the
+sender encoded, not the order your declaration lists, and each argument carries
+the parameter it belongs to in its `index` field. `inv->args[0]` happens to work
+on a tool with one parameter and silently reads the wrong one on a tool with
+two, which compiles, runs, and drives the mechanism with a number meant for
+something else. `adip_arg_num` does the lookup and returns false where the
+parameter is absent or is an enum, so a missing value never arrives as a zero.
 
 By the time this is called, the library has already confirmed that the tool
 exists, that every argument is present and of the right type, that each value

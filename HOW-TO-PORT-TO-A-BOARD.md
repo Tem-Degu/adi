@@ -500,6 +500,34 @@ hardware makes, and only your hardware can keep them. Measure both.
 
 ---
 
+## One thing to know before you write a handler
+
+Bring-up needs no handler, because nothing is invoking anything yet. The moment
+you add one, this is the part that bites.
+
+Read arguments **by name**:
+
+```c
+adip_num_t setting;
+
+if (adip_arg_num(inv, "setting", &setting)) {
+    start_grind_move(setting);
+}
+```
+
+`inv->args` is in the order the sender encoded, not the order your declaration
+lists, and each argument carries the parameter it belongs to in its `index`
+field. `inv->args[0]` happens to work on a tool with one parameter and silently
+reads the wrong one on a tool with two: it compiles, it runs, and it drives the
+mechanism with a number meant for something else.
+
+`adip_arg_num` returns false where the parameter is absent or is an enum, and
+leaves your variable untouched, so a missing value never arrives as a zero.
+
+[`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) covers the rest of the handler.
+
+---
+
 ## What you have, and what is next
 
 A board that connects, identifies itself, answers a heartbeat and enters a safe
