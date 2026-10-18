@@ -21,6 +21,7 @@ adi-safety = { workspace = true }
 adi-core = { workspace = true }
 adi-decision = { workspace = true }
 adi-domain-espresso = { workspace = true }
+adi-domain-base = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }

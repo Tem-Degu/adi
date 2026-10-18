@@ -8,9 +8,32 @@
 //! sizes, constraints.
 
 use adi_protocol::ids::VariableId;
-use adi_protocol::knowledge::{Knowledge, ResolvedTargets};
+use adi_protocol::knowledge::{Knowledge, KnowledgeExtension, Layer, ResolvedTargets};
 
 use crate::cycle::Cycle;
+
+/// Why a knowledge extension was not accepted.
+///
+/// ADI-P 6 makes accepting an extension a property of a profile, so the
+/// refusal belongs here with the trait and not inside one profile's error
+/// type. Before this existed, loading an extension was an inherent method on
+/// the espresso profile, which meant a caller holding a domain chosen at
+/// runtime could not offer a manufacturer their own knowledge at all.
+#[derive(Debug, thiserror::Error)]
+pub enum ExtensionRejected {
+    /// Malformed in itself: bad namespace, a redefinition, a missing parent.
+    /// ADI-P 6.5 items 1 to 4 and 6.
+    #[error(transparent)]
+    Extension(#[from] adi_protocol::ExtensionError),
+    /// Well formed and does not layer: it widens a constraint, or changes a
+    /// unit. ADI-P 6.4.
+    #[error(transparent)]
+    Knowledge(#[from] adi_protocol::KnowledgeError),
+    /// The profile has no base to layer onto. A profile that reasons from
+    /// compiled-in knowledge always has one; a test double need not.
+    #[error("the {0} profile accepts no knowledge extensions")]
+    Unsupported(String),
+}
 
 /// A cause the profile can identify from a cycle.
 #[derive(Debug, Clone, PartialEq)]
@@ -113,4 +136,23 @@ pub trait Domain {
     /// Descriptors this profile accepts as subjective feedback, used to close
     /// the language layer's output schema.
     fn feedback_vocabulary(&self) -> &[&str];
+
+    /// Accept a manufacturer's, integrator's or user's knowledge. ADI-P 6.
+    ///
+    /// Defaulted to a refusal so that a profile with no base knowledge, such
+    /// as a test double, still compiles. Any profile a machine actually runs
+    /// on should implement it, because ADI-P 6 gives a manufacturer the right
+    /// to extend whatever profile they declare.
+    ///
+    /// ADI-P 6.5 governs what a caller does with the error: report it and
+    /// carry on with the knowledge already held. A rejected extension
+    /// degrades a machine to standard behaviour and never stops it working,
+    /// so an implementation must leave the profile exactly as it was.
+    fn add_extension(
+        &mut self,
+        _extension: KnowledgeExtension,
+        _layer: Layer,
+    ) -> Result<(), ExtensionRejected> {
+        Err(ExtensionRejected::Unsupported(self.profile_id().to_string()))
+    }
 }

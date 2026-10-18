@@ -83,7 +83,10 @@ sdk/
 │   │                         runs a cycle, enforces the envelope.
 │   ├── adi-models/           Model configuration, provenance, output schema,
 │   │                         and the backend that runs an external program.
-│   ├── adi-domain-espresso/  First domain profile. Registry and rules.
+│   ├── adi-domain-base/      The profile for a machine whose domain nobody
+│   │                         has written. No knowledge of its own, and one
+│   │                         generic correction.
+│   ├── adi-domain-espresso/  First real domain profile. Registry and rules.
 │   └── adi-cli/              Validator, generator and development driver.
 ├── c/                        libadip, the appliance SDK. See c/DESIGN.md.
 │   ├── example/              A complete working appliance, to copy.
@@ -103,6 +106,28 @@ sdk/
 │                             Verifies the abstraction against a second domain.
 └── examples/                 Sample declarations, skills and knowledge.
 ```
+
+## Which profile a machine runs on
+
+Every declaration states its `domain_profile`, and that is what the tools load.
+Two are compiled in.
+
+| | |
+|---|---|
+| `espresso/v1` | The first real profile. Knows what a good extraction is, and which faults look alike |
+| `base/v1` | No knowledge of its own. Everything comes from the manufacturer's knowledge extension |
+
+`base/v1` is what makes the SDK usable before a profile exists for an industry.
+A machine declaring it supplies its outcomes, its targets and its notes in one
+file, and gets spoken requests, answers and a correction for anything that
+drifts outside its target. What it does not get is a cause: separating two
+faults that look alike is what a profile holds. See
+[`../HOW-TO-ADD-A-DOMAIN.md`](../HOW-TO-ADD-A-DOMAIN.md), and
+`examples/declarations/printer.*` for a machine that is not a coffee machine.
+
+A profile has to be compiled in to be selectable, and a declaration naming one
+this build does not carry is reported rather than guessed at. `adi` is a
+development driver; a product links the engine and names its own profile.
 
 ## The one rule
 

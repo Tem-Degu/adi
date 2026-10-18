@@ -1,0 +1,17 @@
+# The base profile's knowledge. Layer 0.
+#
+# Deliberately empty. A domain profile normally ships what its domain knows:
+# espresso ships what a good extraction is. This profile ships nothing,
+# because it is for machines whose domain nobody has written down yet.
+#
+# Everything a machine using this profile reasons about therefore arrives in
+# the manufacturer's own knowledge extension (ADI-P 6), layered over this one.
+# The variables, their units and their meanings, the named styles and their
+# targets, and the notes all come from there.
+#
+# The file exists rather than the profile constructing an empty base in code so
+# that both profiles are built the same way from the same format, and so that
+# an extension has something real to validate against.
+
+profile: "base/v1"
+knowledge_version: "1.0"

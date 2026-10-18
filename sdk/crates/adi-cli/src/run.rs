@@ -17,7 +17,6 @@ use adi_decision::{
     AutonomyLevel, Interpreter, ModelActionSelector, ModelToolSelector, SelectionContext,
     Understood,
 };
-use adi_domain_espresso::Espresso;
 use adi_language::context::VariableInfo;
 use adi_language::{Explainer, Language, NoSpeaker, RecordExplainer, Speaker, Transcriber};
 use adi_models::{
@@ -66,7 +65,10 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     let declaration: Declaration = serde_yaml::from_str(&read(&declaration_path)?)?;
     let skill: Skill = serde_yaml::from_str(&read(&skill_path)?)?;
-    let mut domain = Espresso::new();
+    // The profile the machine asks for. ADI-P 4.1 makes `domain_profile` a
+    // required field, so this is always stated and never guessed.
+    let mut domain = crate::domain::for_profile(&declaration.domain_profile)?;
+    println!("  profile      {}", domain.profile_id());
 
     // A skill naming tools this machine does not declare is usually the
     // default skill arriving beside somebody else's declaration. The engine
@@ -170,7 +172,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             Session::open_with_selector(
                 &declaration,
                 Some(&skill),
-                &domain,
+                domain.as_ref(),
                 Box::new(selector),
                 transport,
             )
@@ -180,7 +182,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             Session::open_with_selector(
                 &declaration,
                 Some(&skill),
-                &domain,
+                domain.as_ref(),
                 Box::new(ModelToolSelector { chooser }),
                 transport,
             )
@@ -188,7 +190,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         (AutonomyLevel::D0, _) => Session::open(
             &declaration,
             Some(&skill),
-            &domain,
+            domain.as_ref(),
             AutonomyLevel::D0,
             transport,
         )?,
@@ -209,7 +211,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("  autonomy     {}", session.level().as_str());
 
-    let interpreter = load_interpreter(config_path.as_deref(), &domain, &declaration.device)?;
+    let interpreter = load_interpreter(config_path.as_deref(), domain.as_ref(), &declaration.device)?;
     let voice = Voice::load(config_path.as_deref())?;
     match &interpreter {
         Some((_, label)) => println!("  interpreter  {label}"),
@@ -246,7 +248,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                 Ok(())
             }
             "status" => status(&mut session, now_ms),
-            "cycle" => cycle(&mut session, now_ms, &voice),
+            "cycle" => cycle(&mut session, &declaration.domain_profile, now_ms, &voice),
             // A recorded utterance, since capturing from a microphone needs a
             // device and a platform library this tool does not carry.
             other if other.starts_with("listen ") => listen(
@@ -482,11 +484,26 @@ fn help() {
 
 /// The observation path: a cycle finished, something was wrong with it, and
 /// the engine corrects the machine. No model is involved at any point.
+///
+/// The cycle below is espresso, and deliberately so: it is the worked example
+/// the documents walk through. On any other profile it would be a coffee shot
+/// shown to a machine that is not a coffee machine, which teaches the reader
+/// something false about what they are running. So it is offered only where it
+/// means something, and elsewhere says what it would take to have one.
 fn cycle(
     session: &mut Session<'_>,
+    profile: &str,
     now_ms: u64,
     voice: &Voice,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if profile != adi_domain_espresso::registry::PROFILE_ID {
+        println!("  no example      this command replays a worked espresso cycle, and");
+        println!("                  this machine runs the {profile} profile.");
+        println!("                  An appliance reports its own cycles over the link;");
+        println!("                  this is demonstration data, not part of the protocol.");
+        return Ok(());
+    }
+
     let n = session.memory().len() + 1;
 
     // A short shot, which the profile diagnoses as under extracted.
@@ -772,7 +789,7 @@ type Loaded = Option<(Box<dyn Interpreter>, String)>;
 /// Build whatever interpreter the configuration names.
 fn load_interpreter(
     config_path: Option<&Path>,
-    domain: &Espresso,
+    domain: &dyn adi_core::domain::Domain,
     device: &adi_protocol::declaration::Device,
 ) -> Result<Loaded, Box<dyn std::error::Error>> {
     let Some(path) = config_path else {
@@ -797,7 +814,6 @@ fn load_interpreter(
             let command = seam.command.clone().ok_or("the process backend names no command")?;
             let label = format!("process ({command})");
 
-            use adi_core::Domain;
             let knowledge = domain.knowledge();
             let interpreter = ProcessInterpreter::start(
                 &command,

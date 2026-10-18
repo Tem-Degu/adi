@@ -23,6 +23,11 @@ NEUTRAL_CRATES = [
     "crates/adi-wire",
     "crates/adi-session",
     "crates/adi-models",
+    # The base profile is a domain profile with no domain in it, which is
+    # the whole of what it offers a machine nobody has written a profile
+    # for. Scanned with the neutral crates because a coffee word appearing
+    # in it would mean exactly what one appearing in the engine means.
+    "crates/adi-domain-base",
 ]
 
 # Vocabulary belonging to a specific domain rather than to the abstraction.

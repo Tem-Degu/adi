@@ -1,0 +1,44 @@
+# How far each control moves each outcome on the IW-200.
+#
+# Without an entry here a tool is callable and never selectable: the engine
+# builds its candidate list from these responses, so a tool naming no outcome
+# is never offered to a model and no spoken request can arrive at it.
+#
+# per_unit is signed and is the whole of what lets a correction be sized
+# instead of guessed at.
+
+skill_version: "1.0"
+skill_id: "skill/IW-200/1.0"
+
+applies_to:
+  vendor: "Inkworks"
+  model: "IW-200"
+  firmware_range: { min: "1.0.0", max: "1.9.99" }
+
+responses:
+  - tool: "x.inkworks.ink.set_density"
+    parameter: "density"
+    variable: "x.inkworks.ink_coverage"
+    per_unit: 1.8
+    unit: pct
+    valid_range: { min: 10.0, max: 80.0 }
+    confidence: 0.8
+
+  # The same control moves drying too, because wetter pages take longer. A
+  # tool that moves two outcomes is ordinary, and saying so is what lets the
+  # engine tell two candidates apart when both would serve a goal.
+  - tool: "x.inkworks.ink.set_density"
+    parameter: "density"
+    variable: "x.inkworks.dry_time"
+    per_unit: 0.4
+    unit: s
+    valid_range: { min: 0.0, max: 30.0 }
+    confidence: 0.6
+
+  - tool: "x.inkworks.dry.set_time"
+    parameter: "seconds"
+    variable: "x.inkworks.dry_time"
+    per_unit: 1.0
+    unit: s
+    valid_range: { min: 0.0, max: 30.0 }
+    confidence: 0.95

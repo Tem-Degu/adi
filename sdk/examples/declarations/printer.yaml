@@ -1,0 +1,128 @@
+# A machine that is not a coffee machine, on a profile nobody wrote for it.
+#
+# This exists to demonstrate one claim: a manufacturer can describe their
+# machine and have the engine reason about it without a domain profile being
+# written for their industry first. It declares `base/v1`, which ships no
+# knowledge of its own, and supplies everything it reasons about in
+# printer.knowledge.yaml.
+#
+# What it gets: spoken requests reach its tools, questions are answered from
+# what it declared, and an outcome that drifts outside its target is corrected.
+# What it does not get: a cause. The base profile reports that ink coverage
+# drifted and cannot tell a clogged head from a low reservoir, because telling
+# those apart is what a domain profile is for. See HOW-TO-ADD-A-DOMAIN.md.
+#
+# There is no firmware behind this file, so it validates and inspects and does
+# not run. Running needs a machine.
+
+adip_version: "0.2"
+domain: "printing"
+domain_profile: "base/v1"
+conformance_level: autonomous
+
+device:
+  vendor: "Inkworks"
+  model: "IW-200"
+  firmware_version: "1.0.0"
+  declaration_id: "sha256:printerexample"
+
+session:
+  max_concurrent: 1
+  heartbeat_interval_ms: 500
+  control_timeout_ms: 2000
+
+signals:
+  - id: "x.inkworks.signal.coverage"
+    unit: pct
+    range: { min: 0, max: 100, unit: pct }
+    sample_rate_hz: 5
+    accuracy: { abs: 0.5, unit: pct }
+
+tools:
+  - id: "x.inkworks.ink.set_density"
+    name: "set_density"
+    parameters:
+      density:
+        type: integer
+        unit: step
+        min: 0
+        max: 40
+        resolution: 1
+    preconditions: ["state == idle"]
+    effects: ["ink_density"]
+    duration_ms_typ: 500
+    reversible: true
+    description: >
+      Sets how much ink the head lays down per pass, in steps. Higher is
+      darker and slower to dry.
+
+  - id: "x.inkworks.dry.set_time"
+    name: "set_dry_time"
+    parameters:
+      seconds: { type: number, unit: s, min: 0.0, max: 30.0, resolution: 0.5 }
+    preconditions: ["state == idle"]
+    effects: ["dry_time"]
+    reversible: true
+    description: >
+      Holds the sheet under the dryer for this long before it reaches the
+      tray.
+
+  - id: "x.inkworks.head.clean"
+    name: "clean_head"
+    parameters:
+      cycles: { type: integer, unit: step, min: 1, max: 5, resolution: 1 }
+    preconditions: ["state == idle"]
+    effects: ["head_state"]
+    reversible: false
+    description: >
+      Purges the print head. Clears a partial blockage and spends ink doing
+      it, so it is worth running when banding appears and wasteful otherwise.
+
+  - id: "x.inkworks.reservoir.refill"
+    name: "refill"
+    preconditions: ["state == idle"]
+    effects: ["reservoir_state"]
+    reversible: false
+    description: Resets the ink reservoir accounting after a cartridge change.
+
+envelope:
+  enforced_by: both
+  independent_of_engine: true
+
+  limits:
+    - { parameter: "seconds", unit: s, hard_max: 30.0 }
+
+  interlocks:
+    - { id: "lid_closed", blocks: ["*"] }
+
+  # Stateful constraints. D2 refuses to initialise without them, because this
+  # is exactly where individually valid calls combine into an invalid one.
+  invariants:
+    - id: "cleaning_budget"
+      quantity: "cleaning_cycles"
+      max: 20.0
+      unit: step
+      accumulates:
+        "x.inkworks.head.clean": "cycles"
+      reset_on: ["x.inkworks.reservoir.refill"]
+
+  rate_limits:
+    - id: "cleaning_recovery"
+      tools: ["x.inkworks.head.clean"]
+      min_interval_s: 60.0
+      max_invocations: 6
+      window_s: 3600.0
+
+  resources:
+    - id: "ink_reservoir"
+      unit: step
+      capacity: 5000.0
+      consumed_by:
+        "x.inkworks.head.clean": "cycles"
+
+  failsafe:
+    on_control_timeout: "abort_to_safe"
+    on_signal_loss: "abort_to_safe"
+    on_fault: "abort_to_safe"
+    safe_state: "head_parked_no_feed"
+    max_time_to_safe_ms: 500

@@ -1,0 +1,53 @@
+# What the IW-200 reasons about. Pairs with printer.yaml.
+#
+# On a machine declaring `base/v1` this file is the domain. The profile ships
+# no variables, no styles and no notes, so everything here is the only thing
+# the engine knows about printing.
+#
+# ADI-P 6.2 and 6.3: every identifier a vendor introduces sits in the vendor's
+# namespace and may not redefine one the profile already models. On this
+# profile the profile models none, so the namespace rule is the only thing
+# keeping two manufacturers' identifiers apart. Validation enforces it.
+
+namespace: "x.inkworks"
+extension_version: "1.0"
+extends: { domain_profile: "base/v1", base_min_version: "1.0" }
+
+# The outcomes. A spoken request lands on one of these and a correction
+# targets one, so a machine that declares none has nothing the engine can
+# reason about. The description is what lets "it came out faint" reach
+# ink_coverage: a bare identifier only works where the model happens to have
+# been trained on the industry.
+variables:
+  x.inkworks.ink_coverage:
+    unit: pct
+    description: >
+      Share of the page the ink actually covers, measured on the test patch.
+      Low reads as faint and washed out; high reads as heavy and slow to dry.
+  x.inkworks.dry_time:
+    unit: s
+    description: >
+      Seconds the sheet spends under the dryer. Short risks smudging in the
+      tray; long slows the job down.
+
+# What a good result is. Each style is a named set of targets, and the engine
+# compares what was measured against the one that was asked for.
+styles:
+  - id: "x.inkworks.style.draft"
+    targets:
+      x.inkworks.ink_coverage: { min: 18.0, max: 32.0, unit: pct }
+      x.inkworks.dry_time:     { min: 0.0,  max: 4.0,  unit: s }
+
+  - id: "x.inkworks.style.photo"
+    targets:
+      x.inkworks.ink_coverage: { min: 55.0, max: 70.0, unit: pct }
+      x.inkworks.dry_time:     { min: 8.0,  max: 20.0, unit: s }
+
+# Free text the machine may answer a person from. Advisory, and it may never
+# determine an action.
+notes:
+  - id: "x.inkworks.note.banding"
+    text: >
+      Pale horizontal bands usually mean a partially blocked head rather than
+      low ink. Running a cleaning cycle clears it; adding ink does not, and
+      spends ink making the page heavier than it should be.

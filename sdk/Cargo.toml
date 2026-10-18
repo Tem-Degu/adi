@@ -10,6 +10,7 @@ members = [
     "crates/adi-session",
     "crates/adi-models",
     "crates/adi-domain-espresso",
+    "crates/adi-domain-base",
     "crates/adi-cli",
 ]
 
@@ -30,6 +31,7 @@ adi-wire = { path = "crates/adi-wire" }
 adi-session = { path = "crates/adi-session" }
 adi-models = { path = "crates/adi-models" }
 adi-domain-espresso = { path = "crates/adi-domain-espresso" }
+adi-domain-base = { path = "crates/adi-domain-base" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

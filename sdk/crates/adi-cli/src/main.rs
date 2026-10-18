@@ -4,6 +4,7 @@
 //! integrate without waiting on us. See ROADMAP phase 12.
 
 mod conformance;
+mod domain;
 mod genc;
 mod bench;
 mod run;
@@ -193,39 +194,16 @@ fn load_skill(path: &PathBuf) -> Result<Skill, Box<dyn std::error::Error>> {
     Ok(serde_yaml::from_str(&text)?)
 }
 
-/// The espresso profile, with a manufacturer's own knowledge over it.
-///
-/// ADI-P 6.5: a failing extension is rejected with a reason and the engine
-/// continues on the knowledge it already has. So a bad extension is reported
-/// and does not stop the command, which is the behaviour a machine in the
-/// field must have and is therefore the behaviour the tools should show.
-fn load_domain(
-    knowledge_path: Option<&PathBuf>,
-) -> Result<adi_domain_espresso::Espresso, Box<dyn std::error::Error>> {
-    let mut domain = adi_domain_espresso::Espresso::new();
-
-    if let Some(path) = knowledge_path {
-        let text = std::fs::read_to_string(path)?;
-        let extension: adi_protocol::knowledge::KnowledgeExtension =
-            serde_yaml::from_str(&text)?;
-        match domain.add_extension(extension, adi_protocol::knowledge::Layer::Vendor) {
-            Ok(()) => println!("knowledge: ok  ({})", path.display()),
-            Err(e) => eprintln!("knowledge: REJECTED  {e}
-
-  The machine keeps working on base knowledge. ADI-P 6.5."),
-        }
-    }
-
-    Ok(domain)
-}
-
 fn validate(
     path: PathBuf,
     skill_path: Option<PathBuf>,
     knowledge_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let _ = load_domain(knowledge_path.as_ref())?;
     let declaration = load_declaration(&path)?;
+    let _domain = domain::load_or_report(
+        &declaration.domain_profile,
+        knowledge_path.as_deref(),
+    );
     match declaration.validate() {
         Ok(()) => println!("declaration: ok  ({} {})", declaration.device.vendor, declaration.device.model),
         Err(e) => {
@@ -310,17 +288,29 @@ fn capabilities(
     skill_path: Option<PathBuf>,
     knowledge_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use adi_core::domain::Domain;
 
     let declaration = load_declaration(&path)?;
     let skill = skill_path.map(|p| load_skill(&p)).transpose()?;
-    let domain = load_domain(knowledge_path.as_ref())?;
-    let modelled: Vec<String> = domain.variables().iter().map(|v| v.0.clone()).collect();
+    let domain = domain::load_or_report(
+        &declaration.domain_profile,
+        knowledge_path.as_deref(),
+    );
+    let modelled: Vec<String> = domain
+        .as_ref()
+        .map(|d| d.variables().iter().map(|v| v.0.clone()).collect())
+        .unwrap_or_default();
 
     println!("tools the engine may invoke:");
     for tool in declaration.engine_tools() {
         let kind = if tool.id.is_vendor() { "vendor" } else { "registry" };
         println!("  {:<45} {}", tool.id.as_str(), kind);
+    }
+
+    // Without the profile nothing here knows which outcomes are modelled,
+    // so the list below is reported and not checked. Said plainly, because
+    // a silent empty check reads as "none of these work".
+    if domain.is_none() {
+        println!("\nthat profile is not in this build, so the outcomes below are listed and not checked.");
     }
 
     if let Some(skill) = skill {

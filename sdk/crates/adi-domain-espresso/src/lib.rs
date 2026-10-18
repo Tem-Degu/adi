@@ -159,4 +159,29 @@ impl Domain for Espresso {
     fn feedback_vocabulary(&self) -> &[&str] {
         registry::FEEDBACK_VOCABULARY
     }
+
+    /// The trait route to the inherent method below, so a caller holding a
+    /// profile chosen at runtime can still offer a manufacturer their own
+    /// knowledge. Behaviour is identical; only the error type differs, and
+    /// both arms of `EspressoError` that can arise here convert into it.
+    fn add_extension(
+        &mut self,
+        extension: KnowledgeExtension,
+        layer: Layer,
+    ) -> Result<(), adi_core::domain::ExtensionRejected> {
+        match Espresso::add_extension(self, extension, layer) {
+            Ok(()) => Ok(()),
+            Err(EspressoError::Extension(e)) => Err(e.into()),
+            Err(EspressoError::Knowledge(e)) => Err(e.into()),
+            // The compiled-in base is parsed at build time and tested in this
+            // crate, so a parse failure here is a broken build rather than a
+            // bad extension. Reported as unsupported so the caller still
+            // continues on the knowledge it holds, which 6.5 requires.
+            Err(EspressoError::Parse(_)) => Err(
+                adi_core::domain::ExtensionRejected::Unsupported(
+                    registry::PROFILE_ID.to_string(),
+                ),
+            ),
+        }
+    }
 }

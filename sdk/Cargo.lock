@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "adi-core",
  "adi-decision",
+ "adi-domain-base",
  "adi-domain-espresso",
  "adi-language",
  "adi-models",
@@ -41,6 +42,16 @@ dependencies = [
  "adi-protocol",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "adi-domain-base"
+version = "0.1.0"
+dependencies = [
+ "adi-core",
+ "adi-protocol",
  "serde_yaml",
  "thiserror 1.0.69",
 ]

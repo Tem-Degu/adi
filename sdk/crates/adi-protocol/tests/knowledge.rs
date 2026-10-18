@@ -312,3 +312,55 @@ fn an_envelope_naming_an_undeclared_tool_is_refused() {
         "the message should name the missing tool: {text}"
     );
 }
+
+// ----------------------------------------------------- vendor variables, 6.3
+
+/// ADI-P 6.3: a variable a vendor introduces MUST sit in the vendor's
+/// namespace. Unenforced for a while, which mattered most on a profile with no
+/// base knowledge, where every variable a machine has is a vendor variable and
+/// this rule is the only thing keeping two manufacturers' identifiers apart.
+#[test]
+fn a_vendor_variable_outside_the_namespace_is_refused() {
+    let mut e = extension();
+    e.variables.insert(
+        VariableId::from("rinse_temp"),
+        VariableDef {
+            unit: Unit::C,
+            description: "Unnamespaced, and so a collision waiting to happen.".into(),
+        },
+    );
+
+    match e.validate(&base()) {
+        Err(ExtensionError::NotNamespaced { id, .. }) => assert_eq!(id, "rinse_temp"),
+        other => panic!("expected a namespace refusal, got {other:?}"),
+    }
+}
+
+/// And MUST NOT redefine one the base already models. A redefinition shadows
+/// the profile's own meaning and unit while every target naming it goes on
+/// resolving, so the engine compares a measurement against a range that means
+/// something else.
+#[test]
+fn a_vendor_variable_redefining_a_base_one_is_refused() {
+    let b = base();
+    let existing = b
+        .variables
+        .keys()
+        .next()
+        .expect("the neutral base declares variables")
+        .clone();
+
+    let mut e = extension();
+    e.variables.insert(
+        existing.clone(),
+        VariableDef {
+            unit: Unit::G,
+            description: "The same name, a different meaning and a different unit.".into(),
+        },
+    );
+
+    match e.validate(&b) {
+        Err(ExtensionError::Redefinition(id)) => assert_eq!(id, existing.0),
+        other => panic!("expected a redefinition refusal, got {other:?}"),
+    }
+}

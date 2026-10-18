@@ -1,0 +1,17 @@
+[package]
+name = "adi-domain-base"
+description = "The base domain profile. No built-in knowledge, and a generic correction for any machine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+adi-core = { workspace = true }
+adi-protocol = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = { workspace = true }

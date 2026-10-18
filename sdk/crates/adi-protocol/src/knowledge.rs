@@ -493,6 +493,33 @@ impl KnowledgeExtension {
             }
         }
 
+        // Variables, under the same two rules. 6.3 states both and this is
+        // where they are enforced.
+        //
+        // They were omitted here while the field's own documentation said they
+        // were checked, which is the worst place for a gap to sit. The cost is
+        // not theoretical: an unnamespaced vendor variable collides with
+        // whatever a future base release calls the same thing, and a
+        // redefinition of a base variable shadows the profile's own meaning
+        // and unit while every target that names it goes on resolving. The
+        // engine then compares a measurement against a range that means
+        // something else.
+        //
+        // It matters more on a profile with no base knowledge, where every
+        // variable a machine has is a vendor variable, so this rule is the
+        // only thing keeping two manufacturers' identifiers apart.
+        for id in self.variables.keys() {
+            if base.variables.contains_key(id) {
+                return Err(ExtensionError::Redefinition(id.0.clone()));
+            }
+            if !id.0.starts_with(&prefix) {
+                return Err(ExtensionError::NotNamespaced {
+                    id: id.0.clone(),
+                    namespace: self.namespace.clone(),
+                });
+            }
+        }
+
         // Every declared range must be satisfiable on its own terms. An empty
         // range would make every value illegal, which is never what anyone
         // meant to write.

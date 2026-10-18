@@ -243,6 +243,27 @@ works the day they declare it, without a release from this project.
 Three platform functions complete the integration: a millisecond clock, a byte
 write, and a function that drives the machine to a safe state.
 
+### A machine that is not an espresso machine
+
+The first domain is espresso. The engine does not know that, and never did: a
+domain is supplied at runtime and every crate except the profile itself is
+checked against a rule that forbids domain vocabulary.
+
+A machine says which domain it uses in its declaration. Saying `base/v1` selects
+a profile that ships no knowledge of its own, so everything the machine reasons
+about comes from one file you write: your outcomes with their units and
+meanings, what a good result looks like, and what the machine should be able to
+say. There is no code to write and nothing to compile.
+
+That is enough for the machine to take spoken requests, answer questions, and
+correct an outcome that drifted outside its target.
+
+What it does not get is a cause. The base profile reports that something
+drifted and cannot say why, because separating two faults that look alike, and
+knowing which correction would make one of them worse, is what a domain profile
+holds. `sdk/examples/declarations/printer.*` is a worked example, and
+[`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) covers both.
+
 ### Documents you should read to get started
 
 Two guides, in order.
@@ -256,7 +277,13 @@ what a working link looks like. It stops before any mechanism is callable.
 works. It takes one mechanism from a pin to something the engine can reason
 about, including the electrical steps and the failure cases.
 
-You can do a good deal of both before any board exists. The example appliance
+[`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) is for a machine that is
+not an espresso machine. It covers describing your machine's outcomes in a file,
+which needs no code and is enough for it to take spoken requests and correct
+itself when something drifts, and then writing a profile when you want it to
+identify causes.
+
+You can do a good deal of all three before any board exists. The example appliance
 is a host build of the same C library, driven over stdin and stdout, which is a
 real transport binding rather than a simulation.
 
@@ -317,6 +344,8 @@ adi-language   The four model seams: transcribe, interpret, explain, speak.
 adi-models     Model configuration, provenance, and external backends.
 adi-session    The loop. Link, heartbeat, cycle, envelope, record, memory.
 adi-domain-*   One domain profile. Registry, knowledge, diagnosis rules.
+               `base` ships none of those, for a machine whose domain
+               nobody has written yet. `espresso` is the first real one.
 adi-cli        Validator, code generator and development driver.
 ```
 
@@ -481,6 +510,7 @@ Ordered by when you need them rather than by importance.
 | [`sdk/README.md`](./sdk/README.md) | To run it | The implementation: layout, build, model configuration and current limitations. |
 | [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) | First, on real hardware | Getting `libadip` onto your board and talking to an engine: the declaration, the generated tables, the three port functions, the transport, and the first heartbeat. Stops before any mechanism is callable. |
 | [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | Next, once the link works | One mechanism from a pin to something the engine can reason about: driver, handler, declaration entry, and the optional skill entry. Includes the electrical steps and the failure cases. |
+| [`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) | For a machine that is not espresso | What a domain is, and the two ways to supply one. Describing your machine's outcomes in a file, which needs no code, and writing a profile when you want it to identify causes rather than report drift. |
 | [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | Alongside both | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, about 7.3 KB of flash on a Cortex-M4. Why it is shaped the way it is, and what it does not do. |
 | [`PROTOCOL.md`](./PROTOCOL.md) | As the reference | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. Normative; the two guides above are the practical paths through it. |
 | [`ROADMAP.md`](./ROADMAP.md) | For where this is going | The build plan, in phases. |
