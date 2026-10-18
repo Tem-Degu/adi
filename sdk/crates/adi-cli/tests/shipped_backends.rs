@@ -69,11 +69,18 @@ fn explain(script: &str, request: &str) -> Option<serde_json::Value> {
     Some(serde_json::from_str(line).expect("the explanation should be JSON"))
 }
 
-const SELECTION: &str = r#"{"goals":[{"variable":"shot_time","delta":4.0,"unit":"s"}],
+/// The shape `ProcessChooser` actually puts on the wire. Taken from
+/// `adi-models/src/chooser.rs`, field for field: a goal carries `cause` and
+/// `confidence` and no unit of its own, a candidate carries the `parameter` it
+/// sets and that parameter's `unit`, and `remembered` holds the identifiers of
+/// recent cycles. An earlier version of this fixture invented a goal unit and
+/// omitted the rest, which is how a prompt can drop a field and still pass.
+const SELECTION: &str = r#"{"goals":[{"variable":"shot_time","cause":"under_extracted","delta":4.0,"confidence":0.8}],
 "candidates":[
- {"index":0,"tool":"adi.espresso.grind.set_setting","variable":"shot_time","per_unit":-1.4,"current":24,"confidence":0.75},
- {"index":1,"tool":"adi.espresso.dose.set_mass","variable":"shot_time","per_unit":0.6,"current":18,"confidence":0.5}],
-"level":"d2","constraints":["no two steps may move the same variable"]}"#;
+ {"index":0,"tool":"adi.espresso.grind.set_setting","parameter":"setting","unit":"step","variable":"shot_time","per_unit":-1.4,"current":24,"confidence":0.75},
+ {"index":1,"tool":"adi.espresso.dose.set_mass","parameter":"mass","unit":"g","variable":"shot_time","per_unit":0.6,"current":18,"confidence":0.5}],
+"level":"d2","remembered":["cycle-0012","cycle-0011"],
+"constraints":["no two steps may move the same variable"]}"#;
 
 const UTTERANCE: &str = r#"{"utterance":"half of last time","styles":[],"variables":[],"notes":[]}"#;
 
@@ -173,4 +180,49 @@ fn the_prompt_carries_the_goal_and_every_candidate() {
     assert!(prompt.contains("adi.espresso.dose.set_mass"), "{prompt}");
     assert!(prompt.contains("-1.4"), "per_unit is how a correction is sized: {prompt}");
     assert!(prompt.contains("24"), "current is what d2 adds the change to: {prompt}");
+}
+
+/// Everything the engine sends has to reach the model.
+///
+/// A field the engine troubles to send and the prompt discards is invisible
+/// from both ends: the record shows it was supplied and the model never saw
+/// it. The first version of this backend dropped four.
+#[test]
+fn nothing_the_engine_sends_is_dropped() {
+    let plan = require_python!(explain(
+        "qwen_interpreter.py",
+        &SELECTION.replace('\n', "")
+    ));
+    let prompt = plan["prompt"].as_str().expect("a prompt");
+
+    // ADI-P 3.3.1: a selector at D1 or D2 must be given the history the engine
+    // holds, or it can disagree with the ranking but never on evidence.
+    assert!(prompt.contains("cycle-0012"), "the remembered cycles: {prompt}");
+
+    // The diagnosis the correction answers. Two goals on one variable can want
+    // opposite things for different reasons.
+    assert!(prompt.contains("under_extracted"), "the goal's cause: {prompt}");
+
+    // At d2 the value sets the parameter, so which parameter and in what unit
+    // is what the number means.
+    assert!(prompt.contains("setting"), "the parameter: {prompt}");
+    assert!(prompt.contains("step"), "the parameter's unit: {prompt}");
+}
+
+/// The switch that stops Qwen reasoning aloud belongs in exactly one place.
+///
+/// It was briefly added twice, once where the prompt is built and once where
+/// it is sent. Harmless, since a model that does not recognise it reads it as
+/// ordinary text, and still wrong to ship.
+#[test]
+fn the_direct_answer_switch_is_not_repeated() {
+    for request in [UTTERANCE, &SELECTION.replace('\n', "")] {
+        let plan = require_python!(explain("qwen_interpreter.py", request));
+        let prompt = plan["prompt"].as_str().expect("a prompt");
+        assert_eq!(
+            prompt.matches("/no_think").count(),
+            0,
+            "the prompt is built bare and the switch is appended once when sent: {prompt}"
+        );
+    }
 }

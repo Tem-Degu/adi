@@ -332,25 +332,38 @@ def chooser_schema_for(request):
 
 
 def choice_lines(request):
-    """The goals and candidates, as text the model reads."""
+    """The goals and candidates, as text the model reads.
+
+    Every field the engine sends is rendered. A field the engine troubles to
+    send and the prompt discards is worse than one that was never sent, because
+    the omission is invisible from both ends: the engine's record shows it was
+    supplied and the model never saw it.
+    """
     out = []
 
     for goal in request.get("goals", []):
-        delta = goal.get("delta")
-        out.append(
-            "goal: move {} by {}{}".format(
-                goal.get("variable"),
-                delta,
-                " " + goal["unit"] if goal.get("unit") else "",
-            )
-        )
+        # `cause` is the diagnosis this correction answers. Two goals on one
+        # variable can want opposite things for different reasons, and the
+        # delta alone does not say which.
+        line = "goal: move {} by {}".format(goal.get("variable"), goal.get("delta"))
+        if goal.get("cause"):
+            line += ", to correct {}".format(goal["cause"])
+        if goal.get("confidence") is not None:
+            line += " (confidence {})".format(goal["confidence"])
+        out.append(line)
 
     out.append("")
     out.append("candidates:")
     for c in request.get("candidates", []):
+        # The parameter is what the value sets, and its unit is not the
+        # variable's: a grind position is in steps and moves shot time in
+        # seconds. A model proposing an absolute setting has to know which of
+        # the two it is writing.
+        unit = c.get("unit") or "unit"
         parts = [
             "  [{}] {}".format(c.get("index"), c.get("tool")),
-            "moves {} by {} per unit".format(c.get("variable"), c.get("per_unit")),
+            "sets {} in {}".format(c.get("parameter"), unit),
+            "moves {} by {} per {}".format(c.get("variable"), c.get("per_unit"), unit),
             "current {}".format(c.get("current")),
         ]
         if c.get("confidence") is not None:
@@ -360,6 +373,16 @@ def choice_lines(request):
         if c.get("description"):
             parts.append(c["description"])
         out.append(", ".join(parts))
+
+    # ADI-P 3.3.1 requires a selector at D1 or D2 be given the history the
+    # engine holds, on the stated grounds that a model seeing only what the
+    # engine already used to rank the list can disagree with the ranking but
+    # never on evidence. What the engine sends today is the identifiers of the
+    # last few cycles and not the decisions or their outcomes, so this is the
+    # history as far as it goes.
+    if request.get("remembered"):
+        out.append("")
+        out.append("recent cycles, newest first: " + ", ".join(request["remembered"]))
 
     for key in ("constraints", "rejected"):
         if request.get(key):
@@ -386,11 +409,14 @@ def plan_for(request):
             choice_lines(request),
         )
 
+    # The prompt is returned bare. `main` appends the "/no_think" switch once,
+    # for whichever seam is being served, so it is written in one place and
+    # cannot be sent twice.
     return (
         "interpreter",
         schema_for(request),
         INSTRUCTION + "\n\n" + context_lines(request),
-        request.get("utterance", "") + " /no_think",
+        request.get("utterance", ""),
     )
 
 
