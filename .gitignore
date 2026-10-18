@@ -38,3 +38,6 @@ sdk/c/build/
 sdk/target/
 tools/
 uae-investor-targets.txt
+
+# Written by `say` in an interactive session, not source.
+sdk/spoken.wav

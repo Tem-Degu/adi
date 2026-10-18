@@ -50,14 +50,14 @@ import copy
 import json
 import sys
 
+# Imported here rather than lazily so that a missing dependency is reported at
+# startup, and not fatally, because --explain needs neither the package nor a
+# model. See main.
 try:
     from llama_cpp import Llama, LlamaGrammar
 except ImportError:
-    sys.stderr.write(
-        "llama-cpp-python is not installed.\n"
-        "    pip install llama-cpp-python\n"
-    )
-    sys.exit(1)
+    Llama = None
+    LlamaGrammar = None
 
 
 # The shape a reply must take. Kept in step with
@@ -133,6 +133,41 @@ SCHEMA = {
         },
     ]
 }
+
+CHOOSER_INSTRUCTION = """You choose which of an appliance's mechanisms to move, and by how much.
+
+You are given one or more goals and a numbered list of candidates. Each
+candidate is a mechanism the machine declares, already filtered to ones that
+move the goal's variable. Answer with one JSON object:
+
+  {"steps": [{"candidate": <number from the list>, "value": <number>}]}
+
+Rules, all of them checked:
+
+  One step per goal, and every goal served. If any goal cannot be served,
+  answer {"steps": []} and nothing will be done. A short list is refused.
+
+  No two steps may move the same variable.
+
+  "value" is required at d2 and must be omitted at d1, where the engine
+  computes it.
+
+AT D2 THE VALUE IS THE ABSOLUTE SETTING TO SEND, NOT A CHANGE.
+
+Each candidate gives "current", its present setting, and "per_unit", how much
+the variable moves per unit of the parameter, signed. For a goal asking for
+`delta`:
+
+  value = current + delta / per_unit
+
+A candidate's "also_affects" says what else it moves, which is how two
+mechanisms serving one goal differ. Prefer the one whose side effects suit the
+goal, then the one with the higher confidence.
+
+If "rejected" is present, your previous answer was refused for the reason
+given. Fix that specific thing.
+"""
+
 
 INSTRUCTION = """\
 You turn a spoken request to an appliance into one JSON object.
@@ -258,10 +293,149 @@ def context_lines(request):
     return "\n".join(lines)
 
 
+def chooser_schema_for(request):
+    """The shape of a selection, narrowed to the candidates actually offered.
+
+    The index is an enum of the indices in this request, so naming a candidate
+    the engine did not offer becomes impossible to emit rather than emitted and
+    then refused. ADI-P 3.3.1 requires that a selector cannot name a tool the
+    machine did not declare; the engine enforces it on the way back, and this
+    enforces it on the way out.
+
+    `value` is required at d2 and absent at d1, where the engine sizes the
+    correction itself.
+    """
+    indices = [c["index"] for c in request.get("candidates", []) if "index" in c]
+
+    step = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["candidate"],
+        "properties": {
+            # An empty candidate list would make an empty enum, which no
+            # grammar can satisfy. Falling back to an integer keeps the schema
+            # compilable; the engine refuses an unknown index anyway.
+            "candidate": {"enum": indices} if indices else {"type": "integer"},
+        },
+    }
+
+    if request.get("level") == "d2":
+        step["required"] = ["candidate", "value"]
+        step["properties"]["value"] = {"type": "number"}
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["steps"],
+        "properties": {"steps": {"type": "array", "items": step}},
+    }
+
+
+def choice_lines(request):
+    """The goals and candidates, as text the model reads."""
+    out = []
+
+    for goal in request.get("goals", []):
+        delta = goal.get("delta")
+        out.append(
+            "goal: move {} by {}{}".format(
+                goal.get("variable"),
+                delta,
+                " " + goal["unit"] if goal.get("unit") else "",
+            )
+        )
+
+    out.append("")
+    out.append("candidates:")
+    for c in request.get("candidates", []):
+        parts = [
+            "  [{}] {}".format(c.get("index"), c.get("tool")),
+            "moves {} by {} per unit".format(c.get("variable"), c.get("per_unit")),
+            "current {}".format(c.get("current")),
+        ]
+        if c.get("confidence") is not None:
+            parts.append("confidence {}".format(c["confidence"]))
+        if c.get("also_affects"):
+            parts.append("also affects {}".format(", ".join(c["also_affects"])))
+        if c.get("description"):
+            parts.append(c["description"])
+        out.append(", ".join(parts))
+
+    for key in ("constraints", "rejected"):
+        if request.get(key):
+            out.append("")
+            out.append("{}: {}".format(key, json.dumps(request[key])))
+
+    out.append("")
+    out.append("level: {}".format(request.get("level", "d2")))
+    return "\n".join(out)
+
+
+def plan_for(request):
+    """How this request is served: its schema, its instruction and its prompt.
+
+    Separated from main so that it can be exercised without loading a model.
+    A selection request carries candidates and a spoken one does not, which is
+    the same test reference.py makes.
+    """
+    if "candidates" in request:
+        return (
+            "chooser",
+            chooser_schema_for(request),
+            CHOOSER_INSTRUCTION,
+            choice_lines(request),
+        )
+
+    return (
+        "interpreter",
+        schema_for(request),
+        INSTRUCTION + "\n\n" + context_lines(request),
+        request.get("utterance", "") + " /no_think",
+    )
+
+
+def explain(stream):
+    """Report how each request would be served, without loading a model.
+
+    `--explain` exists so that the routing can be tested where the weights
+    cannot be: CI has no 2.5 GB model and never will. It answers the question
+    this file once got wrong, which is whether a selection request is
+    recognised as one at all, and it needs no llama-cpp and no GGUF.
+
+    It says nothing about the quality of the model's judgement. That needs
+    weights and is measured by `adi models bench`.
+    """
+    for line in stream:
+        line = line.strip()
+        if not line:
+            continue
+
+        seam, schema, _instruction, prompt = plan_for(json.loads(line))
+        sys.stdout.write(
+            json.dumps({"seam": seam, "schema": schema, "prompt": prompt}) + "\n"
+        )
+        sys.stdout.flush()
+
+    return 0
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--explain":
+        return explain(sys.stdin)
+
     if len(sys.argv) < 2:
-        sys.stderr.write("usage: qwen_interpreter.py <model.gguf>\n")
+        sys.stderr.write(
+            "usage: qwen_interpreter.py <model.gguf>\n"
+            "       qwen_interpreter.py --explain   (routing only, no model)\n"
+        )
         return 2
+
+    if Llama is None:
+        sys.stderr.write(
+            "llama-cpp-python is not installed.\n"
+            "    pip install llama-cpp-python\n"
+        )
+        return 1
 
     model = Llama(
         model_path=sys.argv[1],
@@ -281,17 +455,21 @@ def main():
         if not line:
             continue
 
+        seam = "interpreter"
         try:
             request = json.loads(line)
 
-            schema = schema_for(request)
+            # One program, two seams. A selection request carries candidates
+            # and a spoken one does not, which is the test reference.py makes.
+            seam, schema, instruction, prompt = plan_for(request)
+
             key = json.dumps(schema, sort_keys=True)
             if key not in grammars:
                 grammars[key] = LlamaGrammar.from_json_schema(key)
             grammar = grammars[key]
 
             messages = [
-                {"role": "system", "content": INSTRUCTION + "\n\n" + context_lines(request)},
+                {"role": "system", "content": instruction},
                 # Qwen3 reasons inside a <think> block before answering, and a
                 # grammar permitting only the final JSON leaves it nowhere to
                 # do that. Measured against the shipped corpus, the result was
@@ -302,7 +480,7 @@ def main():
                 # "/no_think" is the family's documented switch for a direct
                 # answer. A model that does not recognise it reads it as
                 # ordinary text, so this is safe to send to any backend.
-                {"role": "user", "content": request.get("utterance", "") + " /no_think"},
+                {"role": "user", "content": prompt + " /no_think"},
             ]
             completion = model.create_chat_completion(
                 messages=messages,
@@ -317,16 +495,25 @@ def main():
             json.loads(reply)  # refuse to pass on something unparseable
 
         except Exception as error:  # noqa: BLE001
-            # A backend that crashes takes the seam down. One that asks leaves
-            # the machine usable and puts the reason in the record.
-            reply = json.dumps(
-                {
-                    "clarify": {
-                        "question": "Sorry, I did not follow. Could you say that again?",
-                        "because": f"interpreter backend error: {error}",
+            # A backend that crashes takes the seam down. One that answers
+            # leaves the machine usable and puts the reason in the record.
+            #
+            # What a usable answer is differs by seam. A question back is the
+            # right reply to a person and meaningless to the engine when it
+            # asked which mechanism to move: there, refusing the plan is the
+            # safe answer, and no steps is how a plan is refused.
+            if seam == "chooser":
+                sys.stderr.write("chooser backend error: {}\n".format(error))
+                reply = json.dumps({"steps": []})
+            else:
+                reply = json.dumps(
+                    {
+                        "clarify": {
+                            "question": "Sorry, I did not follow. Could you say that again?",
+                            "because": f"interpreter backend error: {error}",
+                        }
                     }
-                }
-            )
+                )
 
         sys.stdout.write(reply.strip() + "\n")
         sys.stdout.flush()

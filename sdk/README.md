@@ -168,7 +168,15 @@ adi run --level d2 --config models/models.example-process.yaml
 ```
 
 The chooser runs the same program as the interpreter, since an appliance with
-one model resident answers both questions from it.
+one model resident answers both questions from it. A backend therefore serves
+two seams and has to tell them apart: a selection request carries `candidates`
+and a spoken one does not. Both shipped backends branch on that, and
+`cargo test -p adi-cli --test shipped_backends` holds them to it without
+needing the weights.
+
+The latency table above measures one of those two questions. Interpreting an
+utterance has been timed against real weights; choosing a mechanism has not,
+so D1 and D2 carry no measured figure.
 
 ## What a machine declares
 
