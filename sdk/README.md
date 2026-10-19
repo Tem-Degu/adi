@@ -481,7 +481,27 @@ weights** and corrected where they were wrong. See the table above for what
 each was measured to do, and `models/manifest.yaml` for the checksums of the
 files used.
 
+Both also accept `--explain`, which reports how a request would be served and
+loads no model. The test suite uses it, because a backend that runs real
+weights cannot otherwise be tested where the weights are not present, and an
+untested one is how a backend ships unable to answer at all.
+
 `models/models.example-process.yaml` configures the reference set.
+
+### The two numbers on a speech seam
+
+`sample_rate` is the rate the backend's model requires, not the rate the
+microphone produces. Audio at any other rate is refused rather than resampled,
+because audio read at the wrong rate does not error, it transcribes badly and
+the model takes the blame. Moonshine wants 16000; Piper publishes voices at
+both 16000 and 22050, so a speaker seam has to state which one it loaded.
+
+`min_confidence` is the threshold below which a transcript is treated as not
+heard, at which point the machine asks again instead of acting. ADI-P 9.4.3
+makes asking an outcome rather than a failure. The default is 0.6, which is
+deliberately not near-certain: speech recognition over a running grinder is
+not a quiet-room benchmark, and the cost of asking again is a second of
+someone's time against a wasted drink. Raise it for a noisier installation.
 
 **Implement the trait.** `adi-language` defines the four seams as traits. A
 manufacturer shipping at volume implements them directly against their own

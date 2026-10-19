@@ -20,7 +20,7 @@ use adi_decision::{
 use adi_language::context::VariableInfo;
 use adi_language::{Explainer, Language, NoSpeaker, RecordExplainer, Speaker, Transcriber};
 use adi_models::{
-    ProcessSpeaker, ProcessTranscriber, Surroundings,
+    ProcessSpeaker, ProcessTranscriber, SeamConfig, Surroundings,
     Backend, ModelsConfig, ProcessChooser, ProcessInterpreter, ScriptedInterpreter, Seam,
 };
 use adi_protocol::declaration::Declaration;
@@ -213,10 +213,6 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     let interpreter = load_interpreter(config_path.as_deref(), domain.as_ref(), &declaration.device)?;
     let voice = Voice::load(config_path.as_deref())?;
-    match &interpreter {
-        Some((_, label)) => println!("  interpreter  {label}"),
-        None => println!("  interpreter  none, so spoken requests are unavailable"),
-    }
 
     println!();
     help();
@@ -286,15 +282,66 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 struct Voice {
     speaker: Option<Box<dyn Speaker>>,
     transcriber: Option<Box<dyn Transcriber>>,
+    /// Below this a transcript is treated as not heard, and the machine asks
+    /// instead of acting. Carried here because it is read from the
+    /// configuration and applied where a transcript is produced.
+    min_confidence: f64,
+}
+
+/// The default rate for each speech seam, used where the configuration states
+/// none.
+///
+/// These are the rates the recommended models run at, and they are defaults
+/// rather than requirements. Moonshine wants 16 kHz; Piper publishes voices at
+/// both 16 and 22.05 kHz, so a configuration that cannot state its own rate
+/// can only use half of them.
+const DEFAULT_TRANSCRIBER_RATE: u32 = 16_000;
+const DEFAULT_SPEAKER_RATE: u32 = 22_050;
+
+/// The rate a speech seam runs at, as configured.
+///
+/// Audio is refused at any other rate rather than resampled, so this number
+/// decides whether a backend works at all. A rate of zero would divide a
+/// sample count by nothing when a duration is taken, so it is refused here
+/// where it can still be explained.
+fn speech_rate(seam: &SeamConfig, default: u32) -> Result<u32, String> {
+    match seam.sample_rate {
+        None => Ok(default),
+        Some(0) => Err("sample_rate is 0, which is not a rate".into()),
+        Some(rate) => Ok(rate),
+    }
+}
+
+/// The confidence threshold for a transcript, as configured.
+///
+/// A threshold outside 0 to 1 can never be met or can never be missed, and
+/// either makes the check decorative. It is refused rather than clamped,
+/// because a clamped threshold is one the integrator did not choose and would
+/// have no way to notice.
+fn transcript_threshold(seam: &SeamConfig) -> Result<f64, String> {
+    match seam.min_confidence {
+        None => Ok(adi_language::DEFAULT_MIN_TRANSCRIPT_CONFIDENCE),
+        Some(value) if value.is_finite() && (0.0..=1.0).contains(&value) => Ok(value),
+        Some(value) => Err(format!("min_confidence {value} is outside 0 to 1")),
+    }
 }
 
 impl Voice {
     /// Start whichever of the two the configuration names.
+    ///
+    /// A seam that cannot be made ready is reported and left unserved, and the
+    /// session continues without it. This follows the rule stated in
+    /// `models.yaml`: an engine refuses the operations an unserved seam
+    /// provides and names the seam, rather than failing. Before this, a
+    /// speech program that would not start ended the session before the
+    /// prompt, which also took away `cycle`, the one command that needs no
+    /// model at all.
     fn load(config_path: Option<&Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let Some(path) = config_path else {
             return Ok(Self {
                 speaker: None,
                 transcriber: None,
+                min_confidence: adi_language::DEFAULT_MIN_TRANSCRIPT_CONFIDENCE,
             });
         };
 
@@ -303,23 +350,52 @@ impl Voice {
         let speaker = {
             let seam = config.seam(Seam::Speaker);
             match (seam.backend, seam.command.clone()) {
-                (Backend::Process, Some(command)) => Some(Box::new(ProcessSpeaker::start(
-                    &command,
-                    &seam.args,
-                    22_050,
-                )?) as Box<dyn Speaker>),
+                (Backend::Process, Some(command)) => {
+                    match speech_rate(&seam, DEFAULT_SPEAKER_RATE)
+                        .map_err(|e| e.to_string())
+                        .and_then(|rate| {
+                            ProcessSpeaker::start(&command, &seam.args, rate)
+                                .map(|s| (s, rate))
+                                .map_err(|e| e.to_string())
+                        }) {
+                        Ok((speaker, rate)) => {
+                            println!("  speaker      process ({command}) at {rate} Hz");
+                            Some(Box::new(speaker) as Box<dyn Speaker>)
+                        }
+                        Err(e) => {
+                            println!("  speaker      unavailable: {e}");
+                            None
+                        }
+                    }
+                }
                 _ => None,
             }
         };
 
+        let mut min_confidence = adi_language::DEFAULT_MIN_TRANSCRIPT_CONFIDENCE;
         let transcriber = {
             let seam = config.seam(Seam::Transcriber);
             match (seam.backend, seam.command.clone()) {
-                (Backend::Process, Some(command)) => Some(Box::new(ProcessTranscriber::start(
-                    &command,
-                    &seam.args,
-                    16_000,
-                )?) as Box<dyn Transcriber>),
+                (Backend::Process, Some(command)) => {
+                    match transcript_threshold(&seam).and_then(|threshold| {
+                        let rate = speech_rate(&seam, DEFAULT_TRANSCRIBER_RATE)?;
+                        ProcessTranscriber::start(&command, &seam.args, rate)
+                            .map(|t| (t, rate, threshold))
+                            .map_err(|e| e.to_string())
+                    }) {
+                        Ok((transcriber, rate, threshold)) => {
+                            min_confidence = threshold;
+                            println!(
+                                "  transcriber  process ({command}) at {rate} Hz, asking below {threshold}"
+                            );
+                            Some(Box::new(transcriber) as Box<dyn Transcriber>)
+                        }
+                        Err(e) => {
+                            println!("  transcriber  unavailable: {e}");
+                            None
+                        }
+                    }
+                }
                 _ => None,
             }
         };
@@ -327,6 +403,7 @@ impl Voice {
         Ok(Self {
             speaker,
             transcriber,
+            min_confidence,
         })
     }
 
@@ -624,12 +701,18 @@ fn listen(
     // an intent. Mishearing "hotter" as "shorter" is a physical action on a
     // machine with a heating element, and the transcript is the one place where
     // a wrong word is indistinguishable downstream from a right one.
-    let language = Language::new(
+    let mut language = Language::new(
         transcriber,
         interpreter,
         RecordExplainer,
         NoSpeaker,
     );
+
+    // The threshold the configuration states, not the library default. These
+    // agree in the shipped examples, which is why the field going unread was
+    // invisible: a machine in a noisier place than a kitchen counter needs a
+    // higher one, and setting it had no effect at all.
+    language.min_transcript_confidence = voice.min_confidence;
 
     let context = SelectionContext {
         history: session.history(),
@@ -777,17 +860,52 @@ fn load_chooser(
     let tag = if level == AutonomyLevel::D2 { "d2" } else { "d1" };
     let label = format!("process ({command}) at {tag}");
 
-    Ok(Some((
-        ProcessChooser::start(&command, &seam.args, tag)?,
-        label,
-    )))
+    // A chooser that will not start is reported as absent rather than
+    // propagated, so the caller's explanation runs: a level that needs a
+    // chooser and has none is told what to configure or to run at D0. The
+    // bare backend error said only that a program was not found, which does
+    // not say what it was for or what to do about it.
+    match ProcessChooser::start(&command, &seam.args, tag) {
+        Ok(chooser) => Ok(Some((chooser, label))),
+        Err(e) => {
+            println!("  chooser      unavailable: {e}");
+            Ok(None)
+        }
+    }
 }
 
 /// An interpreter and a description of where it came from, for the banner.
 type Loaded = Option<(Box<dyn Interpreter>, String)>;
 
-/// Build whatever interpreter the configuration names.
+/// The interpreter seam, where it is configured.
+///
+/// A seam that cannot be made ready is reported and left unserved, for the
+/// same reason the speech seams are: the session still has `cycle` and
+/// `status`, which need no model, and ending it here would take those away
+/// too. The caller already prints that spoken requests are unavailable.
 fn load_interpreter(
+    config_path: Option<&Path>,
+    domain: &dyn adi_core::domain::Domain,
+    device: &adi_protocol::declaration::Device,
+) -> Result<Loaded, Box<dyn std::error::Error>> {
+    match start_interpreter(config_path, domain, device) {
+        Ok(Some((interpreter, label))) => {
+            println!("  interpreter  {label}");
+            Ok(Some((interpreter, label)))
+        }
+        Ok(None) => {
+            println!("  interpreter  none, so spoken requests are unavailable");
+            Ok(None)
+        }
+        Err(e) => {
+            println!("  interpreter  unavailable: {e}");
+            println!("               spoken requests are unavailable; the rest of the session is not");
+            Ok(None)
+        }
+    }
+}
+
+fn start_interpreter(
     config_path: Option<&Path>,
     domain: &dyn adi_core::domain::Domain,
     device: &adi_protocol::declaration::Device,
@@ -885,4 +1003,79 @@ fn resolve_executable(given: &Path) -> PathBuf {
     }
 
     given.to_path_buf()
+}
+
+#[cfg(test)]
+mod voice_config {
+    //! Reading the speech seams' configuration.
+    //!
+    //! Both numbers below were present in the shipped example configurations,
+    //! documented in the type that holds them, and read by nothing. The rate
+    //! was hardcoded at the call site and the threshold was taken from the
+    //! library default, which happens to equal the value in the examples, so
+    //! the field appeared to work.
+
+    use super::{speech_rate, transcript_threshold, DEFAULT_SPEAKER_RATE, DEFAULT_TRANSCRIBER_RATE};
+    use adi_models::{Backend, SeamConfig};
+
+    fn seam(sample_rate: Option<u32>, min_confidence: Option<f64>) -> SeamConfig {
+        SeamConfig {
+            backend: Backend::Process,
+            sample_rate,
+            min_confidence,
+            ..SeamConfig::none()
+        }
+    }
+
+    #[test]
+    fn a_configured_rate_is_what_is_used() {
+        assert_eq!(speech_rate(&seam(Some(24_000), None), DEFAULT_SPEAKER_RATE), Ok(24_000));
+        assert_eq!(speech_rate(&seam(Some(8_000), None), DEFAULT_TRANSCRIBER_RATE), Ok(8_000));
+    }
+
+    /// Piper publishes voices at 16 and at 22.05 kHz. A tool that reads only
+    /// its own default can run half of them.
+    #[test]
+    fn a_rate_other_than_the_default_is_not_overridden() {
+        let configured = speech_rate(&seam(Some(16_000), None), DEFAULT_SPEAKER_RATE);
+        assert_eq!(configured, Ok(16_000), "the speaker default must not win");
+    }
+
+    #[test]
+    fn no_rate_means_the_default_for_that_seam() {
+        assert_eq!(speech_rate(&seam(None, None), DEFAULT_TRANSCRIBER_RATE), Ok(16_000));
+        assert_eq!(speech_rate(&seam(None, None), DEFAULT_SPEAKER_RATE), Ok(22_050));
+    }
+
+    /// A duration is a sample count divided by a rate.
+    #[test]
+    fn a_rate_of_zero_is_refused() {
+        assert!(speech_rate(&seam(Some(0), None), DEFAULT_SPEAKER_RATE).is_err());
+    }
+
+    #[test]
+    fn a_configured_threshold_is_what_is_used() {
+        assert_eq!(transcript_threshold(&seam(None, Some(0.9))), Ok(0.9));
+        assert_eq!(transcript_threshold(&seam(None, Some(0.0))), Ok(0.0));
+        assert_eq!(transcript_threshold(&seam(None, Some(1.0))), Ok(1.0));
+    }
+
+    #[test]
+    fn no_threshold_means_the_library_default() {
+        assert_eq!(
+            transcript_threshold(&seam(None, None)),
+            Ok(adi_language::DEFAULT_MIN_TRANSCRIPT_CONFIDENCE)
+        );
+    }
+
+    /// A threshold outside 0 to 1 can never be met or can never be missed, and
+    /// either makes the check decorative. Refused rather than clamped: a
+    /// clamped threshold is one nobody chose and nobody can see.
+    #[test]
+    fn a_threshold_outside_zero_to_one_is_refused() {
+        assert!(transcript_threshold(&seam(None, Some(1.5))).is_err());
+        assert!(transcript_threshold(&seam(None, Some(-0.1))).is_err());
+        assert!(transcript_threshold(&seam(None, Some(f64::NAN))).is_err());
+        assert!(transcript_threshold(&seam(None, Some(f64::INFINITY))).is_err());
+    }
 }

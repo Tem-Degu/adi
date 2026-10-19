@@ -27,3 +27,8 @@ serde = { workspace = true }
 serde_yaml = { workspace = true }
 serde_json = { workspace = true }
 serialport = { version = "4.10.1", default-features = false }
+
+[dev-dependencies]
+# Tests only. The engine puts audio on the wire as base64, so a test that
+# builds a recording for a speech backend has to encode one the same way.
+base64 = "0.22"

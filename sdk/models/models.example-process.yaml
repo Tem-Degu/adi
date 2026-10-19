@@ -36,11 +36,25 @@ seams:
     backend: process
     command: python3
     args: ["examples/interpreters/reference_speech.py", "transcribe"]
+
+    # The rate this program's model requires, not the rate the microphone
+    # produces. Audio at any other rate is refused rather than resampled, so
+    # this describes the model. Moonshine wants 16000.
     sample_rate: 16000
+
+    # Below this a transcript is treated as not heard and the machine asks
+    # again instead of acting. Raise it where the machine stands somewhere
+    # noisy: mishearing "hotter" as "shorter" is a physical action on a
+    # machine with a heating element, and the cost of asking again is a
+    # second of someone's time.
     min_confidence: 0.6
 
   speaker:
     backend: process
     command: python3
     args: ["examples/interpreters/reference_speech.py", "speak"]
+
+    # The rate this program's voice produces. A reply at any other rate is
+    # refused, because audio played at the wrong rate is awkward to diagnose
+    # by ear. Piper publishes voices at 16000 and at 22050.
     sample_rate: 22050

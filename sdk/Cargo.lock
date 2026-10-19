@@ -16,6 +16,7 @@ dependencies = [
  "adi-safety",
  "adi-session",
  "adi-wire",
+ "base64",
  "clap",
  "serde",
  "serde_json",
