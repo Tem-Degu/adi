@@ -1,0 +1,61 @@
+# What the DH-20 reasons about. Pairs with dehydrator.yaml.
+#
+# On a machine declaring `base/v1` this file is the domain. The profile ships
+# no variables, no styles and no notes, so everything here is the only thing
+# the engine knows about drying.
+#
+# ADI-P 6.2 and 6.3: every identifier a vendor introduces sits in the vendor's
+# namespace and may not redefine one the profile already models. On this
+# profile the profile models none, so the namespace rule is the only thing
+# keeping two manufacturers' identifiers apart. Validation enforces it.
+
+namespace: "x.dryline"
+extension_version: "1.0"
+extends: { domain_profile: "base/v1", base_min_version: "1.0" }
+
+# The outcome. Not the control: the engine reasons about results, so a spoken
+# request lands on one of these and a correction targets one. The description
+# is what lets "it came out chewy" reach moisture_content, because a bare
+# identifier only works where the model happens to have been trained on the
+# trade.
+variables:
+  x.dryline.moisture_content:
+    unit: pct
+    description: >
+      Share of the food's weight that is still water, measured on the probe
+      tray at the end of the run. High reads as chewy, bendy or damp and will
+      spoil in storage; low reads as brittle and snaps instead of bending.
+
+# What a good result is. The engine compares what was measured against the one
+# that was asked for.
+styles:
+  - id: "x.dryline.style.fruit"
+    description: >
+      Dried fruit. Leathery and bendy, keeping enough water to stay pleasant
+      to eat. What someone means by fruit leather, apple rings or chewy.
+    targets:
+      x.dryline.moisture_content: { min: 15.0, max: 20.0, unit: pct }
+
+  - id: "x.dryline.style.crisp"
+    description: >
+      Dried through to brittle, so it snaps rather than bends and keeps for
+      months. What someone means by crisp, snappy, crunchy or for storage.
+    targets:
+      x.dryline.moisture_content: { min: 5.0, max: 10.0, unit: pct }
+
+# Free text the machine may answer a person from. Advisory, and it may never
+# determine an action. A note must not state a target or an effect magnitude,
+# because those belong in a style and in the skill where they are validated.
+notes:
+  - id: "x.dryline.note.case_hardening"
+    text: >
+      Air that is too hot dries the outside faster than water can travel out
+      from the middle. The surface seals, the inside stays wet, and the piece
+      reads as dry while it is not. Lower air temperature and a longer run
+      give a more even result than the reverse.
+
+  - id: "x.dryline.note.load_matters"
+    text: >
+      Thickness and spacing change the result more than the temperature does.
+      Pieces touching each other dry unevenly whatever the air is doing, and
+      trays packed too deep hold moisture at the bottom.

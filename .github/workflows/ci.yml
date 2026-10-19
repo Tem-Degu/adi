@@ -99,3 +99,11 @@ jobs:
       - name: Footprint
         working-directory: sdk/c
         run: make arm-size
+
+      # A second machine, on the base profile, built for the same core. It is
+      # the only firmware here that is not a test suite and not espresso, so it
+      # is what catches a change that works for the worked example and not for
+      # a manufacturer's own machine.
+      - name: A second machine, as firmware
+        working-directory: sdk/c
+        run: make dehydrator

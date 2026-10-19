@@ -1,0 +1,103 @@
+# A food dehydrator, on a profile nobody wrote for it, with firmware behind it.
+#
+# printer.yaml makes the same claim and stops at validation: a manufacturer can
+# describe their machine and have the engine reason about it with no domain
+# profile written for their industry. This one runs. The firmware in
+# `c/dehydrator/` is the same `libadip` the espresso example uses, built for a
+# Cortex-M3 and talking over a UART, so the whole path from a spoken request to
+# a value arriving at a microcontroller is exercised on a machine that is not
+# an espresso machine.
+#
+# Deliberately small. One outcome, one mechanism, one named result. Enough to
+# tell whether the engine can reason about a new domain, and not so much that a
+# failure is hard to attribute.
+#
+# What it gets: spoken requests reach its tool, questions are answered from
+# what it declared, and an outcome that drifted is corrected back towards
+# target. What it does not get is a cause: the base profile reports that
+# moisture is high and cannot tell a damp load from a failing fan, because
+# telling those apart is what a domain profile is for. See
+# HOW-TO-ADD-A-DOMAIN.md.
+
+adip_version: "0.2"
+domain: "drying"
+domain_profile: "base/v1"
+conformance_level: advisory
+
+device:
+  vendor: "Dryline"
+  model: "DH-20"
+  firmware_version: "1.0.0"
+  declaration_id: "sha256:dehydratorexample"
+
+session:
+  max_concurrent: 1
+  heartbeat_interval_ms: 1000
+  # Generous, because the reply crosses an emulated UART. A real board on a
+  # real line answers in single-digit milliseconds.
+  control_timeout_ms: 4000
+
+signals:
+  - id: "x.dryline.signal.moisture"
+    unit: pct
+    range: { min: 0, max: 100, unit: pct }
+    sample_rate_hz: 2
+    accuracy: { abs: 1.0, unit: pct }
+
+tools:
+  - id: "x.dryline.heater.set_temperature"
+    name: "set_temperature"
+    parameters:
+      celsius:
+        type: integer
+        unit: c
+        min: 30
+        max: 70
+        resolution: 1
+        monotonic: higher_is_more
+    preconditions: ["state == idle"]
+    effects: ["x.dryline.air_temperature"]
+    duration_ms_typ: 2000
+    reversible: true
+    description: >
+      Sets the drying air temperature. A resistive element behind the fan,
+      settling within about two minutes. Hotter air carries more water away,
+      so it dries further and faster, and far enough past the fruit's own
+      sugar point it will case-harden the outside and trap moisture inside.
+
+events:
+  - id: "x.dryline.event.fault"
+    payload:
+      code: { type: string }
+      severity: { type: enum, values: ["warning", "error", "critical"] }
+      recoverable: { type: boolean }
+
+envelope:
+  enforced_by: both
+  independent_of_engine: true
+
+  limits:
+    - { parameter: "celsius", unit: c, hard_max: 70 }
+
+  interlocks:
+    - { id: "tray_latched", blocks: ["*"] }
+
+  # Stateful constraints, which is what D2 refuses to initialise without. The
+  # element has thermal mass, so changing the setting faster than it can settle
+  # means the next cycle measures the previous setting. Individually valid
+  # calls, invalid in sequence, which is the case this block exists for.
+  rate_limits:
+    - id: "element_settling"
+      tools: ["x.dryline.heater.set_temperature"]
+      min_interval_s: 120.0
+      max_invocations: 20
+      window_s: 86400.0
+
+  failsafe:
+    on_control_timeout: "abort_to_safe"
+    on_signal_loss: "abort_to_safe"
+    on_fault: "abort_to_safe"
+    safe_state: "element_off_fan_running"
+    # The element is off within one control period; the fan keeps running to
+    # carry the residual heat out, which is why this is not zero.
+    max_time_to_safe_ms: 500

@@ -49,7 +49,11 @@ T6 = test/test_signals.c
 BUILD = build
 OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 
-.PHONY: all test clean size regen example
+# A target whose name matches a directory needs declaring here, or make finds
+# the directory, calls it up to date and does nothing. `example` was declared
+# for that reason; `arm` and `dehydrator` collide with arm/ and dehydrator/ the
+# same way and were not.
+.PHONY: all test clean size regen example arm arm-test arm-size dehydrator dehydrator-run
 
 TESTS = $(BUILD)/test_m1 $(BUILD)/test_m2 $(BUILD)/test_m3 $(BUILD)/test_m4 \
         $(BUILD)/test_m5 $(BUILD)/test_signals
@@ -124,6 +128,7 @@ clean:
 #
 #   mingw32-make arm-size    footprint for Cortex-M4
 #   mingw32-make arm-test    run every suite under QEMU
+#   mingw32-make dehydrator  a second machine as firmware, UART over QEMU
 #
 # Needs arm-none-eabi-gcc and qemu-system-arm. Both are free; neither needs a
 # board. Override the paths if they are not on PATH.
@@ -166,6 +171,32 @@ $(ARMBUILD)/test_signals.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T6) | $
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T6) -o $@ $(ARMLIBS)
 
 arm: $(ARMTESTS)
+
+# ----------------------------------------------- a second machine, as firmware
+#
+# A food dehydrator on the base profile, built for the same emulated core. It
+# exists to answer one question: whether a manufacturer can describe a machine
+# nobody wrote a profile for and have the engine reason about it. See
+# examples/declarations/dehydrator.yaml and HOW-TO-PORT-TO-A-BOARD.md.
+#
+#   make dehydrator      build the firmware
+#   make dehydrator-run  run it under QEMU with UART0 on a pty, which is what
+#                        `adi run --serial <pty>` connects to
+#
+# Unlike the test suites this is not semihosted: the link is UART0, so the
+# bytes cross a real peripheral and the engine's own framing.
+
+DH20 = generated/adip_generated_dh20.c
+
+$(ARMBUILD)/dehydrator.elf: arm/startup.c $(ARMLD) $(SRC) $(DH20) dehydrator/main.c | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(DH20) dehydrator/main.c -o $@ $(ARMLIBS)
+
+dehydrator: $(ARMBUILD)/dehydrator.elf
+
+# -serial pty makes QEMU print the device it allocated. Hand that to
+# `adi run --serial`.
+dehydrator-run: $(ARMBUILD)/dehydrator.elf
+	$(QEMU) -M lm3s6965evb -nographic -serial pty -kernel $(ARMBUILD)/dehydrator.elf
 
 # Every ARM rule lists its sources. They were order-only before, with nothing
 # but the build directory as a prerequisite, so once a .elf existed make

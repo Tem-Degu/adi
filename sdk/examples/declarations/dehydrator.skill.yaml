@@ -1,0 +1,31 @@
+# How far the control moves the outcome on the DH-20.
+#
+# Without an entry here the tool is callable and never selectable: the engine
+# builds its candidate list from these responses, so a tool naming no outcome
+# is never offered to a model and no spoken request can arrive at it.
+#
+# per_unit is signed, and is the whole of what lets a correction be sized
+# rather than guessed at.
+
+skill_version: "1.0"
+skill_id: "skill/DH-20/1.0"
+
+applies_to:
+  vendor: "Dryline"
+  model: "DH-20"
+  firmware_range: { min: "1.0.0", max: "1.9.99" }
+
+responses:
+  # Hotter air carries more water away, so moisture comes down: the sign is
+  # negative and that is what tells the engine which way to move the dial.
+  #
+  # An estimate from the bench, not a measurement across loads. ADI-P puts the
+  # confidence here for exactly this reason, and the engine scales a correction
+  # by it, so an honest 0.6 produces smaller steps than a flattering 0.95.
+  - tool: "x.dryline.heater.set_temperature"
+    parameter: "celsius"
+    variable: "x.dryline.moisture_content"
+    per_unit: -0.4
+    unit: pct
+    valid_range: { min: 0.0, max: 60.0 }
+    confidence: 0.6
