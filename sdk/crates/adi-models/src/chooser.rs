@@ -56,6 +56,15 @@ struct Request<'a> {
     /// break it, and before this was sent the commonest break, two steps moving
     /// one variable, failed the cycle outright.
     constraints: Vec<&'static str>,
+    /// What this seam is for. See [`CHOOSER_INSTRUCTION`].
+    instruction: &'static str,
+    /// The shape of a valid answer, narrowed to the candidates actually
+    /// offered and to this level, in the form a constrained decoder takes.
+    ///
+    /// ADI-P 9.3 requirement 3 on the way out as well as on the way back:
+    /// naming a candidate the engine did not supply becomes impossible to emit
+    /// rather than emitted and refused.
+    schema: serde_json::Value,
     /// Why the previous answer was refused. Absent on a first attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     rejected: Option<&'a str>,
@@ -126,11 +135,38 @@ struct Step {
 ///
 /// Facts about the contract, not persuasion. The engine enforces every one of
 /// these after the fact; sending them lets a model satisfy them first.
+/// What the seam is for, stated by the engine.
+///
+/// Held here with [`CONSTRAINTS`] and sent with every request. A backend that
+/// carries its own copy of this carries one that can drift from the rules the
+/// engine actually enforces, and the shipped Qwen backend's copy disagreed with
+/// the constraint below about how a D2 value is arrived at.
+pub const CHOOSER_INSTRUCTION: &str =
+    "You choose which of an appliance's mechanisms to move, and by how much.
+
+You are given one or more goals and a numbered list of candidates. Each
+candidate is a mechanism the machine declares, already filtered to ones that
+move the goal's variable. Answer with one JSON object:
+
+  {\"steps\": [{\"candidate\": <number from the list>, \"value\": <number>}]}
+
+Each candidate gives \"current\", its present setting, and \"per_unit\", how much
+the variable moves per unit of the parameter, signed.
+
+A candidate's \"also_affects\" says what else it moves, which is how two
+mechanisms serving one goal differ. Prefer the one whose side effects suit the
+goal, then the one with the higher confidence.
+
+If \"rejected\" is present, your previous answer was refused for the reason
+given. Fix that specific thing.
+
+Every rule the answer is checked against is listed under \"constraints\".";
+
 const CONSTRAINTS: &[&str] = &[
     "Return exactly one step per goal, in the same order as the goals.",
     "Choose each step by its candidate index. Do not invent a tool name.",
-    "No two steps may move the same variable. ADI-P 9.5: the next cycle could      not then attribute the change to either, and the plan is refused whole.",
-    "Every step needs a value, and it is the absolute setting to send, not a      change. Add your intended change to the candidate's current value.",
+    "No two steps may move the same variable. ADI-P 9.5: the next cycle could not then attribute the change to either, and the plan is refused whole.",
+    "Every step needs a value, and it is the absolute setting to send, not a change. The goal's delta is in the variable's unit and the parameter is in its own, so the two do not add: value = current + delta / per_unit. The sign of per_unit already says which way the parameter moves.",
     "Serve every goal or none. A plan missing a goal is refused.",
 ];
 
@@ -219,6 +255,8 @@ impl ProcessChooser {
                 })
                 .collect(),
             level: self.level,
+            instruction: CHOOSER_INSTRUCTION,
+            schema: crate::selection_schema(candidates.len(), self.level),
             constraints: CONSTRAINTS
                 .iter()
                 .copied()
@@ -237,7 +275,10 @@ impl ProcessChooser {
             .map_err(|e| format!("could not encode the request: {e}"))?;
         line.push('\n');
 
-        let mut pipe = self.inner.lock().map_err(|_| "the backend lock was poisoned")?;
+        let mut pipe = self
+            .inner
+            .lock()
+            .map_err(|_| "the backend lock was poisoned")?;
 
         pipe.stdin
             .write_all(line.as_bytes())
@@ -251,14 +292,15 @@ impl ProcessChooser {
             .map_err(|e| format!("could not read the reply: {e}"))?
             == 0
         {
-            return Err(format!(
-                "'{}' produced no output and exited",
-                pipe.command
-            ));
+            return Err(format!("'{}' produced no output and exited", pipe.command));
         }
 
-        let reply: Reply = serde_json::from_str(raw.trim())
-            .map_err(|e| format!("the reply is not a valid selection: {e}; got {}", raw.trim()))?;
+        let reply: Reply = serde_json::from_str(raw.trim()).map_err(|e| {
+            format!(
+                "the reply is not a valid selection: {e}; got {}",
+                raw.trim()
+            )
+        })?;
 
         // Checked here as well as in the selector, because an index out of
         // range would otherwise panic rather than refuse. The selector checks

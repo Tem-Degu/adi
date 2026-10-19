@@ -20,7 +20,22 @@ the decoder rather than checked afterwards; the engine validates the result
 again regardless, because a decoder that guarantees the shape guarantees
 nothing about the contents.
 
-The schema permits either an intent or a question. That second arm is not a
+The schema and the instruction are not written here. The engine sends both
+with every request: it owns the contract, and it narrows the schema to the
+styles, materials, variables and units this machine declares. This file reads
+them off the request and compiles the grammar from what it was given.
+
+That division is the point. This file used to carry its own copy of the
+schema, and the copy had two of the contract's three arms. An intent and a
+question were permitted; an answer was not. The engine has permitted an answer
+throughout, ADI-P 9.4.5 describes it, and the engine was already sending the
+machine identity and the manufacturer's notes an answer is composed from. The
+grammar built from the local copy made an answer impossible to emit, so the
+machine met every question with a question. Nothing detected it, because the
+engine never stated the contract on the wire for the copy to be checked
+against. A backend that holds no copy cannot drift from the original.
+
+The schema permits an intent, a question or an answer. The second arm is not a
 convenience. Constraining a small model costs accuracy, because capacity spent
 satisfying a format is capacity not spent on the task, and a model that cannot
 resolve a request would otherwise be forced to invent something valid.
@@ -31,13 +46,7 @@ VERIFIED against Qwen3 4B Q4_K_M on an x86-64 host with no accelerator.
 Reaches 9 of 18 exactly correct on eval/espresso, and 14 of 18 correct in
 choosing whether to act or to ask.
 
-Two things found by running it, both corrected here and both worth knowing if
-you write your own backend.
-
-The output schema must be narrowed to what the machine declares. The engine's
-own schema permits any string where an identifier belongs, because it
-validates the answer afterwards. A grammar can do better: see schema_for
-below. Unconstrained, this model produced a style the machine does not have.
+One thing found by running it, worth knowing if you write your own backend.
 
 Qwen3 needs "/no_think". It reasons in a block before answering, and a grammar
 admitting only the final JSON leaves it nowhere to do that. Without the switch
@@ -46,7 +55,6 @@ its answers barely varied with the input.
 Copyright 2026 StreetAI. Licensed under the Apache License, Version 2.0.
 """
 
-import copy
 import json
 import sys
 
@@ -60,208 +68,22 @@ except ImportError:
     LlamaGrammar = None
 
 
-# The shape a reply must take. Kept in step with
-# adi-models/src/schema.rs::UNDERSTOOD_SCHEMA; a change to one is a change to
-# both.
-SCHEMA = {
-    "oneOf": [
-        {
-            "type": "object",
-            "required": ["intent"],
-            "additionalProperties": False,
-            "properties": {
-                "intent": {
-                    "type": "object",
-                    "required": ["kind"],
-                    "additionalProperties": False,
-                    "properties": {
-                        "kind": {"enum": ["adjust", "produce"]},
-                        "style": {"type": "string"},
-                        "material": {"type": "string"},
-                        "targets": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "oneOf": [
-                                    {
-                                        "type": "object",
-                                        "required": ["value", "unit"],
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "value": {"type": "number"},
-                                            "unit": {"type": "string"},
-                                        },
-                                    },
-                                    {
-                                        "type": "object",
-                                        "required": ["of"],
-                                        "additionalProperties": False,
-                                        "properties": {
-                                            "of": {"type": "string"},
-                                            "scale": {"type": "number"},
-                                            "offset": {
-                                                "type": "object",
-                                                "required": ["value", "unit"],
-                                                "properties": {
-                                                    "value": {"type": "number"},
-                                                    "unit": {"type": "string"},
-                                                },
-                                            },
-                                        },
-                                    },
-                                ]
-                            },
-                        },
-                    },
-                }
-            },
-        },
-        {
-            "type": "object",
-            "required": ["clarify"],
-            "additionalProperties": False,
-            "properties": {
-                "clarify": {
-                    "type": "object",
-                    "required": ["question", "because"],
-                    "additionalProperties": False,
-                    "properties": {
-                        "question": {"type": "string"},
-                        "because": {"type": "string"},
-                    },
-                }
-            },
-        },
-    ]
-}
-
-CHOOSER_INSTRUCTION = """You choose which of an appliance's mechanisms to move, and by how much.
-
-You are given one or more goals and a numbered list of candidates. Each
-candidate is a mechanism the machine declares, already filtered to ones that
-move the goal's variable. Answer with one JSON object:
-
-  {"steps": [{"candidate": <number from the list>, "value": <number>}]}
-
-Rules, all of them checked:
-
-  One step per goal, and every goal served. If any goal cannot be served,
-  answer {"steps": []} and nothing will be done. A short list is refused.
-
-  No two steps may move the same variable.
-
-  "value" is required at d2 and must be omitted at d1, where the engine
-  computes it.
-
-AT D2 THE VALUE IS THE ABSOLUTE SETTING TO SEND, NOT A CHANGE.
-
-Each candidate gives "current", its present setting, and "per_unit", how much
-the variable moves per unit of the parameter, signed. For a goal asking for
-`delta`:
-
-  value = current + delta / per_unit
-
-A candidate's "also_affects" says what else it moves, which is how two
-mechanisms serving one goal differ. Prefer the one whose side effects suit the
-goal, then the one with the higher confidence.
-
-If "rejected" is present, your previous answer was refused for the reason
-given. Fix that specific thing.
-"""
-
-
-INSTRUCTION = """\
-You turn a spoken request to an appliance into one JSON object.
-
-To act on the request:
-  {"intent": {"kind": "produce"|"adjust", "style": "<id>",
-   "targets": {"<variable>": <target>}}}
-
-A target is either {"value": <number>, "unit": "<unit>"}
-or {"of": "last"|"<cycle id>", "scale": <number>, "offset": {...}}.
-Give at most one of scale and offset. Neither means the same as then.
-A scale of 0 means none at all.
-
-If the request cannot be resolved, ask instead:
-  {"clarify": {"question": "<what to ask>", "because": "<why>"}}
-
-Asking is a correct answer. Do not guess a value, a style or a cycle that was
-not stated: the result of this request moves a machine.
-
-State relations rather than resolving them. "Half of last time" is
-{"of": "last", "scale": 0.5}, never a number. The engine holds the memory and
-does the arithmetic.
-
-Name only the styles, materials and variables listed below.\
-"""
-
-
-
-def schema_for(request):
-    """The output schema, narrowed to what this machine actually declares.
-
-    SCHEMA above permits any string where an identifier belongs, which is what
-    the engine's own schema does, because the engine validates the answer
-    afterwards and can report a useful refusal. A grammar can do better than
-    that here: a style that is not in the list becomes impossible to emit
-    rather than emitted and then refused.
-
-    This matters more than it looks. The instruction already says to name only
-    what is listed, and a model of this size does not reliably obey it. Against
-    the shipped corpus the unconstrained schema produced
-    `adi.espresso.style.cortado` for a machine that declares no such style.
-    Instruction is advice; a grammar is not.
-
-    Units are narrowed the same way, from the units the variables declare.
-    Targets are keyed by variable, so an unmodelled variable also becomes
-    unreachable rather than refused four steps later.
-    """
-    schema = copy.deepcopy(SCHEMA)
-    intent = schema["oneOf"][0]["properties"]["intent"]["properties"]
-
-    styles = request.get("styles") or []
-    if styles:
-        intent["style"] = {"enum": list(styles)}
-    else:
-        # A machine declaring no styles cannot be asked for one.
-        intent.pop("style", None)
-
-    materials = request.get("materials") or []
-    if materials:
-        intent["material"] = {"enum": list(materials)}
-    else:
-        intent.pop("material", None)
-
-    variables = request.get("variables") or []
-    names = [v["name"] if isinstance(v, dict) else v for v in variables]
-    units = sorted({v.get("unit") for v in variables
-                    if isinstance(v, dict) and v.get("unit")})
-
-    if not names:
-        intent.pop("targets", None)
-        return schema
-
-    target = intent["targets"]["additionalProperties"]
-    if units:
-        # Each branch of the target carries a unit, and an offset carries its
-        # own.
-        target["oneOf"][0]["properties"]["unit"] = {"enum": units}
-        target["oneOf"][1]["properties"]["offset"]["properties"]["unit"] = {
-            "enum": units
-        }
-
-    # One named property per declared variable, and nothing else permitted.
-    # A JSON schema keyed by name rather than by additionalProperties is what
-    # makes the grammar enumerate them.
-    intent["targets"] = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {name: target for name in names},
-    }
-    return schema
-
 def context_lines(request):
-    """What the engine knows, as plain lines for the prompt."""
+    """What the engine knows, as plain lines for the prompt.
+
+    Every field the engine sends is rendered. A field the engine troubles to
+    send and the prompt discards is worse than one that was never sent, because
+    the omission is invisible from both ends: the engine's record shows it was
+    supplied and the model never saw it. This prompt dropped three of them, and
+    two were the whole basis on which a question gets answered.
+    """
     lines = []
+
+    # What the machine is. ADIP 9.4.5 names this first among what an engine
+    # should supply for a question, and "what model are you" is answerable
+    # from nothing else.
+    if request.get("machine"):
+        lines.append("this machine: " + request["machine"])
 
     if request.get("styles"):
         lines.append("styles: " + ", ".join(request["styles"]))
@@ -278,6 +100,13 @@ def context_lines(request):
             else:
                 lines.append("  " + v["name"])
 
+    # The manufacturer's notes. ADIP 9.4.5: an answer should name what it drew
+    # on, which is why each note is given with its identifier.
+    if request.get("notes"):
+        lines.append("notes, each with the id to cite in drew_on:")
+        for note in request["notes"]:
+            lines.append("  [{}] {}".format(note.get("id", "?"), note.get("text", "")))
+
     for cycle in request.get("remembered", []):
         parts = ["cycle " + cycle.get("cycle_id", "?")]
         if cycle.get("style"):
@@ -290,45 +119,19 @@ def context_lines(request):
     if not request.get("remembered"):
         lines.append("nothing has been produced yet")
 
+    # ADIP 3.3.1: the decisions the engine has already taken and what they were
+    # for. A model asked about an earlier correction has nothing else to go on.
+    if request.get("history"):
+        lines.append("decisions already taken, newest first:")
+        for decision in request["history"]:
+            line = "  cycle {} corrected {}".format(
+                decision.get("cycle_id", "?"), decision.get("cause", "?")
+            )
+            if decision.get("tool"):
+                line += " using " + decision["tool"]
+            lines.append(line)
+
     return "\n".join(lines)
-
-
-def chooser_schema_for(request):
-    """The shape of a selection, narrowed to the candidates actually offered.
-
-    The index is an enum of the indices in this request, so naming a candidate
-    the engine did not offer becomes impossible to emit rather than emitted and
-    then refused. ADI-P 3.3.1 requires that a selector cannot name a tool the
-    machine did not declare; the engine enforces it on the way back, and this
-    enforces it on the way out.
-
-    `value` is required at d2 and absent at d1, where the engine sizes the
-    correction itself.
-    """
-    indices = [c["index"] for c in request.get("candidates", []) if "index" in c]
-
-    step = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["candidate"],
-        "properties": {
-            # An empty candidate list would make an empty enum, which no
-            # grammar can satisfy. Falling back to an integer keeps the schema
-            # compilable; the engine refuses an unknown index anyway.
-            "candidate": {"enum": indices} if indices else {"type": "integer"},
-        },
-    }
-
-    if request.get("level") == "d2":
-        step["required"] = ["candidate", "value"]
-        step["properties"]["value"] = {"type": "number"}
-
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["steps"],
-        "properties": {"steps": {"type": "array", "items": step}},
-    }
 
 
 def choice_lines(request):
@@ -397,27 +200,46 @@ def choice_lines(request):
 def plan_for(request):
     """How this request is served: its schema, its instruction and its prompt.
 
+    The schema and the instruction are taken from the request. The engine holds
+    the contract, narrows the schema to what this machine declares, and sends
+    both with every request, so this file does not carry a copy of either.
+
+    That is not tidiness. This backend used to carry its own copy of the schema,
+    and the copy had two of the contract's three arms: an intent and a question,
+    but no answer. The engine has permitted an answer throughout, ADIP 9.4.5
+    describes it, and the engine was already sending the machine identity and
+    the manufacturer's notes needed to compose one. The grammar built from the
+    local copy made answering impossible to emit, so the machine met every
+    question with a question. Nothing detected it, because the engine never
+    stated the contract on the wire for the copy to be compared against.
+
     Separated from main so that it can be exercised without loading a model.
     A selection request carries candidates and a spoken one does not, which is
     the same test reference.py makes.
     """
-    if "candidates" in request:
-        return (
-            "chooser",
-            chooser_schema_for(request),
-            CHOOSER_INSTRUCTION,
-            choice_lines(request),
+    schema = request.get("schema")
+    instruction = request.get("instruction")
+    if schema is None or instruction is None:
+        # Refused rather than guessed at. A backend that invents a contract
+        # when none arrived is how the copies drifted in the first place.
+        missing = "schema" if schema is None else "instruction"
+        raise ValueError(
+            "the request carries no {}. The engine sends both with every "
+            "request; a hand-written request has to supply them too.".format(missing)
         )
 
+    if "candidates" in request:
+        return "chooser", schema, instruction, choice_lines(request)
+
+    # The context goes above the instruction, because the engine's instruction
+    # refers to what it was "given above": the styles, the variables and their
+    # meanings, the notes, and what this machine is.
+    #
     # The prompt is returned bare. `main` appends the "/no_think" switch once,
     # for whichever seam is being served, so it is written in one place and
     # cannot be sent twice.
-    return (
-        "interpreter",
-        schema_for(request),
-        INSTRUCTION + "\n\n" + context_lines(request),
-        request.get("utterance", ""),
-    )
+    system = context_lines(request) + "\n\n" + instruction
+    return "interpreter", schema, system, request.get("utterance", "")
 
 
 def explain(stream):
@@ -428,6 +250,12 @@ def explain(stream):
     this file once got wrong, which is whether a selection request is
     recognised as one at all, and it needs no llama-cpp and no GGUF.
 
+    Both halves of what the model is sent are reported: the system message,
+    which carries the context and the engine's instruction, and the user
+    message. Reporting only the second hid a prompt that was dropping the
+    machine identity, the manufacturer's notes and the decision history, since
+    on the spoken path those all go in the first.
+
     It says nothing about the quality of the model's judgement. That needs
     weights and is measured by `adi models bench`.
     """
@@ -436,9 +264,17 @@ def explain(stream):
         if not line:
             continue
 
-        seam, schema, _instruction, prompt = plan_for(json.loads(line))
+        seam, schema, instruction, prompt = plan_for(json.loads(line))
         sys.stdout.write(
-            json.dumps({"seam": seam, "schema": schema, "prompt": prompt}) + "\n"
+            json.dumps(
+                {
+                    "seam": seam,
+                    "schema": schema,
+                    "instruction": instruction,
+                    "prompt": prompt,
+                }
+            )
+            + "\n"
         )
         sys.stdout.flush()
 

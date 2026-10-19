@@ -20,17 +20,19 @@ pub mod manifest;
 pub mod parse;
 pub mod process;
 pub mod schema;
-pub mod speech;
 pub mod scripted;
+pub mod speech;
 
-pub use chooser::ProcessChooser;
+pub use chooser::{ProcessChooser, CHOOSER_INSTRUCTION};
 pub use config::{Backend, ModelsConfig, SeamConfig};
-pub use parse::understood;
 pub use manifest::{hash_file, identify, Manifest, Provenance, Published, Seam};
+pub use parse::understood;
 pub use process::{ProcessInterpreter, Surroundings};
-pub use speech::{ProcessSpeaker, ProcessTranscriber};
-pub use schema::{OUTPUT_INSTRUCTION, UNDERSTOOD_SCHEMA};
+pub use schema::{
+    narrowed_schema, selection_schema, SchemaVariable, OUTPUT_INSTRUCTION, UNDERSTOOD_SCHEMA,
+};
 pub use scripted::ScriptedInterpreter;
+pub use speech::{ProcessSpeaker, ProcessTranscriber};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {

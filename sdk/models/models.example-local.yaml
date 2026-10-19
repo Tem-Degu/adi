@@ -4,27 +4,29 @@
 # real models, through the backends in examples/interpreters/.
 #
 # First:
+#     python3 -m venv .venv     # recent Linux refuses a system-wide install
+#     . .venv/bin/activate
 #     pip install -r requirements.txt
-#     adi models check          # reports which files are missing, and where
-#                               # to obtain each one
+#     adi models check --config models/models.example-local.yaml
 #
-# The command below is whatever starts Python on your system. On most Linux
-# and macOS installations that is python3; on Windows it is usually python,
-# because python3 there is a store shim that exits immediately.
+# The command below is whatever starts Python on your system. python3 on Linux
+# and macOS. On Windows it is usually python, because python3 there is a store
+# shim that exits immediately, so change the three commands below if the
+# backends fail to start.
 
 root: .
 
 seams:
   interpreter:
     backend: process
-    command: python
+    command: python3
     args:
       - "examples/interpreters/qwen_interpreter.py"
       - "models/interpreter/qwen3-4b-q4_k_m.gguf"
 
   transcriber:
     backend: process
-    command: python
+    command: python3
     args:
       - "examples/interpreters/speech_backends.py"
       - "transcribe"
@@ -37,7 +39,7 @@ seams:
 
   speaker:
     backend: process
-    command: python
+    command: python3
     args:
       - "examples/interpreters/speech_backends.py"
       - "speak"

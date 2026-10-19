@@ -85,6 +85,15 @@ struct VariableLine<'a> {
 #[derive(Debug, Serialize)]
 struct Request<'a> {
     utterance: &'a str,
+    /// The contract the reply must satisfy, stated by the engine rather than
+    /// remembered by the program. ADI-P 9.4.1. A backend that holds its own
+    /// copy of this has a copy that can drift, and one did: the shipped Qwen
+    /// backend's copy was missing the answer arm, so the machine could not
+    /// answer a question at all.
+    instruction: &'static str,
+    /// The same contract as a schema, narrowed to what this machine declares,
+    /// in the form a constrained decoder takes.
+    schema: &'a serde_json::Value,
     styles: &'a [String],
     materials: &'a [String],
     /// Each with its unit and what it means, rather than a bare name. A model
@@ -311,8 +320,21 @@ impl Interpreter for ProcessInterpreter {
             })
             .collect();
 
+        let schema_variables: Vec<crate::SchemaVariable<'_>> = assembled
+            .variables
+            .iter()
+            .map(|v| crate::SchemaVariable {
+                name: &v.name,
+                unit: v.unit.as_deref(),
+            })
+            .collect();
+        let schema =
+            crate::narrowed_schema(&assembled.styles, &assembled.materials, &schema_variables);
+
         let request = Request {
             utterance: &assembled.utterance,
+            instruction: crate::OUTPUT_INSTRUCTION,
+            schema: &schema,
             styles: &assembled.styles,
             materials: &assembled.materials,
             variables: &variable_lines,

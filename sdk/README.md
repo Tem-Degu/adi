@@ -35,8 +35,10 @@ D2; see [Autonomy levels](#autonomy-levels).
 ### Adding speech
 
 ```sh
+python3 -m venv .venv            # recent Linux refuses a system-wide install
+. .venv/bin/activate
 pip install -r requirements.txt
-adi models check                 # reports each missing file and its source
+adi models check --config models/models.example-local.yaml
 # obtain the three model files it names
 cargo run -p adi-cli -- run --config models/models.example-local.yaml
 ```
