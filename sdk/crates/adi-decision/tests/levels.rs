@@ -153,11 +153,7 @@ impl adi_core::domain::Domain for TestDomain {
         &self.knowledge
     }
     fn derive(&self, _: &mut adi_core::Cycle) {}
-    fn diagnose(
-        &self,
-        _: &adi_core::Cycle,
-        _: &adi_protocol::ResolvedTargets,
-    ) -> Diagnosis {
+    fn diagnose(&self, _: &adi_core::Cycle, _: &adi_protocol::ResolvedTargets) -> Diagnosis {
         Diagnosis::advisory("balanced", "nothing to correct")
     }
     fn feedback_vocabulary(&self) -> &[&str] {
@@ -370,8 +366,14 @@ fn a_plan_moving_one_variable_twice_is_refused() {
     // Both candidates move cycle_time.
     let selector = ModelActionSelector::new(
         FixedPlan(vec![
-            ProposedStep { candidate: 0, value: 25.0 },
-            ProposedStep { candidate: 1, value: 10.0 },
+            ProposedStep {
+                candidate: 0,
+                value: 25.0,
+            },
+            ProposedStep {
+                candidate: 1,
+                value: 10.0,
+            },
         ]),
         &d,
     )
@@ -419,13 +421,22 @@ fn a_recoverable_mistake_gets_one_more_attempt() {
                 );
                 // Two steps, both moving cycle_time.
                 return Ok(vec![
-                    ProposedStep { candidate: 0, value: 25.0 },
-                    ProposedStep { candidate: 1, value: 10.0 },
+                    ProposedStep {
+                        candidate: 0,
+                        value: 25.0,
+                    },
+                    ProposedStep {
+                        candidate: 1,
+                        value: 10.0,
+                    },
                 ]);
             }
 
             self.saw_rejection.set(context.rejected.is_some());
-            Ok(vec![ProposedStep { candidate: 0, value: 25.0 }])
+            Ok(vec![ProposedStep {
+                candidate: 0,
+                value: 25.0,
+            }])
         }
     }
 
@@ -474,8 +485,14 @@ fn a_chooser_that_always_conflicts_fails_after_exactly_two_attempts() {
         ) -> Result<Vec<ProposedStep>, String> {
             self.0.set(self.0.get() + 1);
             Ok(vec![
-                ProposedStep { candidate: 0, value: 25.0 },
-                ProposedStep { candidate: 1, value: 10.0 },
+                ProposedStep {
+                    candidate: 0,
+                    value: 25.0,
+                },
+                ProposedStep {
+                    candidate: 1,
+                    value: 10.0,
+                },
             ])
         }
     }
@@ -491,7 +508,10 @@ fn a_chooser_that_always_conflicts_fails_after_exactly_two_attempts() {
         .expect_err("a plan that always conflicts must fail");
 
     assert_eq!(calls.get(), 2, "exactly two attempts, never a third");
-    assert!(matches!(err, DecisionError::ConflictingSteps { .. }), "{err:?}");
+    assert!(
+        matches!(err, DecisionError::ConflictingSteps { .. }),
+        "{err:?}"
+    );
 }
 
 /// D0 is deterministic, so a retry would ask the same question and receive the
@@ -527,8 +547,14 @@ fn a_plan_with_a_bad_step_performs_nothing() {
 
     let selector = ModelActionSelector::new(
         FixedPlan(vec![
-            ProposedStep { candidate: 0, value: 25.0 },
-            ProposedStep { candidate: 7, value: 10.0 },
+            ProposedStep {
+                candidate: 0,
+                value: 25.0,
+            },
+            ProposedStep {
+                candidate: 7,
+                value: 10.0,
+            },
         ]),
         &d,
     )
@@ -547,9 +573,165 @@ fn a_step_with_no_present_value_is_refused() {
     let planner = Planner::new(&d, Some(&s), &domain);
     let selector = ModelActionSelector::new(one(0, 25.0), &d).unwrap();
 
+    assert!(adi_decision::decide(&planner, &selector, &goals(), &ctx(), &BTreeMap::new()).is_err());
+}
+
+// --------------------------------------------- a correction that corrects
+
+/// The defect this group exists for.
+///
+/// A value equal to the setting already in force moves nothing. Before this,
+/// the engine clamped it, found it in range, sent it, recorded a correction
+/// and explained the fault it had not corrected, so the machine reported
+/// having acted on every cycle while the fault persisted. Qwen3 4B proposed
+/// exactly this on every cycle of a real session, and the session reported
+/// success each time.
+#[test]
+fn a_value_equal_to_the_present_setting_is_refused() {
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    // `position` is at 30 in `present()`.
+    let selector = ModelActionSelector::new(one(0, 30.0), &d).unwrap();
+    let err = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present())
+        .expect_err("a correction that changes nothing is not a correction");
+
+    let text = err.to_string();
     assert!(
-        adi_decision::decide(&planner, &selector, &goals(), &ctx(), &BTreeMap::new()).is_err()
+        text.contains("already in") && text.contains("change nothing"),
+        "the refusal should say the value is the one in force: {text}"
     );
+}
+
+/// The same thing through the resolution. A proposal that is not the present
+/// setting but rounds onto it moves nothing either, and the rounding happens
+/// before this is judged.
+#[test]
+fn a_value_that_rounds_onto_the_present_setting_is_refused() {
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    // `position` is declared in whole steps, so 30.4 is sent as 30.
+    let selector = ModelActionSelector::new(one(0, 30.4), &d).unwrap();
+    assert!(
+        adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present()).is_err(),
+        "30.4 snaps to the present 30 and moves nothing"
+    );
+}
+
+/// A mechanism at the end of its travel is a different situation, and the
+/// refusal says so, because the correction is to choose another candidate
+/// rather than to propose a different number for this one.
+#[test]
+fn a_mechanism_already_at_its_limit_says_so() {
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    // `position` is declared 0 to 60. Hold it at the top and ask for more.
+    let mut at_limit = present();
+    at_limit.insert("position".to_string(), Quantity::new(60.0, Unit::Step));
+
+    let selector = ModelActionSelector::new(one(0, 70.0), &d).unwrap();
+    let err = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &at_limit)
+        .expect_err("a mechanism with nothing left to give cannot serve the goal");
+
+    let text = err.to_string();
+    assert!(
+        text.contains("end of its declared range"),
+        "the refusal should name the situation: {text}"
+    );
+    assert!(
+        text.contains("different candidate"),
+        "and say what would help: {text}"
+    );
+}
+
+/// The refusal must not catch a real correction, which is the whole point of
+/// comparing against the present setting rather than against a tolerance.
+#[test]
+fn a_correction_that_moves_the_parameter_is_untouched() {
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    let selector = ModelActionSelector::new(one(0, 25.0), &d).unwrap();
+    let corrections = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present())
+        .expect("moving position from 30 to 25 is a correction");
+
+    assert_eq!(corrections[0].absolute.value, 25.0);
+    assert_eq!(corrections[0].delta.value, -5.0);
+}
+
+/// ADI-P 9.4.6: a refusal the model could correct earns one further attempt,
+/// carrying the reason. A model told that its value was the setting already in
+/// force can propose one that moves, and the cycle then completes.
+#[test]
+fn a_model_told_its_value_changed_nothing_can_correct_it() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct NoChangeOnce {
+        calls: Rc<Cell<usize>>,
+        saw_rejection: Rc<Cell<bool>>,
+    }
+
+    impl ActionChooser for NoChangeOnce {
+        fn choose(
+            &self,
+            _: &[adi_decision::Goal],
+            _: &[Candidate],
+            context: &SelectionContext<'_>,
+        ) -> Result<Vec<ProposedStep>, String> {
+            self.calls.set(self.calls.get() + 1);
+
+            if self.calls.get() == 1 {
+                // The present setting, which is what the small model proposed.
+                return Ok(vec![ProposedStep {
+                    candidate: 0,
+                    value: 30.0,
+                }]);
+            }
+
+            self.saw_rejection.set(context.rejected.is_some());
+            Ok(vec![ProposedStep {
+                candidate: 0,
+                value: 23.0,
+            }])
+        }
+    }
+
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    let calls = Rc::new(Cell::new(0));
+    let saw_rejection = Rc::new(Cell::new(false));
+    let selector = ModelActionSelector::new(
+        NoChangeOnce {
+            calls: Rc::clone(&calls),
+            saw_rejection: Rc::clone(&saw_rejection),
+        },
+        &d,
+    )
+    .unwrap();
+
+    let corrections = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present())
+        .expect("the second attempt moves the parameter");
+
+    assert_eq!(calls.get(), 2, "the refusal must be retried once");
+    assert!(
+        saw_rejection.get(),
+        "the second attempt must be told why the first was refused"
+    );
+    assert_eq!(corrections[0].absolute.value, 23.0);
 }
 
 // ------------------------------------------------------------ the model seam
@@ -674,10 +856,7 @@ fn a_plan_may_serve_several_goals_at_once() {
     let domain = TestDomain::new();
     let planner = Planner::new(&d, Some(&s), &domain);
 
-    let both = vec![
-        wants("cycle_time", 4.0),
-        wants("additive_volume", 6.0),
-    ];
+    let both = vec![wants("cycle_time", 4.0), wants("additive_volume", 6.0)];
 
     // The candidate list now spans both variables.
     let variables: Vec<VariableId> = both
@@ -712,10 +891,7 @@ fn d2_may_propose_a_magnitude_for_each_goal() {
     let domain = TestDomain::new();
     let planner = Planner::new(&d, Some(&s), &domain);
 
-    let both = vec![
-        wants("cycle_time", 4.0),
-        wants("additive_volume", 6.0),
-    ];
+    let both = vec![wants("cycle_time", 4.0), wants("additive_volume", 6.0)];
     let variables: Vec<VariableId> = both
         .iter()
         .filter_map(|g| g.target_variable.clone())
@@ -735,8 +911,7 @@ fn d2_may_propose_a_magnitude_for_each_goal() {
     .collect();
 
     let selector = ModelActionSelector::new(FixedPlan(steps), &d).unwrap();
-    let corrections =
-        adi_decision::decide(&planner, &selector, &both, &ctx(), &present()).unwrap();
+    let corrections = adi_decision::decide(&planner, &selector, &both, &ctx(), &present()).unwrap();
 
     assert_eq!(corrections.len(), 2);
     for c in &corrections {
@@ -758,8 +933,14 @@ fn two_steps_on_one_variable_are_still_refused() {
 
     let selector = ModelActionSelector::new(
         FixedPlan(vec![
-            ProposedStep { candidate: 0, value: 25.0 },
-            ProposedStep { candidate: 1, value: 10.0 },
+            ProposedStep {
+                candidate: 0,
+                value: 25.0,
+            },
+            ProposedStep {
+                candidate: 1,
+                value: 10.0,
+            },
         ]),
         &d,
     )
@@ -816,7 +997,9 @@ fn d1_must_answer_every_goal() {
         }
     }
 
-    let selector = ModelToolSelector { chooser: AnswersOnce };
+    let selector = ModelToolSelector {
+        chooser: AnswersOnce,
+    };
     let two = vec![wants("cycle_time", 4.0), wants("additive_volume", 6.0)];
     assert!(matches!(
         selector.select(&two, &candidates(), &ctx()),

@@ -29,15 +29,17 @@
 //! matters. The refusal is the point of the level system, not an inconvenience.
 
 use adi_core::domain::Diagnosis;
-use adi_core::plan::{Candidate, Correction, Planner};
 use adi_core::memory::Memory;
+use adi_core::plan::{Candidate, Correction, Planner};
 use adi_core::record::{DecisionRecord, SelectedBy};
 use adi_core::Cycle;
-use adi_protocol::units::Quantity;
 use adi_protocol::ids::VariableId;
+use adi_protocol::units::Quantity;
 use adi_protocol::{Declaration, Intent, SemanticId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum AutonomyLevel {
     /// Engine chooses tools and values. Fully reproducible.
@@ -143,7 +145,9 @@ impl<'a> SelectionContext<'a> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DecisionError {
-    #[error("D2 requires a declaration with stateful invariants or rate limits; this one has neither")]
+    #[error(
+        "D2 requires a declaration with stateful invariants or rate limits; this one has neither"
+    )]
     StatefulEnvelopeRequired,
     #[error("autonomy level {0} needs a model backend; construct the selector directly with one")]
     NoModelBackend(&'static str),
@@ -696,13 +700,12 @@ fn attempt(
 
     let mut out = Vec::with_capacity(resolved.len());
     for (step, chosen) in resolved {
-        let present = current
-            .get(&chosen.parameter)
-            .copied()
-            .ok_or_else(|| DecisionError::MalformedSelection(format!(
+        let present = current.get(&chosen.parameter).copied().ok_or_else(|| {
+            DecisionError::MalformedSelection(format!(
                 "no present value for parameter '{}'",
                 chosen.parameter
-            )))?;
+            ))
+        })?;
 
         // The goal this step serves, found by the variable its candidate moves.
         // A step whose candidate answers no goal cannot be planned, because the
@@ -713,12 +716,65 @@ fn attempt(
             .ok_or_else(|| DecisionError::UndeclaredSelection(chosen.tool.0.clone()))?;
 
         let correction = match step.value {
-            Some(value) => planner.plan_value(&chosen.variable, chosen, present, value)?,
+            Some(value) => {
+                let correction = planner.plan_value(&chosen.variable, chosen, present, value)?;
+                changes_something(&correction, chosen)?;
+                correction
+            }
             None => planner.plan(goal, chosen, present)?,
         };
         out.push(correction);
     }
     Ok(out)
+}
+
+/// Refuse a correction that would alter nothing, and say which kind it is.
+///
+/// Only D2 reaches this, because only D2 supplies the value. At D0 and D1 the
+/// engine sizes the correction from the desired change and the mechanism's
+/// response, and a small or clamped result there is the arithmetic working.
+/// A value chosen elsewhere is a different matter: equal to the setting in
+/// force, it moves nothing, and the engine would otherwise send it, record a
+/// correction, and explain the fault it did not correct. The machine then
+/// reports having acted on every cycle while the fault persists, which is a
+/// worse failure than refusing, because refusing is visible.
+///
+/// `Range::exceeds` already states the same principle for the neighbouring
+/// case: a value held at the end of its range is recorded as clamped, so that
+/// a person can tell a small adjustment from no adjustment at all. This is the
+/// case where there was no adjustment.
+///
+/// The delta is compared against zero exactly rather than against a tolerance.
+/// `plan_value` has already snapped the value to the declared resolution, so a
+/// proposal that rounds onto the present setting arrives here as exactly zero,
+/// and a proposal that moves the parameter onto its grid from off it is a real
+/// change that should not be refused.
+///
+/// Both refusals are `MalformedSelection`, which ADI-P 9.4.6 permits one
+/// further attempt at, and the reason reaches the model as `rejected`. The two
+/// messages differ because the corrections differ: one asks for a value that
+/// moves, and one says this mechanism has nothing left to give and another
+/// candidate is needed.
+fn changes_something(correction: &Correction, chosen: &Candidate) -> Result<(), DecisionError> {
+    if correction.delta.value != 0.0 {
+        return Ok(());
+    }
+
+    if correction.clamped_from.is_some() {
+        return Err(DecisionError::MalformedSelection(format!(
+            "'{}' is already at the end of its declared range, so the value \
+             proposed cannot move '{}' any further. Choose a different \
+             candidate, or return no steps if none can serve the goal.",
+            chosen.parameter, chosen.variable.0
+        )));
+    }
+
+    Err(DecisionError::MalformedSelection(format!(
+        "the value proposed for '{}' is {} {:?}, which is the setting already \
+         in force, so it would change nothing and '{}' would not move. Propose \
+         the absolute setting the parameter should reach.",
+        chosen.parameter, correction.absolute.value, correction.absolute.unit, chosen.variable.0
+    )))
 }
 
 /// A single correction, which is the common case on the diagnosis path.
