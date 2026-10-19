@@ -942,7 +942,16 @@ pub(crate) fn start_interpreter(
                 &command,
                 &seam.args,
                 Surroundings {
-                    styles: knowledge.style_ids().into_iter().map(str::to_string).collect(),
+                    // With what each style is, not only its identifier. A
+                    // request names a style the way a person would.
+                    styles: knowledge
+                        .styles_described()
+                        .into_iter()
+                        .map(|(name, description)| adi_language::context::StyleInfo {
+                            name: name.to_string(),
+                            description: description.map(str::to_string),
+                        })
+                        .collect(),
                     materials: knowledge
                         .material_ids()
                         .into_iter()

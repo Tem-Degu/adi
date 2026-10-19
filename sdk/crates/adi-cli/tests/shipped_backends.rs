@@ -127,7 +127,13 @@ fn utterance(said: &str) -> String {
 
     serde_json::json!({
         "utterance": said,
-        "styles": styles,
+        // Each style with what it is, as `ProcessInterpreter` sends it. The
+        // schema below is narrowed from the identifiers alone, because a
+        // description is for the prompt and is not something a model emits.
+        "styles": [{
+            "name": "adi.espresso.style.espresso",
+            "description": "The standard shot."
+        }],
         "materials": [],
         "variables": [{
             "name": "shot_time",
@@ -384,6 +390,47 @@ fn nothing_the_engine_sends_on_the_spoken_path_is_dropped() {
 
     // And what was already there, so this does not pass by replacing it.
     assert!(prompt.contains("shot_time"), "the variables: {prompt}");
+}
+
+/// A style reaches the model as an identifier, and a request names one the way
+/// a person would. Without something saying what a style is, "something short
+/// and strong" can be mapped onto `adi.espresso.style.ristretto` only by a
+/// model that already knows the domain, which ADI-P 7.3 says a profile may not
+/// assume and which is never true of a style a manufacturer added.
+///
+/// Measured: a hosted model asked for a style on most requests and was scored
+/// wrong for it, because the instruction tells it not to guess a style that
+/// was not stated and nothing told it what any style was.
+#[test]
+fn a_style_reaches_the_prompt_with_what_it_is() {
+    let plan = require_python!(explain(
+        "qwen_interpreter.py",
+        &utterance("something short and strong")
+    ));
+    let prompt = plan["instruction"].as_str().expect("an instruction");
+
+    assert!(
+        prompt.contains("adi.espresso.style.espresso"),
+        "the identifier, which is what may be emitted: {prompt}"
+    );
+    assert!(
+        prompt.contains("The standard shot."),
+        "and what it is, which is what makes it selectable: {prompt}"
+    );
+}
+
+/// The description is for the prompt. A model may emit only the identifier,
+/// so narrowing must not let a description into the enum.
+#[test]
+fn a_description_does_not_reach_the_schema() {
+    let plan = require_python!(explain("qwen_interpreter.py", &utterance("an espresso")));
+    let intent = &plan["schema"]["oneOf"][0]["properties"]["intent"]["properties"];
+
+    assert_eq!(
+        intent["style"]["enum"],
+        serde_json::json!(["adi.espresso.style.espresso"]),
+        "only the identifier may be emitted, got {intent}"
+    );
 }
 
 /// The switch that stops Qwen reasoning aloud belongs in exactly one place.

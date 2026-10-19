@@ -38,17 +38,18 @@ models:
       The recommended interpreter, and the smallest measured to behave
       acceptably.
 
-      Through the shipped backend it reaches 5 of 18 on the corpus in
+      Through the shipped backend it reaches 7 of 18 on the corpus in
       eval/espresso, measured with `adi models bench --config
       models/models.example-local.yaml`. An earlier figure of 9 of 18 was taken
       with a harness that was not kept and is withdrawn. A hosted model scores
-      7 of 18 on the same corpus, and most of its misses are questions asked
+      8 of 18 on the same corpus, and most of its misses are questions asked
       where the corpus expects an action, so the corpus and the shipped
       instruction disagree and the figure understates the seam. See Recommended
       models in sdk/README.md.
 
       Latency is the open problem. On four shared cloud cores the median is 16
-      seconds and the 95th percentile is 66, which is unusable for speech.
+      to 18 seconds and the 95th percentile is 66 or worse, which is unusable
+      for speech.
       Measure on the board you intend to ship before committing to a voice
       interface.
 

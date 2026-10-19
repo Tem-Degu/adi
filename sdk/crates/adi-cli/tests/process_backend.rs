@@ -40,10 +40,18 @@ fn script() -> String {
         .into_owned()
 }
 
-fn styles() -> Vec<String> {
+/// Two styles, one described and one not, since the knowledge may say nothing
+/// about a style it declares.
+fn styles() -> Vec<adi_language::context::StyleInfo> {
     vec![
-        "adi.espresso.style.espresso".into(),
-        "adi.espresso.style.lungo".into(),
+        adi_language::context::StyleInfo {
+            name: "adi.espresso.style.espresso".into(),
+            description: Some("The standard shot.".into()),
+        },
+        adi_language::context::StyleInfo {
+            name: "adi.espresso.style.lungo".into(),
+            description: None,
+        },
     ]
 }
 
@@ -252,7 +260,7 @@ fn a_programs_answer_is_validated_like_any_other() {
                 intent
                     .style
                     .as_deref()
-                    .is_none_or(|s| styles().iter().any(|declared| declared == s)),
+                    .is_none_or(|s| styles().iter().any(|declared| declared.name == s)),
                 "a backend must not invent a style the machine does not declare"
             );
         }

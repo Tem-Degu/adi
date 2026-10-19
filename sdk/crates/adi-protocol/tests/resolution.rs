@@ -131,11 +131,13 @@ fn a_cycle_at_resolution_time_is_reported() {
     b.styles = vec![
         StyleEntry {
             id: "a".into(),
+            description: None,
             inherits: Some("b".into()),
             targets: BTreeMap::new(),
         },
         StyleEntry {
             id: "b".into(),
+            description: None,
             inherits: Some("a".into()),
             targets: BTreeMap::new(),
         },

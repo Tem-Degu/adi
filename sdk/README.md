@@ -363,20 +363,27 @@ confirmed against files freshly obtained from the published sources.
 
 **On corpus accuracy, read this before quoting a figure.** Through the shipped
 backend, `adi models bench --config models/models.example-local.yaml` scores
-Qwen 3 4B Q4 at **5 of 18**, and a hosted model at **7 of 18**. Earlier
-documents here quoted 9 of 18; that was measured with a harness written for
-the occasion which was not kept, so it is not reproducible and is withdrawn.
+Qwen 3 4B Q4 at **7 of 18**, and a hosted model at **8 of 18**. Earlier
+documents here quoted 9 of 18; that was measured with a harness written for the
+occasion which was not kept, so it is not reproducible and is withdrawn.
 
-A capable model scoring 7 of 18 is a statement about the corpus rather than
-about the model. Nine of its eleven misses are questions asked where the corpus
-expects an action, and the model is obeying our own instruction when it asks:
-the instruction says not to guess a style that was not stated, several cases
-expect a style to be inferred from a description such as "something short and
-strong", and styles reach the model as bare identifiers while variables are
-sent with their units and meanings. Until the instruction and the corpus agree,
-and styles carry descriptions, this number measures that disagreement as much
-as it measures a model. It is reported rather than quietly improved because a
-measurement nobody can reproduce is what produced the figure it replaces.
+Both figures rose by giving styles a description. A style reaches a model as an
+identifier, and a request names one the way a person would, so mapping
+"something short and strong" onto `adi.espresso.style.ristretto` was possible
+only for a model that already knew the domain. Describing the four espresso
+styles took the local model from 5 of 18 to 7 and the hosted one from 7 to 8,
+which is the same reasoning that already applied to a variable's meaning and a
+tool's description.
+
+**A capable model scoring 8 of 18 is still a statement about the corpus.** Most
+of its remaining misses are questions asked where the corpus expects an action,
+and it is obeying the instruction when it asks: the instruction says not to
+guess a style that was not stated, and several cases expect a style to be
+inferred or omitted entirely. Nothing tells a model that `style` may be left
+out, or when `adjust` is meant rather than `produce`. Until the instruction and
+the corpus agree, this number measures that disagreement as much as it measures
+a model. It is reported rather than quietly improved, because a measurement
+nobody could reproduce is what produced the figure it replaces.
 
 Qwen 3 1.7B is listed in the manifest and **not recommended**. On the shipped
 corpus it reached 3 of 18, and it never asked a question where asking was the
@@ -399,7 +406,7 @@ running as the engine keeps them:
 |---|---|---|---|
 | Speaker | Piper medium | **0.2 s** for 3 s of speech, 12x realtime | comfortable |
 | Transcriber | Moonshine base | around 2 s for a short utterance | acceptable |
-| Interpreter | Qwen 3 4B Q4 | **16 s median, 66 s at p95** | **unusable for speech** |
+| Interpreter | Qwen 3 4B Q4 | **16 to 18 s median, 66 s at p95 or worse** | **unusable for speech** |
 | Interpreter | a hosted model | **3.6 s median, 14 s at p95** | still above two seconds |
 
 Reproduce either row with `adi models bench --config <file.yaml>`. The
@@ -459,7 +466,9 @@ language.
 
 ```
 interpreter  -> {"utterance":"half of last time","instruction":"...",
-                 "schema":{...},"styles":[...],"variables":[...],
+                 "schema":{...},
+                 "styles":[{"name":"...","description":"..."}],
+                 "variables":[...],"materials":[...],
                  "notes":[...],"machine":"...","history":[...]}
              <- {"intent":{"kind":"produce","targets":{...}}}
              or {"clarify":{"question":"...","because":"..."}}
@@ -480,6 +489,14 @@ speaker      -> {"text":"..."}
 ```
 
 Audio is base64 of 16-bit signed, little endian, single channel samples.
+
+A style carries what it is, as a variable carries its meaning and a tool its
+description. A request names a style the way a person would, and an identifier
+alone can be mapped onto one only by a model that already knows the domain,
+which ADI-P 7.3 says a profile may not assume and which is never true of a
+style a manufacturer added. A description may influence which style is chosen
+and reaches no actuation value: the targets a style sets are what actuates, and
+they are validated.
 
 `instruction` and `schema` carry the contract itself. The engine owns what a
 reply may be, narrows the schema to the styles, materials, variables and units
@@ -765,7 +782,9 @@ board.
   envelope refuses. A hosted model completes the cycle correctly. D0 and D1 are
   unaffected, because the engine computes the value at both.
 - **The evaluation corpus and the shipped instruction disagree**, so the
-  accuracy figure understates the seam. See the note under Recommended models.
+  accuracy figure understates the seam. The instruction does not say that a
+  style may be omitted, or when `adjust` is meant rather than `produce`, and
+  several cases require both. See the note under Recommended models.
 - **`adi models check` does not inspect a process backend's weights.** A
   program supplies its own, and its identity is the command, so the report
   says a seam is served without opening a model file. An empty `models/` can

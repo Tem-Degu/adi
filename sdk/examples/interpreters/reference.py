@@ -12,7 +12,8 @@ It exists to demonstrate the boundary rather than to interpret well. The rules
 below are deliberately simple, and a real backend would put a language model
 here. What a real backend would not change is the contract:
 
-  in   {"utterance": "...", "styles": [...], "materials": [...],
+  in   {"utterance": "...", "styles": [{"name": "...", "description": "..."}],
+        "materials": [...],
         "variables": [{"name": "...", "unit": "s", "meaning": "..."}],
          "remembered": [...], "history": [...]}
 
@@ -93,17 +94,35 @@ def intent(kind, style=None, targets=None):
 
 
 def find_style(words, styles):
-    """Match a spoken word against a declared style identifier.
+    """Match a spoken word against a declared style.
 
-    Only identifiers the machine actually declared are considered. A backend
-    that invented one would produce an intent the engine refuses, which is
-    safe but unhelpful, and the refusal would arrive as a fault rather than as
-    a question.
+    Each style arrives as an object carrying its identifier and, where the
+    knowledge says, what it is. A real model reads the description, which is
+    what lets "something short and strong" reach a ristretto without the word
+    appearing in the identifier. This matches on the identifier's last segment,
+    then on a word of the description, because the point here is the shape of
+    the reply rather than the quality of the language.
+
+    Only styles the machine actually declared are considered. A backend that
+    invented one would produce an intent the engine refuses, which is safe but
+    unhelpful, and the refusal would arrive as a fault rather than as a
+    question.
     """
     for style in styles:
-        leaf = style.rsplit(".", 1)[-1].lower()
-        if leaf in words:
-            return style
+        name = style.get("name", "")
+        if name.rsplit(".", 1)[-1].lower() in words:
+            return name
+
+    # Then the description, where one was supplied. Words of four letters or
+    # fewer are dropped: without that, "the" and "with" match every style and
+    # the first one wins every request.
+    for style in styles:
+        described = (style.get("description") or "").lower()
+        if not described:
+            continue
+        distinctive = {w for w in re.findall(r"[a-z]+", described) if len(w) > 4}
+        if distinctive & words:
+            return style.get("name", "")
     return None
 
 
@@ -254,7 +273,9 @@ def interpret(request):
     # more useful than producing something else.
     if words & {"make", "get", "like", "want", "please"}:
         return answer(
-            "I can make: " + ", ".join(s.rsplit(".", 1)[-1] for s in styles) + ". Which?",
+            "I can make: "
+            + ", ".join(s.get("name", "").rsplit(".", 1)[-1] for s in styles)
+            + ". Which?",
             "no declared style matched the request",
         )
 

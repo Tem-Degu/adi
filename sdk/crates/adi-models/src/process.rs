@@ -38,7 +38,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 
 use adi_decision::{accept_intent, DecisionError, Interpreter, SelectionContext, Understood};
-use adi_language::context::{ContextBudget, ModelContext, VariableInfo};
+use adi_language::context::{ContextBudget, ModelContext, StyleInfo, VariableInfo};
 use serde::Serialize;
 
 use crate::ModelError;
@@ -50,8 +50,10 @@ use crate::ModelError;
 /// worth being able to read in one place.
 #[derive(Debug, Default, Clone)]
 pub struct Surroundings {
-    /// Styles the knowledge declares, which an intent may name.
-    pub styles: Vec<String>,
+    /// Styles the knowledge declares, which an intent may name, each with
+    /// what it is. A style reaches a model as an identifier, and a request
+    /// names one the way a person would.
+    pub styles: Vec<StyleInfo>,
     /// Materials the knowledge declares.
     pub materials: Vec<String>,
     /// Variables the profile models, each with its unit and meaning.
@@ -61,6 +63,14 @@ pub struct Surroundings {
     pub notes: Vec<adi_protocol::knowledge::Note>,
     /// What this machine is, where the caller knows.
     pub device: Option<String>,
+}
+
+/// A style as the backend is told about it.
+#[derive(Debug, Serialize)]
+struct StyleLine<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
 }
 
 /// A note as the backend is told about it.
@@ -94,7 +104,7 @@ struct Request<'a> {
     /// The same contract as a schema, narrowed to what this machine declares,
     /// in the form a constrained decoder takes.
     schema: &'a serde_json::Value,
-    styles: &'a [String],
+    styles: &'a [StyleLine<'a>],
     materials: &'a [String],
     /// Each with its unit and what it means, rather than a bare name. A model
     /// cannot map a request onto a variable it has only been shown the name of.
@@ -133,7 +143,7 @@ struct HistoryLine {
 pub struct ProcessInterpreter {
     inner: Mutex<Pipe>,
     budget: ContextBudget,
-    knowledge_styles: Vec<String>,
+    knowledge_styles: Vec<StyleInfo>,
     knowledge_materials: Vec<String>,
     variables: Vec<VariableInfo>,
     /// Every note the knowledge holds, filtered per utterance.
@@ -301,6 +311,15 @@ impl Interpreter for ProcessInterpreter {
             );
         }
 
+        let style_lines: Vec<StyleLine<'_>> = assembled
+            .styles
+            .iter()
+            .map(|s| StyleLine {
+                name: &s.name,
+                description: s.description.as_deref(),
+            })
+            .collect();
+
         let variable_lines: Vec<VariableLine<'_>> = assembled
             .variables
             .iter()
@@ -328,14 +347,17 @@ impl Interpreter for ProcessInterpreter {
                 unit: v.unit.as_deref(),
             })
             .collect();
+        // The schema is narrowed from the identifiers. A description is for the
+        // prompt and is not something a model may emit.
+        let style_names: Vec<String> = assembled.styles.iter().map(|s| s.name.clone()).collect();
         let schema =
-            crate::narrowed_schema(&assembled.styles, &assembled.materials, &schema_variables);
+            crate::narrowed_schema(&style_names, &assembled.materials, &schema_variables);
 
         let request = Request {
             utterance: &assembled.utterance,
             instruction: crate::OUTPUT_INSTRUCTION,
             schema: &schema,
-            styles: &assembled.styles,
+            styles: &style_lines,
             materials: &assembled.materials,
             variables: &variable_lines,
             notes: &note_lines,

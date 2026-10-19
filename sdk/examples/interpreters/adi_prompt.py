@@ -37,8 +37,16 @@ def context_lines(request):
     if request.get("machine"):
         lines.append("this machine: " + request["machine"])
 
+    # Each with what it is, where the knowledge says. A request names a style
+    # the way a person would, so "something short and strong" reaches
+    # adi.espresso.style.ristretto only if something says what a ristretto is.
     if request.get("styles"):
-        lines.append("styles: " + ", ".join(request["styles"]))
+        lines.append("styles:")
+        for style in request["styles"]:
+            name = style.get("name", "?")
+            description = (style.get("description") or "").strip()
+            lines.append("  {}: {}".format(name, description) if description
+                         else "  " + name)
     if request.get("materials"):
         lines.append("materials: " + ", ".join(request["materials"]))
     if request.get("variables"):

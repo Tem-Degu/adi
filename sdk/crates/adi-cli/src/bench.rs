@@ -44,6 +44,13 @@ struct Expectation {
     /// Present when asking is the correct answer.
     #[serde(default)]
     clarify: Option<serde_json::Value>,
+    /// Present when the utterance was a question and answering it is correct.
+    ///
+    /// ADI-P 9.4.5. The corpus carries no case of this kind yet, which is the
+    /// same blind spot that let a backend ship unable to answer at all: the
+    /// suite cannot measure a path it never exercises.
+    #[serde(default)]
+    answer: Option<serde_json::Value>,
 }
 
 enum Verdict {
@@ -279,7 +286,35 @@ fn judge(case: &Case, answer: Result<Understood, adi_decision::DecisionError>) -
             }
         }
 
-        _ => Verdict::Failed("the case states neither an intent nor a question".into()),
+        // Answering was correct, and it answered. The text is not compared:
+        // there is no single right wording, and scoring prose against a
+        // reference would measure similarity to one phrasing. What is checked
+        // is that the machine answered rather than acting, which is the
+        // distinction ADI-P 9.4.5 draws and the one that matters.
+        (None, None, Understood::Answer { .. }) if case.expect.answer.is_some() => {
+            Verdict::Correct
+        }
+
+        // It answered where the case wanted something else. Reported as what
+        // it is: before this, every answer fell to the arm below and was
+        // reported as a defect in the case, which was never true.
+        (_, _, Understood::Answer { text, .. }) => Verdict::WrongKind(format!(
+            "answered '{}' rather than {}",
+            text.chars().take(60).collect::<String>().trim(),
+            if case.expect.clarify.is_some() { "asking" } else { "acting" }
+        )),
+
+        // Answering was correct and it did something else.
+        (None, None, Understood::Intent(_)) => {
+            Verdict::WrongKind("acted on a question that should have been answered".into())
+        }
+        (None, None, Understood::Clarify { question, .. }) => {
+            Verdict::WrongKind(format!("asked '{question}' rather than answering"))
+        }
+
+        _ => Verdict::Failed(
+            "the case states more than one of intent, clarify and answer".into(),
+        ),
     }
 }
 
@@ -334,6 +369,7 @@ mod tests {
         Expectation {
             intent: Some(json),
             clarify: None,
+            answer: None,
         }
     }
 
@@ -341,6 +377,48 @@ mod tests {
         Expectation {
             intent: None,
             clarify: Some(serde_json::json!({ "because": "ambiguous" })),
+            answer: None,
+        }
+    }
+
+    fn expects_answer() -> Expectation {
+        Expectation {
+            intent: None,
+            clarify: None,
+            answer: Some(serde_json::json!({})),
+        }
+    }
+
+    fn answered() -> Understood {
+        Understood::Answer {
+            text: "Example Appliances EX-900.".into(),
+            drew_on: Vec::new(),
+        }
+    }
+
+    /// ADI-P 9.4.5. Before this, an answer matched no arm and was reported as
+    /// a defect in the case, which blamed the corpus for the one path it could
+    /// not score.
+    #[test]
+    fn an_answer_is_scored_rather_than_blamed_on_the_case() {
+        assert!(matches!(
+            judge(&case("q", expects_answer()), Ok(answered())),
+            Verdict::Correct
+        ));
+    }
+
+    #[test]
+    fn answering_where_acting_was_correct_is_reported_as_that() {
+        let verdict = judge(
+            &case("a", expects_intent(serde_json::json!({ "kind": "produce" }))),
+            Ok(answered()),
+        );
+        match verdict {
+            Verdict::WrongKind(why) => {
+                assert!(why.contains("answered"), "got {why}");
+                assert!(why.contains("acting"), "got {why}");
+            }
+            _ => panic!("expected a wrong kind"),
         }
     }
 

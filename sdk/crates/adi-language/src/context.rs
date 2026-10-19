@@ -61,8 +61,13 @@ impl Default for ContextBudget {
 pub struct ModelContext {
     /// What the person said.
     pub utterance: String,
-    /// Style identifiers this machine's knowledge declares.
-    pub styles: Vec<String>,
+    /// Styles this machine's knowledge declares, each with what it is.
+    ///
+    /// Carried with a description for the same reason a variable is carried
+    /// with its meaning: a request names a style the way a person would, and
+    /// an identifier alone can be mapped onto one only by a model that already
+    /// knows the domain.
+    pub styles: Vec<StyleInfo>,
     /// Material identifiers this machine's knowledge declares.
     pub materials: Vec<String>,
     /// Variables the engine models, so a model knows what it may name.
@@ -129,8 +134,16 @@ pub struct NoteLine {
     pub text: String,
 }
 
-/// A variable as the model is told about it.
+/// A style as the model is told about it.
 #[derive(Debug, Clone, PartialEq)]
+pub struct StyleInfo {
+    pub name: String,
+    /// Absent where the knowledge declares a style and says nothing about it.
+    pub description: Option<String>,
+}
+
+/// A variable as the model is told about it.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct VariableInfo {
     pub name: String,
     /// Absent where the profile models a variable its knowledge does not
@@ -150,7 +163,14 @@ impl ModelContext {
     ) -> Self {
         let mut built = Self {
             utterance: utterance.to_string(),
-            styles: knowledge.style_ids().into_iter().map(str::to_string).collect(),
+            styles: knowledge
+                .styles_described()
+                .into_iter()
+                .map(|(name, description)| StyleInfo {
+                    name: name.to_string(),
+                    description: description.map(str::to_string),
+                })
+                .collect(),
             materials: knowledge.material_ids().into_iter().map(str::to_string).collect(),
             variables: variables
                 .iter()
@@ -296,7 +316,17 @@ impl ModelContext {
         }
 
         if !self.styles.is_empty() {
-            let _ = writeln!(out, "styles: {}", self.styles.join(", "));
+            let _ = writeln!(out, "styles:");
+            for style in &self.styles {
+                match &style.description {
+                    Some(description) => {
+                        let _ = writeln!(out, "  {}: {}", style.name, description);
+                    }
+                    None => {
+                        let _ = writeln!(out, "  {}", style.name);
+                    }
+                }
+            }
         }
         if !self.materials.is_empty() {
             let _ = writeln!(out, "materials: {}", self.materials.join(", "));

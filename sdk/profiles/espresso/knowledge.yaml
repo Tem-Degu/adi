@@ -75,24 +75,39 @@ variables:
 
 styles:
   - id: "adi.espresso.style.espresso"
+    description: >
+      The standard shot. Around twice the weight of the dry coffee, in the
+      mid twenties to low thirties of seconds. The default where someone
+      asks for coffee without saying which kind.
     targets:
       ratio:            { min: 1.8,  max: 2.4,  unit: none }
       shot_time:        { min: 25.0, max: 32.0, unit: s }
       brew_temperature: { min: 90.0, max: 96.0, resolution: 0.5, unit: c }
 
   - id: "adi.espresso.style.ristretto"
+    description: >
+      A short, concentrated shot. Less liquid for the same dry coffee, so it
+      tastes stronger, sweeter and heavier in the mouth. What someone means
+      by short, strong, concentrated or intense.
     inherits: "adi.espresso.style.espresso"
     targets:
       ratio:     { min: 1.2,  max: 1.8,  unit: none }
       shot_time: { min: 22.0, max: 30.0, unit: s }
 
   - id: "adi.espresso.style.lungo"
+    description: >
+      A long shot. More liquid for the same dry coffee, so it is weaker,
+      lighter and more bitter, and fills a larger cup. What someone means by
+      long, tall, mild or diluted.
     inherits: "adi.espresso.style.espresso"
     targets:
       ratio:     { min: 3.0,  max: 4.0,  unit: none }
       shot_time: { min: 28.0, max: 40.0, unit: s }
 
   - id: "adi.espresso.style.for_milk"
+    description: >
+      A shot built to be mixed with milk, so it stays tasteable once the milk
+      is in. The base of a flat white, a latte, a cappuccino or a cortado.
     inherits: "adi.espresso.style.espresso"
     targets:
       ratio:     { min: 1.5,  max: 2.0,  unit: none }

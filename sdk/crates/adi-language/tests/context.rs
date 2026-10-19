@@ -282,7 +282,10 @@ fn notes_are_the_first_thing_a_tight_budget_drops() {
         adi_language::context::NoteLine { id: "a".into(), text: "x ".repeat(400) },
         adi_language::context::NoteLine { id: "b".into(), text: "y ".repeat(400) },
     ];
-    context.styles = vec!["adi.example.style.one".into()];
+    context.styles = vec![adi_language::context::StyleInfo {
+        name: "adi.example.style.one".into(),
+        description: None,
+    }];
 
     context.enforce(ContextBudget {
         remembered_cycles: 3,

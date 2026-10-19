@@ -235,6 +235,21 @@ pub struct Extends {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StyleEntry {
     pub id: String,
+    /// What this style is, in the domain's own words.
+    ///
+    /// Read by no engine logic. It exists because a style reaches a model as
+    /// an identifier, and a request names a style the way a person would: a
+    /// model asked to map "something short and strong" onto
+    /// `adi.espresso.style.ristretto` can only do so if it already knows the
+    /// domain, which is not a property a profile may assume and is never true
+    /// of a style a manufacturer added.
+    ///
+    /// The same reasoning as a variable's meaning and a tool's description,
+    /// and the same limit: it may influence which style is chosen and can
+    /// reach no actuation value, because the targets below are what a style
+    /// actually sets and they are validated.
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default)]
     pub inherits: Option<String>,
     #[serde(default)]
@@ -885,6 +900,32 @@ impl Knowledge {
     }
 
     /// Every style the machine can be asked for, across all layers.
+    /// Every declared style with its description, newest layer first for a
+    /// given identifier, sorted for a stable prompt.
+    ///
+    /// `style_ids` remains for callers that only need the identifiers, such as
+    /// validating that an intent named a style this machine has.
+    pub fn styles_described(&self) -> Vec<(&str, Option<&str>)> {
+        let mut out: Vec<(&str, Option<&str>)> = Vec::new();
+        for layer in &self.layers {
+            for style in &layer.styles {
+                let described = style.description.as_deref().map(str::trim);
+                match out.iter_mut().find(|(id, _)| *id == style.id.as_str()) {
+                    // A later layer may supply a description where an earlier
+                    // one had none. It may not remove one.
+                    Some(entry) => {
+                        if described.is_some() {
+                            entry.1 = described;
+                        }
+                    }
+                    None => out.push((style.id.as_str(), described)),
+                }
+            }
+        }
+        out.sort_unstable_by_key(|(id, _)| *id);
+        out
+    }
+
     pub fn style_ids(&self) -> Vec<&str> {
         let mut ids: Vec<&str> = self
             .layers
