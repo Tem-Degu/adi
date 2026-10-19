@@ -144,6 +144,10 @@ If the request cannot be resolved, ask instead:
 Asking is a correct answer. Do not guess a value, a style or a cycle that was
 not stated: the result of this request moves a machine.
 
+State relations rather than resolving them. \"Half of last time\" is
+{\"of\": \"last\", \"scale\": 0.5}, never a number. The engine holds the memory
+and does the arithmetic.
+
 If the person asked a question rather than requesting anything, answer it:
   {\"answer\": {\"text\": \"<what to say>\", \"drew_on\": [\"<note id>\"]}}
 
@@ -359,6 +363,28 @@ mod tests {
     fn round_trip(value: &Understood) -> Understood {
         let json = serde_json::to_string(value).expect("serialises");
         serde_json::from_str(&json).expect("and comes back")
+    }
+
+    /// ADI-P 9.4 is normative: a relative target MUST be resolved by the
+    /// engine and not by the model, because a model required to emit a number
+    /// would have to be trusted to remember correctly and to divide correctly,
+    /// and would be wrong silently when it did not.
+    ///
+    /// The instruction has to say so. This paragraph was in the shipped Qwen
+    /// backend's own copy and not in this one, so consolidating the two
+    /// removed it, and the corpus went from nine of eighteen to four: the
+    /// cases that failed were the relative ones.
+    #[test]
+    fn the_instruction_says_to_state_a_relation_rather_than_resolve_it() {
+        let lower = OUTPUT_INSTRUCTION.to_lowercase();
+        assert!(
+            lower.contains("state relations rather than resolving them"),
+            "a model told nothing about this resolves them itself"
+        );
+        assert!(
+            OUTPUT_INSTRUCTION.contains("\"scale\": 0.5"),
+            "with the worked example, which is what made it land"
+        );
     }
 
     /// The arm the shipped backend's own copy was missing. A machine that

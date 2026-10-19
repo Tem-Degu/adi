@@ -383,14 +383,18 @@ request**.
 
 | Tier | Board class | Interpreter | Suits |
 |---|---|---|---|
-| Minimal | Raspberry Pi 5, 8 GB | Qwen 3 1.7B Q4 | Evaluation, and a product where a short pause is acceptable |
-| Standard | RK3588 class | Qwen 3 4B Q4 | A premium appliance, where the voice interaction should feel immediate |
-| Custom | Whatever you measure | Any | Measured with `adi models bench` |
+| Standard | RK3588 class | Qwen 3 4B Q4 | The smallest local model measured to behave acceptably |
+| Hosted | Any, with a network | A hosted model | Where the interpreter latency below rules out a local one |
+| Custom | Whatever you measure | Any | Measured with `adi models bench --config` |
 
-No board in that table has been measured. The only figures this project has
-taken are in [`sdk/README.md`](./sdk/README.md), on four shared cloud cores with
-no accelerator, where the interpreter took **18 seconds**. That is not a usable
-wait for speech.
+No board in that table has been measured. The figures this project has taken
+are in [`sdk/README.md`](./sdk/README.md), on four shared cloud cores with no
+accelerator, where the interpreter's median was **16 seconds**. That is not a
+usable wait for speech.
+
+Qwen 3 1.7B is **not recommended** and is not a tier. It reached 3 of 18 on the
+evaluation corpus and never asked a question where asking was correct, which is
+the wrong direction to fail in: an ambiguous request becomes a physical action.
 
 Published latency figures come from other hardware and other prompts, so they do
 not transfer. `adi models bench` runs the evaluation corpus against your
@@ -469,8 +473,10 @@ line with. Backends are supplied, so obtaining the model files and pointing a
 configuration at them is the whole of the setup:
 
 ```sh
+python3 -m venv .venv            # recent Linux refuses a system-wide install
+. .venv/bin/activate
 pip install -r requirements.txt
-cargo run -p adi-cli -- models check     # names each missing file and its source
+cargo run -p adi-cli -- models check --config models/models.example-local.yaml
 # obtain the files it names
 cargo run -p adi-cli -- run --config models/models.example-local.yaml
 ```
@@ -549,6 +555,17 @@ Not yet done:
   them and exchanges one message per line, so a developer supplies model files
   and writes no code. Backends that load models through ONNX Runtime and
   llama.cpp directly are not implemented.
+- **A local model of the recommended size does not complete a correction at
+  D2.** Qwen 3 4B Q4 selects the right mechanism consistently and does not
+  reliably compute the value, so a D2 correction is refused rather than
+  carried out. A hosted model does complete it. D0 is unaffected, since the
+  engine computes the value there. `sdk/README.md` carries the measurements.
+- **The evaluation corpus and the shipped instruction disagree.** Several
+  cases expect a style to be inferred from a description, while the
+  instruction tells the model not to guess a style that was not stated, and
+  styles reach the model as bare identifiers with no descriptions. A capable
+  model therefore asks a question and is scored wrong for it. The corpus
+  figures understate what the seam does until one of the two is changed.
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic.
 - **No port to physical hardware.** `libadip` compiles for Cortex-M and

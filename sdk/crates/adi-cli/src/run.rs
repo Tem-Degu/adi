@@ -905,7 +905,12 @@ fn load_interpreter(
     }
 }
 
-fn start_interpreter(
+/// Build whichever interpreter the configuration names.
+///
+/// Shared with `adi models bench`, which needs the same backend a session
+/// uses. Measuring a model through a second construction of it would measure
+/// the second construction.
+pub(crate) fn start_interpreter(
     config_path: Option<&Path>,
     domain: &dyn adi_core::domain::Domain,
     device: &adi_protocol::declaration::Device,

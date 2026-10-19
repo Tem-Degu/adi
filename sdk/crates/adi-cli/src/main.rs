@@ -135,8 +135,12 @@ enum ModelsCommand {
     Bench {
         #[arg(long, default_value = "eval/espresso/utterances.yaml")]
         corpus: PathBuf,
-        /// Scripted answers, which measure the engine with the model time
-        /// removed.
+        /// The model configuration whose interpreter to measure. This is the
+        /// one that reports what a model costs and how often it is right.
+        #[arg(long, short)]
+        config: Option<PathBuf>,
+        /// Scripted answers instead, which measure the engine with the model
+        /// time removed.
         #[arg(long)]
         interpreter: Option<PathBuf>,
     },
@@ -166,7 +170,11 @@ fn dispatch() -> Result<(), Box<dyn std::error::Error>> {
         Command::Models { what } => match what {
             ModelsCommand::Check { config, manifest } => models::check(config, manifest),
             ModelsCommand::Hash { path } => models::hash(path),
-            ModelsCommand::Bench { corpus, interpreter } => bench::bench(corpus, interpreter),
+            ModelsCommand::Bench {
+                corpus,
+                config,
+                interpreter,
+            } => bench::bench(corpus, config, interpreter),
         },
         Command::Run { declaration, skill, appliance, serial, baud, knowledge, config, level } => {
             run::run(run::Options {

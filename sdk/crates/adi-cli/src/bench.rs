@@ -18,6 +18,12 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct Corpus {
+    /// The machine the corpus is written against. Needed to measure a real
+    /// backend, because what the model may name comes from the declaration:
+    /// the styles, the materials, the variables with their units and
+    /// meanings, and the manufacturer's notes.
+    #[serde(default)]
+    declaration: Option<PathBuf>,
     #[serde(default)]
     cases: Vec<Case>,
 }
@@ -51,21 +57,76 @@ enum Verdict {
 
 pub fn bench(
     corpus_path: PathBuf,
+    config: Option<PathBuf>,
     interpreter_script: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(&corpus_path)
         .map_err(|e| format!("{}: {e}", corpus_path.display()))?;
-    let corpus: Corpus = serde_yaml::from_str(&text)
-        .map_err(|e| format!("{}: {e}", corpus_path.display()))?;
+    let corpus: Corpus =
+        serde_yaml::from_str(&text).map_err(|e| format!("{}: {e}", corpus_path.display()))?;
+
+    // A configuration measures the backend it names, which is the measurement
+    // this command exists for. A scripted file measures the engine with the
+    // model time removed, which is a different and much smaller question.
+    //
+    // For a long time neither worked: the only interpreter this could build
+    // was the scripted one, while the help text, this module's own
+    // documentation and three published documents all said it measured the
+    // configured backend. The figures that were published came from a harness
+    // written for the occasion and not kept, so they could not be re-measured
+    // by anyone, including the author.
+    if let Some(config_path) = config {
+        let Some(declaration_path) = corpus.declaration.as_ref() else {
+            return Err(format!(
+                "{} names no declaration, so a real backend cannot be told what                  this machine declares. Add `declaration: <path>` to the corpus,                  or pass --interpreter to measure the engine alone.",
+                corpus_path.display()
+            )
+            .into());
+        };
+
+        // Relative to the corpus, which is where it is written and what it
+        // describes.
+        let declaration_path = corpus_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(declaration_path);
+
+        let text = std::fs::read_to_string(&declaration_path)
+            .map_err(|e| format!("{}: {e}", declaration_path.display()))?;
+        let declaration: adi_protocol::Declaration = serde_yaml::from_str(&text)
+            .map_err(|e| format!("{}: {e}", declaration_path.display()))?;
+
+        let domain = crate::domain::for_profile(&declaration.domain_profile)?;
+
+        let Some((interpreter, label)) = crate::run::start_interpreter(
+            Some(&config_path),
+            domain.as_ref(),
+            &declaration.device,
+        )?
+        else {
+            return Err(format!(
+                "{} configures no interpreter, so there is nothing to measure.                  `adi models check --config {}` reports which seams are served.",
+                config_path.display(),
+                config_path.display()
+            )
+            .into());
+        };
+
+        println!("  machine    {}", declaration_path.display());
+        return run(&corpus, interpreter.as_ref(), &label, &corpus_path);
+    }
 
     let Some(script) = interpreter_script else {
-        println!("no interpreter given.");
+        println!("no interpreter given. One of:");
         println!();
+        println!("  --config <file.yaml>        the configured model backend, which");
+        println!("                              is what reports how often a model is");
+        println!("                              right and what a request costs");
         println!("  --interpreter <file.yaml>   scripted answers, which measure the");
         println!("                              engine with the model time removed");
         println!();
-        println!("A model backend is configured in models.yaml and reported by");
-        println!("`adi models check`. This command measures whichever is in use.");
+        println!("`adi models check --config <file.yaml>` reports which seams a");
+        println!("configuration serves.");
         return Ok(());
     };
 
@@ -96,7 +157,7 @@ fn run(
         history: &[],
         cycle: None,
         memory: None,
-    rejected: None,
+        rejected: None,
     };
 
     for case in &corpus.cases {
@@ -122,7 +183,11 @@ fn run(
     }
 
     let total = corpus.cases.len();
-    let percent = if total == 0 { 0.0 } else { correct as f64 * 100.0 / total as f64 };
+    let percent = if total == 0 {
+        0.0
+    } else {
+        correct as f64 * 100.0 / total as f64
+    };
 
     println!("  correct    {correct} of {total}  ({percent:.0}%)");
     if expected_questions > 0 {
@@ -237,7 +302,10 @@ fn subset_of(expected: &serde_json::Value, produced: &serde_json::Value) -> Resu
             Ok(())
         }
         (Value::Number(want), Value::Number(got)) => {
-            let (a, b) = (want.as_f64().unwrap_or(f64::NAN), got.as_f64().unwrap_or(f64::NAN));
+            let (a, b) = (
+                want.as_f64().unwrap_or(f64::NAN),
+                got.as_f64().unwrap_or(f64::NAN),
+            );
             if (a - b).abs() < 1e-9 {
                 Ok(())
             } else {
@@ -294,7 +362,10 @@ mod tests {
 
     #[test]
     fn a_matching_intent_is_correct() {
-        let c = case("x", expects_intent(serde_json::json!({ "kind": "produce" })));
+        let c = case(
+            "x",
+            expects_intent(serde_json::json!({ "kind": "produce" })),
+        );
         assert!(matches!(
             judge(&c, Ok(produced(Some("adi.example.style.standard")))),
             Verdict::Correct
@@ -316,7 +387,10 @@ mod tests {
     /// Cautious rather than dangerous, but still not what was asked for.
     #[test]
     fn asking_when_it_should_have_acted_is_wrong() {
-        let c = case("x", expects_intent(serde_json::json!({ "kind": "produce" })));
+        let c = case(
+            "x",
+            expects_intent(serde_json::json!({ "kind": "produce" })),
+        );
         assert!(matches!(judge(&c, Ok(asked())), Verdict::WrongKind(_)));
     }
 
@@ -375,7 +449,10 @@ mod tests {
 
     #[test]
     fn a_backend_failure_is_not_a_wrong_answer() {
-        let c = case("x", expects_intent(serde_json::json!({ "kind": "produce" })));
+        let c = case(
+            "x",
+            expects_intent(serde_json::json!({ "kind": "produce" })),
+        );
         let failed = Err(adi_decision::DecisionError::Backend("unreachable".into()));
         assert!(matches!(judge(&c, failed), Verdict::Failed(_)));
     }

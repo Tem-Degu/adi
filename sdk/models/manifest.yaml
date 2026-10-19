@@ -9,10 +9,14 @@
 # ADI-P 9.3 requirement 5 requires that a decision be reconstructable, and
 # where a model contributed, being able to say which model is part of that.
 #
-# The hashes below are placeholders until each file has been obtained and
-# hashed on a machine here. A placeholder hash matches nothing, so a model is
-# recorded as unverified rather than falsely recognised. Fill them with
-# `adi models hash <file>`.
+# The interpreter and speaker hashes below have been confirmed against files
+# freshly obtained from the sources named here. The transcriber and the whisper
+# alternative carry all-zero placeholders, which match nothing, so those are
+# recorded as unverified rather than falsely recognised. Fill a placeholder
+# with `adi models hash <file>`.
+#
+# `bytes` is informational and is not compared. Where it is round, it is an
+# approximation of the published size.
 
 models:
   # ----------------------------------------------------------------- interpreter
@@ -32,14 +36,26 @@ models:
     licence: "Apache-2.0"
     notes: >
       The recommended interpreter, and the smallest measured to behave
-      acceptably. On the shipped corpus it reaches 9 of 18 exactly correct and
-      14 of 18 correct in choosing whether to act or to ask, which is the
-      distinction that matters for safety.
+      acceptably.
 
-      Latency is the open problem. On four shared cloud cores it answers in
-      about 18 seconds, which is unusable for speech. Measure with `adi models
-      bench` on the board you intend to ship before committing to a voice
+      Through the shipped backend it reaches 5 of 18 on the corpus in
+      eval/espresso, measured with `adi models bench --config
+      models/models.example-local.yaml`. An earlier figure of 9 of 18 was taken
+      with a harness that was not kept and is withdrawn. A hosted model scores
+      7 of 18 on the same corpus, and most of its misses are questions asked
+      where the corpus expects an action, so the corpus and the shipped
+      instruction disagree and the figure understates the seam. See Recommended
+      models in sdk/README.md.
+
+      Latency is the open problem. On four shared cloud cores the median is 16
+      seconds and the 95th percentile is 66, which is unusable for speech.
+      Measure on the board you intend to ship before committing to a voice
       interface.
+
+      At D2 it selects the right mechanism and does not reliably compute the
+      value: on every cycle measured it proposed the setting already in force,
+      which the engine now refuses. D0 and D1 are unaffected, because the
+      engine computes the value at both.
 
       Pass `/no_think` with the request, as the shipped backend does. Qwen3
       reasons in a block before answering, and a grammar permitting only the

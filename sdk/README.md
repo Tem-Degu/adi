@@ -99,7 +99,10 @@ sdk/
 ├── examples/interpreters/    Model backends that are separate programs.
 │                             reference*.py implement the protocol with no
 │                             models; qwen_interpreter.py and
-│                             speech_backends.py run real ones.
+│                             speech_backends.py run real local ones;
+│                             openai_interpreter.py runs a hosted one.
+│                             adi_prompt.py turns a request into a prompt and
+│                             is shared by all of them.
 ├── requirements.txt          Python packages those backends need.
 ├── profiles/espresso/        Knowledge base as data.
 ├── conformance/
@@ -201,9 +204,14 @@ and a spoken one does not. Both shipped backends branch on that, and
 `cargo test -p adi-cli --test shipped_backends` holds them to it without
 needing the weights.
 
-The latency table above measures one of those two questions. Interpreting an
-utterance has been timed against real weights; choosing a mechanism has not,
-so D1 and D2 carry no measured figure.
+Both questions have now been put to real weights. Interpreting an utterance is
+in the latency table above. Choosing a mechanism was measured in a live D2
+session, and the result is the open problem on this path: Qwen 3 4B Q4 selected
+the right mechanism on every cycle and proposed the setting the grinder was
+already on, so the correction was refused rather than carried out. A hosted
+model proposed the arithmetically correct value and the cycle completed. The
+engine computes the same value correctly at D0 and D1, so the gap is the
+model's arithmetic and not the design.
 
 ## What a machine declares
 
@@ -350,7 +358,25 @@ the seam and audio comes back.
 
 Verified means the shipped backend was run against the real weights and
 produced correct output on this corpus. `models/manifest.yaml` carries the
-checksums and what each was measured to do.
+checksums and what each was measured to do. Both checksums it states have been
+confirmed against files freshly obtained from the published sources.
+
+**On corpus accuracy, read this before quoting a figure.** Through the shipped
+backend, `adi models bench --config models/models.example-local.yaml` scores
+Qwen 3 4B Q4 at **5 of 18**, and a hosted model at **7 of 18**. Earlier
+documents here quoted 9 of 18; that was measured with a harness written for
+the occasion which was not kept, so it is not reproducible and is withdrawn.
+
+A capable model scoring 7 of 18 is a statement about the corpus rather than
+about the model. Nine of its eleven misses are questions asked where the corpus
+expects an action, and the model is obeying our own instruction when it asks:
+the instruction says not to guess a style that was not stated, several cases
+expect a style to be inferred from a description such as "something short and
+strong", and styles reach the model as bare identifiers while variables are
+sent with their units and meanings. Until the instruction and the corpus agree,
+and styles carry descriptions, this number measures that disagreement as much
+as it measures a model. It is reported rather than quietly improved because a
+measurement nobody can reproduce is what produced the figure it replaces.
 
 Qwen 3 1.7B is listed in the manifest and **not recommended**. On the shipped
 corpus it reached 3 of 18, and it never asked a question where asking was the
@@ -373,7 +399,12 @@ running as the engine keeps them:
 |---|---|---|---|
 | Speaker | Piper medium | **0.2 s** for 3 s of speech, 12x realtime | comfortable |
 | Transcriber | Moonshine base | around 2 s for a short utterance | acceptable |
-| Interpreter | Qwen 3 4B Q4 | **18 s median, 24 s worst** | **unusable for speech** |
+| Interpreter | Qwen 3 4B Q4 | **16 s median, 66 s at p95** | **unusable for speech** |
+| Interpreter | a hosted model | **3.6 s median, 14 s at p95** | still above two seconds |
+
+Reproduce either row with `adi models bench --config <file.yaml>`. The
+interpreter rows are the whole corpus through the shipped backend, so the p95
+is a real request and not an outlier to be discounted.
 
 A person waiting on a machine tolerates perhaps two seconds. The interpreter is
 an order of magnitude outside that, and the smaller model is half the latency
@@ -396,12 +427,18 @@ Measure on the board you intend to ship before committing to a voice
 interface:
 
 ```sh
-adi models bench
+adi models bench --config models/models.example-local.yaml
 ```
 
-This runs the corpus in `eval/espresso/` against the configured interpreter on
-the host it is invoked on, and reports how often the answer was correct and
-what each request cost.
+This runs the corpus in `eval/espresso/` against the interpreter that
+configuration names, on the host it is invoked on, and reports how often the
+answer was correct and what each request cost. `--interpreter <file.yaml>`
+measures the engine with the model time removed instead, which answers a
+different and much smaller question.
+
+Until recently this command could only do the second of those, while its own
+output and three documents said otherwise. That is why the figures above are
+stated with the command that reproduces them.
 
 ### Using a different model
 
@@ -421,8 +458,9 @@ The program requires no dependency on this SDK and may be written in any
 language.
 
 ```
-interpreter  -> {"utterance":"half of last time","styles":[...],
-                 "variables":[...],"notes":[...],"machine":"..."}
+interpreter  -> {"utterance":"half of last time","instruction":"...",
+                 "schema":{...},"styles":[...],"variables":[...],
+                 "notes":[...],"machine":"...","history":[...]}
              <- {"intent":{"kind":"produce","targets":{...}}}
              or {"clarify":{"question":"...","because":"..."}}
              or {"answer":{"text":"...","drew_on":["<note id>"]}}
@@ -430,7 +468,8 @@ interpreter  -> {"utterance":"half of last time","styles":[...],
 chooser      -> {"goals":[{"variable":"shot_time","delta":-3.0,...}],
                  "candidates":[{"index":0,"tool":"...","variable":"shot_time",
                                 "per_unit":-1.4,"current":24,...}],
-                 "level":"d2","constraints":[...]}
+                 "level":"d2","constraints":[...],"instruction":"...",
+                 "schema":{...}}
              <- {"steps":[{"candidate":0,"value":21}]}
 
 transcriber  -> {"audio":"<base64>","sample_rate":16000}
@@ -441,6 +480,18 @@ speaker      -> {"text":"..."}
 ```
 
 Audio is base64 of 16-bit signed, little endian, single channel samples.
+
+`instruction` and `schema` carry the contract itself. The engine owns what a
+reply may be, narrows the schema to the styles, materials, variables and units
+this machine declares, and sends both with every request, so a backend compiles
+a grammar from what it was handed and holds no copy of its own. A copy is a
+thing that drifts: the shipped Qwen backend carried one whose answer arm was
+missing, and a machine running real weights met every question with a question
+while the engine had permitted an answer throughout.
+
+A backend may ignore both and validate nothing, since the engine validates
+every reply regardless. What it may not do is compose a different contract and
+expect the engine to honour it.
 
 An interpreter has three outcomes rather than two. A request becomes an intent,
 an unresolvable one becomes a question back, and a question from the person
@@ -488,6 +539,15 @@ loads no model. The test suite uses it, because a backend that runs real
 weights cannot otherwise be tested where the weights are not present, and an
 untested one is how a backend ships unable to answer at all.
 
+`examples/interpreters/openai_interpreter.py` serves both model seams from a
+hosted model. It needs no package beyond the standard library, reads the key
+from the environment rather than from an argument, and carries the timeout the
+next section asks for.
+
+`examples/interpreters/adi_prompt.py` renders a request as a prompt and is
+imported by the backends above. One copy, for the same reason the engine sends
+the contract rather than asking each backend to remember it.
+
 `models/models.example-process.yaml` configures the reference set.
 
 ### The two numbers on a speech seam
@@ -529,10 +589,19 @@ heartbeats, so after `control_timeout_ms` the appliance decides the link is dead
 and enters its safe state. That behaviour is correct and the cause will not be
 obvious. Use a few seconds, and return a `clarify` when it expires.
 
-**Constrain the output to the schema, narrowed to the machine.** Instruction is
-advice; a grammar is not. Hosted models expose this as structured output or a
-JSON schema, and it should be built from the declaration each request carries.
-See `schema_for` in `examples/interpreters/qwen_interpreter.py`.
+**Constrain the output to the schema the engine sent.** Instruction is advice;
+a grammar is not. The request carries `schema`, already narrowed to what this
+machine declares, and `instruction`, so a backend does not compose either and
+cannot drift from the contract the engine enforces. Hosted models take this as
+structured output or a JSON schema.
+
+Not every provider will apply it. The output schema offers an intent, a
+question or an answer as a `oneOf` at the top level, which some refuse
+outright; the selection schema is a plain object and is accepted.
+`provider_can_enforce` in `examples/interpreters/openai_interpreter.py` shows
+the test and states why the schema is not flattened to suit a dialect. Where
+the provider will not apply it, state it in the prompt: weaker, and the engine
+validates the reply either way.
 
 **Decide what leaves the building.** On the speech seams that is audio of
 whoever is in the room.
@@ -634,6 +703,24 @@ was carried out when it was not.
 Snapping to resolution is not this. A parameter declared in whole steps receiving
 21.4 is set to 21, which is ordinary; only a value outside the range is reported.
 
+A correction that would change nothing is refused outright, which is the same
+concern one step further. At D2 the value comes from a model, and one equal to
+the setting already in force passes every other check: it is in range, in the
+right unit, and finite. Sending it would record a correction and explain a
+fault that was not corrected, so the machine would report acting on every cycle
+while the fault persisted. The model is told which of the two cases it is, and
+gets one further attempt:
+
+```
+  failed       the value proposed for 'setting' is 24 Step, which is the
+               setting already in force, so it would change nothing and
+               'shot_time' would not move.
+```
+
+A mechanism already at the end of its travel is reported differently, because
+the useful correction there is a different candidate rather than a different
+number.
+
 ### Running without models
 
 An engine with an unserved seam is a supported configuration. It refuses the
@@ -671,6 +758,24 @@ board.
   check` reports this rather than reporting a present model file as ready.
   Three of the four seams can be served today by an external program through
   the `process` backend, and the fourth, the explainer, needs no model.
+- **A local model of the recommended size does not complete a correction at
+  D2.** Qwen 3 4B Q4 chose the right mechanism on every cycle measured and
+  proposed the setting already in force, so the correction is refused. It also
+  returns one step per candidate where one per goal is required, which the
+  envelope refuses. A hosted model completes the cycle correctly. D0 and D1 are
+  unaffected, because the engine computes the value at both.
+- **The evaluation corpus and the shipped instruction disagree**, so the
+  accuracy figure understates the seam. See the note under Recommended models.
+- **`adi models check` does not inspect a process backend's weights.** A
+  program supplies its own, and its identity is the command, so the report
+  says a seam is served without opening a model file. An empty `models/` can
+  therefore read as three of four seams ready. The checksum verification
+  described above applies to a backend that loads a file through the engine,
+  and no such backend is implemented.
+- **Nothing ships a recording the transcriber will accept.** The speaker writes
+  `spoken.wav` at its own rate, 22050 by default, and the transcriber requires
+  16000, so `listen spoken.wav` is refused by design and the one audio file the
+  SDK produces cannot be fed back into it.
 - **The espresso perception rules have not been validated against real
   extractions.** Every trace in the conformance corpus is synthetic. Synthetic
   traces are plausible by construction, which is the condition under which an
