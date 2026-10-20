@@ -79,6 +79,13 @@ pub struct ModelContext {
     /// manufacturer's own variable has no such luck: nothing in a model's
     /// training says what `x.acme.tray_state` is.
     pub variables: Vec<VariableInfo>,
+    /// What the appliance is reading now, one entry per outcome it measures.
+    ///
+    /// Where the machine stands. A request may be stated entirely against it:
+    /// "a bit warmer" names no number, and without a reading there is nothing
+    /// for warmer to be warmer than. A model given only past cycles has to
+    /// refuse such a request on a machine that has run none.
+    pub measured: Vec<ReadingLine>,
     /// Recent cycles, most recent first.
     pub remembered: Vec<RememberedSummary>,
     /// Recent decisions, most recent first.
@@ -143,6 +150,14 @@ pub struct StyleInfo {
 }
 
 /// A variable as the model is told about it.
+/// One outcome as the appliance currently reads it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReadingLine {
+    pub name: String,
+    pub value: f64,
+    pub unit: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VariableInfo {
     pub name: String,
@@ -178,11 +193,12 @@ impl ModelContext {
                     let declared = knowledge.variable(v);
                     VariableInfo {
                         name: v.0.clone(),
-                        unit: declared.map(|d| format!("{:?}", d.unit).to_lowercase()),
+                        unit: declared.map(|d| d.unit.as_str().to_string()),
                         meaning: declared.map(|d| d.description.trim().to_string()),
                     }
                 })
                 .collect(),
+            measured: readings(context),
             remembered: Vec::new(),
             history: Vec::new(),
             // Every note, not a selection. A filter guesses what the question
@@ -349,6 +365,13 @@ impl ModelContext {
             }
         }
 
+        if !self.measured.is_empty() {
+            let _ = writeln!(out, "measured now:");
+            for reading in &self.measured {
+                let _ = writeln!(out, "  {} = {} {}", reading.name, reading.value, reading.unit);
+            }
+        }
+
         for cycle in &self.remembered {
             let _ = write!(out, "cycle {}", cycle.cycle_id);
             if let Some(style) = &cycle.style {
@@ -375,6 +398,26 @@ impl ModelContext {
 
         out
     }
+}
+
+/// The appliance's current readings, as the model is told them.
+///
+/// Empty where the appliance reports none, which is conforming and leaves a
+/// request stated against the present state unanswerable. That is the honest
+/// outcome: the alternative is a model inventing a number to be relative to.
+fn readings(context: &SelectionContext<'_>) -> Vec<ReadingLine> {
+    let Some(measured) = context.measured else {
+        return Vec::new();
+    };
+
+    measured
+        .iter()
+        .map(|(variable, quantity)| ReadingLine {
+            name: variable.0.clone(),
+            value: quantity.value,
+            unit: quantity.unit.as_str().to_string(),
+        })
+        .collect()
 }
 
 fn summarise_remembered(entry: &Remembered) -> RememberedSummary {

@@ -72,6 +72,44 @@ fn variables() -> Vec<VariableId> {
 /// ADI-P 9.4.1 lists what an interpreter must receive. Omitting any of it means
 /// asking a model to interpret "half of last time" without telling it what last
 /// time was.
+/// A request may be stated entirely against where the machine is now. "A bit
+/// warmer" names no number, so a model shown only past cycles has to ask on a
+/// machine that has run none, which is every machine on its first day.
+#[test]
+fn what_the_machine_reads_now_reaches_the_model() {
+    let knowledge = knowledge();
+    let memory = RecentCycles::default();
+
+    let mut readings = std::collections::BTreeMap::new();
+    readings.insert(
+        VariableId::from("cycle_time"),
+        Quantity::new(31.5, Unit::S),
+    );
+
+    let context = SelectionContext {
+        history: &[],
+        cycle: None,
+        memory: Some(&memory),
+        rejected: None,
+        settings: None,
+        measured: Some(&readings),
+    };
+
+    let assembled = ModelContext::assemble(
+        "a bit quicker",
+        &knowledge,
+        &[VariableId::from("cycle_time")],
+        &context,
+        ContextBudget::default(),
+    );
+
+    let rendered = assembled.render();
+    assert!(
+        rendered.contains("cycle_time = 31.5 s"),
+        "the reading and its unit should be in the context: {rendered}"
+    );
+}
+
 #[test]
 fn the_model_is_given_what_the_protocol_requires() {
     let k = knowledge();
@@ -83,6 +121,7 @@ fn the_model_is_given_what_the_protocol_requires() {
         memory: Some(&memory),
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     let assembled = ModelContext::assemble(
@@ -114,6 +153,7 @@ fn only_the_most_recent_cycles_are_offered() {
         memory: Some(&memory),
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     let budget = ContextBudget {
@@ -140,6 +180,7 @@ fn the_budget_is_enforced_however_much_is_remembered() {
         memory: Some(&memory),
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     let budget = ContextBudget {
@@ -170,6 +211,7 @@ fn truncation_drops_history_before_it_drops_memory() {
         memory: Some(&memory),
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     // Tight enough to force a drop, loose enough that not everything goes.
@@ -205,6 +247,7 @@ fn what_was_dropped_is_reported() {
         memory: Some(&memory),
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     let tight = ContextBudget {
@@ -229,6 +272,7 @@ fn an_empty_memory_is_not_an_error() {
         memory: None,
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     let assembled = ModelContext::assemble(
@@ -281,6 +325,7 @@ fn notes_are_the_first_thing_a_tight_budget_drops() {
             memory: None,
             rejected: None,
             settings: None,
+            measured: None,
         },
         ContextBudget::default(),
     );

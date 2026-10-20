@@ -1,0 +1,39 @@
+# How far each control moves the outcome on the Rainline SX-2.
+#
+# Without an entry here a tool is callable and never selectable: the engine
+# builds its candidate list from these responses, so a tool naming no outcome
+# is never offered and no spoken request can arrive at it.
+#
+# per_unit is signed, and is what lets a correction be sized rather than
+# guessed at.
+
+skill_version: "1.0"
+skill_id: "skill/SX-2/1.0"
+
+applies_to:
+  vendor: "Rainline"
+  model: "SX-2"
+  firmware_range: { min: "1.0.0", max: "1.9.99" }
+
+responses:
+  # A thermostatic cartridge holds what it is asked for, so a degree of
+  # setting is a degree at the outlet. Held at 0.9 rather than 1.0 because the
+  # outlet runs slightly cooler than the setting once the pipe has cooled
+  # between showers, which is a real effect and not a measurement error.
+  - tool: "x.rainline.mixer.set_temperature"
+    parameter: "celsius"
+    variable: "x.rainline.water_temperature"
+    per_unit: 0.9
+    unit: c
+    valid_range: { min: 15.0, max: 43.0 }
+    confidence: 0.9
+
+  # The valve meters the outlet directly, so what is asked for is what comes
+  # out, within the accuracy of the flow sensor.
+  - tool: "x.rainline.valve.set_flow"
+    parameter: "ml_per_s"
+    variable: "x.rainline.flow_rate"
+    per_unit: 1.0
+    unit: ml_per_s
+    valid_range: { min: 0.0, max: 200.0 }
+    confidence: 0.95

@@ -389,6 +389,7 @@ impl<'a> Session<'a> {
             memory: Some(&self.memory),
             rejected: None,
             settings: None,
+            measured: None,
         };
 
         let corrections = decide(
@@ -452,6 +453,7 @@ impl<'a> Session<'a> {
             memory: Some(&self.memory),
             rejected: None,
             settings: None,
+            measured: None,
         };
 
         let corrections = decide(

@@ -107,3 +107,9 @@ jobs:
       - name: A second machine, as firmware
         working-directory: sdk/c
         run: make dehydrator
+
+      # And a third, with two mechanisms rather than one, so a build that
+      # breaks the handler for a machine with a choice to make fails here.
+      - name: A third machine, as firmware
+        working-directory: sdk/c
+        run: make shower

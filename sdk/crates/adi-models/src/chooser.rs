@@ -248,7 +248,7 @@ impl ProcessChooser {
                     variable: c.variable.as_str(),
                     per_unit: c.per_unit,
                     confidence: c.confidence,
-                    unit: format!("{:?}", c.param_unit).to_lowercase(),
+                    unit: c.param_unit.as_str().to_string(),
                     current: present(context, &c.parameter),
                     description: &c.description,
                     also_affects: c.also_affects.iter().map(|v| v.as_str()).collect(),

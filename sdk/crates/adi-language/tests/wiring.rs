@@ -21,6 +21,7 @@ fn the_documented_wiring_compiles() {
         memory: None,
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     // Both calls are expected to refuse here, because the seams are the

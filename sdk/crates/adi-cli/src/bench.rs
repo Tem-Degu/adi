@@ -166,6 +166,7 @@ fn run(
         memory: None,
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     for case in &corpus.cases {

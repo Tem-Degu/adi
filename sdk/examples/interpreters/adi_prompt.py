@@ -67,6 +67,19 @@ def context_lines(request):
         for note in request["notes"]:
             lines.append("  [{}] {}".format(note.get("id", "?"), note.get("text", "")))
 
+    # What the appliance is reading now. A request stated against the present
+    # state, such as "a bit warmer", has nothing to be relative to without it,
+    # and a model shown only past cycles has to ask on a machine that has run
+    # none.
+    if request.get("measured"):
+        lines.append("what the machine is reading now:")
+        for reading in request["measured"]:
+            lines.append("  {} = {} {}".format(
+                reading.get("variable", "?"),
+                reading.get("value", "?"),
+                reading.get("unit", ""),
+            ))
+
     for cycle in request.get("remembered", []):
         parts = ["cycle " + cycle.get("cycle_id", "?")]
         if cycle.get("style"):

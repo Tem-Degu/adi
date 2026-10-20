@@ -1,0 +1,133 @@
+# A thermostatic shower mixer, the Rainline SX-2.
+#
+# Written by following HOW-TO-PORT-TO-A-BOARD.md and HOW-TO-ADD-A-TOOL.md in
+# order, as a manufacturer with no prior knowledge of ADI would. The firmware
+# that answers this declaration is in c/shower/.
+#
+# Two mechanisms rather than one, which is the only thing it adds over the
+# dehydrator beside it: temperature and flow are separate outcomes with a
+# mechanism each, so a spoken request has to reach the right one. They do not
+# compete, which keeps the question to "did it pick the right dial" instead of
+# "did it weigh two dials correctly".
+#
+# `base/v1`, because no domain profile for bathrooms exists. Everything the
+# engine reasons about here comes from shower.knowledge.yaml.
+
+adip_version: "0.2"
+domain: "shower"
+domain_profile: "base/v1"
+conformance_level: advisory
+
+device:
+  vendor: "Rainline"
+  model: "SX-2"
+  firmware_version: "1.0.0"
+  declaration_id: "sha256:showerexample"
+
+session:
+  max_concurrent: 1
+  heartbeat_interval_ms: 1000
+  # Generous, because the reply crosses an emulated UART. A real valve
+  # controller on a real line answers in single-digit milliseconds.
+  control_timeout_ms: 4000
+
+signals:
+  - id: "x.rainline.signal.outlet_temperature"
+    unit: c
+    range: { min: 0, max: 80, unit: c }
+    sample_rate_hz: 2
+    accuracy: { abs: 0.5, unit: c }
+    # The thermistor at the outlet measures the outcome someone states a
+    # target on, and saying so is what lets a correction be sized.
+    measures: "x.rainline.water_temperature"
+
+  - id: "x.rainline.signal.flow"
+    unit: ml_per_s
+    range: { min: 0, max: 250, unit: ml_per_s }
+    sample_rate_hz: 2
+    accuracy: { abs: 2.0, unit: ml_per_s }
+    measures: "x.rainline.flow_rate"
+
+tools:
+  - id: "x.rainline.mixer.set_temperature"
+    name: "set_temperature"
+    description: >
+      Thermostatic mixing cartridge blending the hot and cold supplies. The
+      outlet reaches a new setting in about three seconds, and a large change
+      in flow unsettles it briefly while the cartridge catches up. The upper
+      limit is a scald limit and is enforced by the cartridge itself, not only
+      by this firmware.
+    parameters:
+      celsius:
+        type: integer
+        unit: c
+        min: 15
+        max: 43
+        resolution: 1
+        monotonic: higher_is_more
+    effects: ["x.rainline.water_temperature"]
+    duration_ms_typ: 3000
+    duration_ms_max: 8000
+    reversible: true
+    abortable: true
+    authority: ["engine", "operator"]
+    hazard: ["hot_surface"]
+
+  - id: "x.rainline.valve.set_flow"
+    name: "set_flow"
+    description: >
+      Motorised flow valve on the outlet. Moves within a second and holds its
+      position when the power is removed, so the shower does not open itself
+      after a cut.
+    parameters:
+      ml_per_s:
+        type: integer
+        unit: ml_per_s
+        min: 0
+        max: 200
+        resolution: 10
+        monotonic: higher_is_more
+    effects: ["x.rainline.flow_rate"]
+    duration_ms_typ: 800
+    duration_ms_max: 3000
+    reversible: true
+    abortable: true
+    authority: ["engine", "operator"]
+
+events:
+  - id: "x.rainline.event.fault"
+    payload:
+      code: { type: string }
+      severity: { type: enum, values: ["warning", "error", "critical"] }
+      recoverable: { type: boolean }
+
+envelope:
+  enforced_by: both
+  independent_of_engine: true
+
+  # Repeated here as hard limits because the envelope is what the appliance
+  # enforces on its own authority, whatever the engine believes.
+  limits:
+    - { parameter: "celsius", unit: c, hard_max: 43 }
+    - { parameter: "ml_per_s", unit: ml_per_s, hard_max: 200 }
+
+  rate_limits:
+    # The cartridge needs to settle before it is asked for something else, and
+    # a person standing under the water should not have the temperature
+    # stepped around faster than they can react.
+    - id: "cartridge_settling"
+      tools: ["x.rainline.mixer.set_temperature"]
+      min_interval_s: 5.0
+      # Sixteen is the most libadip tracks per rate limit, as
+      # ADIP_MAX_RATE_HISTORY in c/include/adip.h.
+      max_invocations: 12
+      window_s: 600.0
+
+  failsafe:
+    on_control_timeout: "abort_to_safe"
+    on_signal_loss: "abort_to_safe"
+    on_fault: "abort_to_safe"
+    # Closing the valve is the harmless state. Leaving water running at an
+    # unknown temperature is not.
+    safe_state: "valve_closed_mixer_cold"
+    max_time_to_safe_ms: 500

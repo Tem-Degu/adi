@@ -1,0 +1,77 @@
+# What the Rainline SX-2 reasons about. Pairs with shower.yaml.
+#
+# On a machine declaring `base/v1` this file is the domain. The profile ships
+# no variables, no styles and no notes, so everything here is the whole of
+# what the engine knows about showering.
+
+namespace: "x.rainline"
+extension_version: "1.0"
+extends: { domain_profile: "base/v1", base_min_version: "1.0" }
+
+# The outcomes. Not the controls: the engine reasons about results, so a
+# spoken request lands on one of these. The descriptions are what connect a
+# person's words to a mechanism, because nothing in a model's training says
+# what `x.rainline.water_temperature` is.
+variables:
+  x.rainline.water_temperature:
+    unit: c
+    description: >
+      Temperature of the water leaving the shower head, measured at the
+      outlet. Higher reads as hotter under the water; lower reads as cooler.
+      This is what someone means by warmer, hotter, cooler or colder.
+
+  x.rainline.flow_rate:
+    unit: ml_per_s
+    description: >
+      How much water leaves the head each second. Higher is a stronger, more
+      drenching spray; lower is gentler and uses less water. This is what
+      someone means by harder, stronger, softer or gentler.
+
+# What a good result is. The engine compares what was measured against the one
+# that was asked for.
+styles:
+  - id: "x.rainline.style.warm"
+    description: >
+      An everyday warm shower, comfortable to stand under for a long time.
+      What someone means by warm, normal or ordinary.
+    targets:
+      x.rainline.water_temperature: { min: 37.0, max: 39.0, unit: c }
+
+  - id: "x.rainline.style.hot"
+    description: >
+      Hot, as hot as this mixer is permitted to run. What someone means by
+      hot, really hot or steaming.
+    targets:
+      x.rainline.water_temperature: { min: 41.0, max: 43.0, unit: c }
+
+  - id: "x.rainline.style.rinse"
+    description: >
+      A brief cool rinse at full flow, for washing something off rather than
+      standing under it.
+    targets:
+      x.rainline.water_temperature: { min: 24.0, max: 28.0, unit: c }
+      x.rainline.flow_rate: { min: 170.0, max: 200.0, unit: ml_per_s }
+
+# Free text the machine may answer a person from. Advisory, and it may never
+# determine an action. A note must not state a target or an effect magnitude,
+# because those belong in a style and in the skill where they are validated.
+notes:
+  - id: "x.rainline.note.scald_limit"
+    text: >
+      This mixer will not exceed the upper temperature its cartridge is set
+      to, whoever asks and however it is asked. A request for something hotter
+      is taken as far as the limit allows and no further, and the limit is
+      enforced by the cartridge as well as by the controller.
+
+  - id: "x.rainline.note.flow_and_temperature"
+    text: >
+      Changing the flow sharply unsettles the outlet temperature for a few
+      seconds while the mixing cartridge catches up. Changing one at a time
+      and letting it settle gives a steadier result than changing both at
+      once.
+
+  - id: "x.rainline.note.cold_supply"
+    text: >
+      In winter the cold supply arrives colder, so reaching a given
+      temperature takes more hot water and the tank empties sooner. Nothing
+      about the shower has changed when this happens.

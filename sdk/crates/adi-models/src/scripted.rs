@@ -150,6 +150,7 @@ mod tests {
             memory: None,
             rejected: None,
             settings: None,
+            measured: None,
         }
     }
 

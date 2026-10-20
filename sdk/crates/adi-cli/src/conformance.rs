@@ -357,6 +357,7 @@ fn run_case(
                 memory: None,
             rejected: None,
             settings: None,
+            measured: None,
             };
 
             match interpreter.interpret(words, &context) {

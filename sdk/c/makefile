@@ -54,7 +54,7 @@ OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 # the directory, calls it up to date and does nothing. `example` was declared
 # for that reason; `arm` and `dehydrator` collide with arm/ and dehydrator/ the
 # same way and were not.
-.PHONY: all test clean size regen example arm arm-test arm-size dehydrator dehydrator-run
+.PHONY: all test clean size regen example arm arm-test arm-size dehydrator dehydrator-run shower shower-run
 
 TESTS = $(BUILD)/test_m1 $(BUILD)/test_m2 $(BUILD)/test_m3 $(BUILD)/test_m4 \
         $(BUILD)/test_m5 $(BUILD)/test_signals $(BUILD)/test_setpoints
@@ -111,6 +111,8 @@ regen:
 	    examples/declarations/neutral-machine.yaml --out c/generated --name neutral
 	cd .. && cargo run --quiet -p adi-cli -- generate-c \
 	    examples/declarations/ex900.yaml --out c/generated --name ex900
+	cd .. && cargo run --quiet -p adi-cli -- generate-c \
+	    examples/declarations/shower.yaml --out c/generated --name sx2
 
 # Footprint of the library alone, without the test harness. DESIGN.md section 8
 # targets under 12 KB of flash for the whole runtime.
@@ -206,6 +208,25 @@ dehydrator: $(ARMBUILD)/dehydrator.elf
 # `adi run --serial`.
 dehydrator-run: $(ARMBUILD)/dehydrator.elf
 	$(QEMU) -M lm3s6965evb -nographic -serial pty -kernel $(ARMBUILD)/dehydrator.elf
+
+# ------------------------------------------------ a third machine, as firmware
+#
+# A thermostatic shower mixer, on the base profile, for the same emulated
+# core. Two mechanisms rather than one, so a spoken request has to reach the
+# right one. See examples/declarations/shower.yaml.
+#
+#   make shower      build the firmware
+#   make shower-run  run it under QEMU with UART0 on a pty
+
+SX2 = generated/adip_generated_sx2.c
+
+$(ARMBUILD)/shower.elf: arm/startup.c $(ARMLD) $(SRC) $(SX2) shower/main.c | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(SX2) shower/main.c -o $@ $(ARMLIBS)
+
+shower: $(ARMBUILD)/shower.elf
+
+shower-run: $(ARMBUILD)/shower.elf
+	$(QEMU) -M lm3s6965evb -nographic -serial pty -kernel $(ARMBUILD)/shower.elf
 
 # Every ARM rule lists its sources. They were order-only before, with nothing
 # but the build directory as a prerequisite, so once a .elf existed make

@@ -122,6 +122,7 @@ fn empty() -> SelectionContext<'static> {
         memory: None,
         rejected: None,
         settings: None,
+        measured: None,
     }
 }
 
@@ -191,6 +192,7 @@ fn a_relative_request_crosses_as_a_relation() {
         memory: Some(&memory),
         rejected: None,
         settings: None,
+        measured: None,
     };
 
     match interpreter.interpret("half the sugar of last time", &context) {

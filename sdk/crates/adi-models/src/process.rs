@@ -116,8 +116,21 @@ struct Request<'a> {
     /// What this machine is, where the engine was told.
     #[serde(skip_serializing_if = "Option::is_none")]
     machine: Option<&'a str>,
+    /// What the appliance is reading now. A request may be stated entirely
+    /// against it, and "a bit warmer" has nothing to be warmer than without
+    /// it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    measured: Vec<ReadingOut>,
     remembered: Vec<RememberedLine>,
     history: Vec<HistoryLine>,
+}
+
+/// One current reading as the backend is told about it.
+#[derive(Debug, Serialize)]
+struct ReadingOut {
+    variable: String,
+    value: f64,
+    unit: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -269,6 +282,19 @@ impl Interpreter for ProcessInterpreter {
                 })
                 .collect(),
             device: self.device.clone(),
+            measured: context
+                .measured
+                .map(|measured| {
+                    measured
+                        .iter()
+                        .map(|(variable, quantity)| adi_language::context::ReadingLine {
+                            name: variable.0.clone(),
+                            value: quantity.value,
+                            unit: quantity.unit.as_str().to_string(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             ..Default::default()
         };
 
@@ -307,7 +333,7 @@ impl Interpreter for ProcessInterpreter {
 
         if assembled.truncated.contains(&"notes") {
             eprintln!(
-                "adi: the notes exceed the configured context budget and were truncated.                  Reduce them to what the smallest model you target can hold."
+                "adi: the notes exceed the configured context budget and were truncated. Reduce them to what the smallest model you target can hold."
             );
         }
 
@@ -362,6 +388,15 @@ impl Interpreter for ProcessInterpreter {
             variables: &variable_lines,
             notes: &note_lines,
             machine: assembled.device.as_deref(),
+            measured: assembled
+                .measured
+                .iter()
+                .map(|r| ReadingOut {
+                    variable: r.name.clone(),
+                    value: r.value,
+                    unit: r.unit.clone(),
+                })
+                .collect(),
             remembered: assembled
                 .remembered
                 .iter()

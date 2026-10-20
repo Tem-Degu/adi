@@ -749,12 +749,19 @@ fn listen(
     // higher one, and setting it had no effect at all.
     language.min_transcript_confidence = voice.min_confidence;
 
+    // What the appliance is reading now goes to the interpreter, because a
+    // request can be stated entirely against it. "A bit warmer" names no
+    // number, and without a reading a model has nothing for warmer to be
+    // warmer than and has to ask.
+    let readings = session.measurements().clone();
+
     let context = SelectionContext {
         history: session.history(),
         cycle: None,
         memory: Some(session.memory()),
         rejected: None,
         settings: None,
+        measured: Some(&readings),
     };
 
     let understood = language.understand(&audio, &context)?;
@@ -774,12 +781,19 @@ fn request(
         return Ok(());
     };
 
+    // What the appliance is reading now goes to the interpreter, because a
+    // request can be stated entirely against it. "A bit warmer" names no
+    // number, and without a reading a model has nothing for warmer to be
+    // warmer than and has to ask.
+    let readings = session.measurements().clone();
+
     let context = SelectionContext {
         history: session.history(),
         cycle: None,
         memory: Some(session.memory()),
         rejected: None,
         settings: None,
+        measured: Some(&readings),
     };
 
     let understood = interpreter.interpret(words, &context)?;
@@ -1021,7 +1035,7 @@ pub(crate) fn start_interpreter(
                             let declared = knowledge.variable(v);
                             VariableInfo {
                                 name: v.0.clone(),
-                                unit: declared.map(|d| format!("{:?}", d.unit).to_lowercase()),
+                                unit: declared.map(|d| d.unit.as_str().to_string()),
                                 meaning: declared.map(|d| d.description.trim().to_string()),
                             }
                         })

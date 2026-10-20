@@ -37,6 +37,33 @@ impl Unit {
         self == other
     }
 
+    /// The name this unit is written with, in a declaration and anywhere a
+    /// model is told about it.
+    ///
+    /// The same spelling serde reads and writes, which is the point of it
+    /// existing. Deriving a name from the Rust spelling instead gave
+    /// `MlPerS` as `mlpers`, so a model was told a unit name the engine
+    /// would refuse when the model used it, and a request naming a flow
+    /// failed to parse on the way back. The units that happen to be one word
+    /// round-tripped, which is why it went unseen.
+    pub fn as_str(self) -> &'static str {
+        use Unit::*;
+        match self {
+            None => "none",
+            G => "g",
+            GPerS => "g_per_s",
+            Ml => "ml",
+            MlPerS => "ml_per_s",
+            C => "c",
+            Bar => "bar",
+            S => "s",
+            Ms => "ms",
+            Step => "step",
+            KgF => "kg_f",
+            Pct => "pct",
+        }
+    }
+
     /// The ADI-P 10.2.3 wire value.
     pub fn as_wire(self) -> u8 {
         self as u8
@@ -147,6 +174,46 @@ pub enum Monotonic {
     HigherIsLess,
     /// Domain-specific direction, resolved by the profile.
     ProfileDefined,
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    /// The name a model is given has to be the name the engine will accept
+    /// back. A unit whose Rust spelling is one word hid this: `pct` and `c`
+    /// round-tripped and `ml_per_s` did not, so the fault appeared only on a
+    /// machine that declared a flow.
+    #[test]
+    fn every_unit_name_is_the_one_serde_reads() {
+        let all = [
+            Unit::None,
+            Unit::G,
+            Unit::GPerS,
+            Unit::Ml,
+            Unit::MlPerS,
+            Unit::C,
+            Unit::Bar,
+            Unit::S,
+            Unit::Ms,
+            Unit::Step,
+            Unit::KgF,
+            Unit::Pct,
+        ];
+
+        for unit in all {
+            let written = serde_json::to_string(&unit).expect("serialises");
+            assert_eq!(
+                written,
+                format!("\"{}\"", unit.as_str()),
+                "as_str disagrees with serde for {unit:?}"
+            );
+
+            let read: Unit =
+                serde_json::from_str(&written).expect("what serde writes, serde reads");
+            assert_eq!(read, unit);
+        }
+    }
 }
 
 #[cfg(test)]

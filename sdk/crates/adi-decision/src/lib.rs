@@ -108,6 +108,15 @@ pub struct SelectionContext<'a> {
     /// Filled by `decide` from the same map the planner computes with, so the
     /// model and the engine are working from one set of numbers.
     pub settings: Option<&'a std::collections::BTreeMap<String, Quantity>>,
+    /// The latest reading of each outcome the appliance measures.
+    ///
+    /// Where the machine stands, as opposed to what it was set to. An
+    /// interpreter needs it to resolve a request stated against the present
+    /// state: "a bit warmer" names no number, and without a reading there is
+    /// nothing for "warmer" to be warmer than. A model shown only past cycles
+    /// has to refuse such a request on a machine that has run none, which is
+    /// every machine on its first day.
+    pub measured: Option<&'a std::collections::BTreeMap<VariableId, Quantity>>,
     /// Why the previous answer was refused, on a second attempt.
     ///
     /// `None` on the first attempt. A chooser that can pass this to a model
@@ -140,6 +149,7 @@ impl<'a> SelectionContext<'a> {
             cycle,
             memory: None,
             settings: None,
+            measured: None,
             rejected: None,
         }
     }
@@ -152,6 +162,15 @@ impl<'a> SelectionContext<'a> {
 
     pub fn with_memory(mut self, memory: &'a dyn Memory) -> Self {
         self.memory = Some(memory);
+        self
+    }
+
+    /// The same context, carrying the latest reading of each outcome.
+    pub fn with_measured(
+        mut self,
+        measured: &'a std::collections::BTreeMap<VariableId, Quantity>,
+    ) -> Self {
+        self.measured = Some(measured);
         self
     }
 
