@@ -370,7 +370,7 @@ with no allocation, no recursion and no floating point, so an M0 is enough.
 | RAM | no static or heap allocation. One context of 724 bytes, plus the frame buffers you size |
 | Integration | three platform functions and one handler |
 
-The full appliance test suite, 361 checks, passes on an emulated Cortex-M3.
+The full appliance test suite, 364 checks, passes on an emulated Cortex-M3.
 What emulation does not establish is real timing, which matters for the reply
 deadline and the failsafe interval, or the platform functions against real
 peripherals.

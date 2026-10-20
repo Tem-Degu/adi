@@ -161,6 +161,40 @@ static void reset_all(void)
     adip_set_setpoint_buffer(&ctx, held, 4u);
 }
 
+/* An appliance powers up long before an engine attaches, and a report sent
+ * into an empty link is lost. Nothing is sent until a peer has spoken, so a
+ * test about what reaches the wire has to put one there first. A heartbeat is
+ * the only evidence of a peer the protocol defines. */
+static void a_peer_arrives(void)
+{
+    uint8_t beat[32];
+    uint8_t wire[64];
+    int framed;
+    int wrapped;
+
+    framed = adip_encode_heartbeat(false, false, beat, sizeof(beat));
+    if (framed <= 0) {
+        return;
+    }
+    wrapped = adip_frame_wrap(beat, (size_t)framed, wire, sizeof(wire));
+    if (wrapped <= 0) {
+        return;
+    }
+    (void)adip_feed(&ctx, wire, (size_t)wrapped);
+    while (adip_poll(&ctx) == ADIP_PENDING) {
+    }
+    (void)adip_poll(&ctx);
+}
+
+/* The same, with the reply to that heartbeat discounted, which is not what
+ * the tests below are counting. */
+static void a_peer_speaks(void)
+{
+    a_peer_arrives();
+    write_calls = 0;
+    last_len = 0;
+}
+
 /* `position`, the only parameter of tool 0, is declared in steps. */
 static adip_num_t steps(int32_t mantissa)
 {
@@ -178,6 +212,7 @@ static void test_a_setpoint_reaches_the_wire(void)
     decoded_t d;
 
     reset_all();
+    a_peer_speaks();
 
     CHECK(adip_report_setpoint(&ctx, 0u, 0u, steps(24)) == ADIP_OK,
           "a declared parameter in its declared unit is accepted");
@@ -205,6 +240,7 @@ static void test_a_setpoint_reaches_the_wire(void)
 static void test_an_unchanged_value_sends_nothing(void)
 {
     reset_all();
+    a_peer_speaks();
 
     (void)adip_report_setpoint(&ctx, 0u, 0u, steps(24));
     (void)adip_poll(&ctx);
@@ -227,6 +263,7 @@ static void test_a_wrong_unit_is_refused(void)
     adip_num_t grams;
 
     reset_all();
+    a_peer_speaks();
 
     grams.mantissa = 24;
     grams.exponent = 0;
@@ -241,6 +278,7 @@ static void test_a_wrong_unit_is_refused(void)
 static void test_an_undeclared_address_is_refused(void)
 {
     reset_all();
+    a_peer_speaks();
 
     CHECK(adip_report_setpoint(&ctx, 99u, 0u, steps(1)) == ADIP_ERR_ARG,
           "no such tool");
@@ -256,6 +294,7 @@ static void test_an_undeclared_address_is_refused(void)
 static void test_without_a_buffer_a_report_is_refused(void)
 {
     reset_all();
+    a_peer_speaks();
     adip_set_setpoint_buffer(&ctx, NULL, 0u);
 
     CHECK(adip_report_setpoint(&ctx, 0u, 0u, steps(24)) == ADIP_ERR_ARG,
@@ -275,6 +314,7 @@ static void test_a_new_session_is_told_again(void)
     int framed;
 
     reset_all();
+    a_peer_speaks();
 
     (void)adip_report_setpoint(&ctx, 0u, 0u, steps(24));
     (void)adip_poll(&ctx);
@@ -304,6 +344,25 @@ static void test_a_new_session_is_told_again(void)
     }
 }
 
+/* A machine is powered for as long as it is plugged in, and an engine attaches
+ * when it attaches. A report sent before then reaches no one, and marking it
+ * sent would lose the value for the session that follows. */
+static void test_nothing_is_sent_before_a_peer_has_spoken(void)
+{
+    reset_all();
+
+    CHECK(adip_report_setpoint(&ctx, 0u, 0u, steps(24)) == ADIP_OK,
+          "the value is accepted");
+    (void)adip_poll(&ctx);
+    (void)adip_poll(&ctx);
+    CHECK(write_calls == 0, "and held, because there is no peer");
+
+    /* The value goes out with the reply to that first heartbeat, in the same
+     * pass, because the engine drains what is waiting and then acts. */
+    a_peer_arrives();
+    CHECK(write_calls >= 1, "and sent once there is one");
+}
+
 /* Several parameters in one frame, because a machine with four dials should
  * not cost four frames to describe. */
 static void test_several_parameters_travel_together(void)
@@ -311,6 +370,7 @@ static void test_several_parameters_travel_together(void)
     decoded_t d;
 
     reset_all();
+    a_peer_speaks();
 
     (void)adip_report_setpoint(&ctx, 0u, 0u, steps(24));
     /* Tool 1's first parameter, whatever the neutral declaration calls it,
@@ -337,6 +397,7 @@ int main(void)
     test_a_wrong_unit_is_refused();
     test_an_undeclared_address_is_refused();
     test_without_a_buffer_a_report_is_refused();
+    test_nothing_is_sent_before_a_peer_has_spoken();
     test_a_new_session_is_told_again();
     test_several_parameters_travel_together();
 

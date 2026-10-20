@@ -779,7 +779,7 @@ The appliance library occupies **about 7.8 KB of flash on a Cortex-M4** with no
 static or heap allocation, against the 16 KB budget stated in
 [`c/DESIGN.md`](./c/DESIGN.md). A product adds its own generated tables.
 
-The full appliance test suite, 361 checks, passes on an emulated Cortex-M3:
+The full appliance test suite, 364 checks, passes on an emulated Cortex-M3:
 
 ```sh
 cd c
