@@ -366,11 +366,11 @@ with no allocation, no recursion and no floating point, so an M0 is enough.
 
 | | |
 |---|---|
-| Flash | about 7.3 KB on Cortex-M4, plus your generated tables |
-| RAM | no static or heap allocation. One context of 496 bytes, plus the frame buffers you size |
+| Flash | about 7.8 KB on Cortex-M4, plus your generated tables |
+| RAM | no static or heap allocation. One context of 724 bytes, plus the frame buffers you size |
 | Integration | three platform functions and one handler |
 
-The full appliance test suite, 332 checks, passes on an emulated Cortex-M3.
+The full appliance test suite, 361 checks, passes on an emulated Cortex-M3.
 What emulation does not establish is real timing, which matters for the reply
 deadline and the failsafe interval, or the platform functions against real
 peripherals.
@@ -517,7 +517,7 @@ Ordered by when you need them rather than by importance.
 | [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) | First, on real hardware | Getting `libadip` onto your board and talking to an engine: the declaration, the generated tables, the three port functions, the transport, and the first heartbeat. Stops before any mechanism is callable. |
 | [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | Next, once the link works | One mechanism from a pin to something the engine can reason about: driver, handler, declaration entry, and the optional skill entry. Includes the electrical steps and the failure cases. |
 | [`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) | For a machine that is not espresso | What a domain is, and the two ways to supply one. Describing your machine's outcomes in a file, which needs no code, and writing a profile when you want it to identify causes rather than report drift. |
-| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | Alongside both | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, about 7.3 KB of flash on a Cortex-M4. Why it is shaped the way it is, and what it does not do. |
+| [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | Alongside both | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, about 7.8 KB of flash on a Cortex-M4. Why it is shaped the way it is, and what it does not do. |
 | [`PROTOCOL.md`](./PROTOCOL.md) | As the reference | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. Normative; the two guides above are the practical paths through it. |
 | [`ROADMAP.md`](./ROADMAP.md) | For where this is going | The build plan, in phases. |
 
@@ -533,7 +533,7 @@ plan, check the safety envelope, invoke, record, explain, remember. All three
 autonomy levels run against a real appliance, and all four model seams are
 reached in a session.
 
-The appliance library occupies about 7.3 KB of flash on a Cortex-M4, with no static
+The appliance library occupies about 7.8 KB of flash on a Cortex-M4, with no static
 or heap allocation, and its full test suite passes on an emulated Cortex-M3.
 Both are reproducible without a board: see [`sdk/README.md`](./sdk/README.md).
 

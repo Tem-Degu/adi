@@ -106,6 +106,10 @@ adip_ctx_t ctx;
 static uint8_t rx[ADIP_RX_MIN];
 static adip_sample_t batch[ADIP_MAX_BATCH];
 
+/* Room for every parameter of every tool, which is the largest a machine can
+ * ever need. A product with one adjustable mechanism sizes this at one. */
+static adip_setpoint_t held[ADIP_EX900_TOOL_COUNT * ADIP_EX900_MAX_PARAMS];
+
 /*
  * Tool indices, in declaration order.
  *
@@ -181,6 +185,10 @@ adip_action_t adip_on_invoke(const adip_invocation_t *inv,
         case TOOL_GRIND_SET:
             if (arg_num(inv, "setting", &value)) {
                 grind_setting = value;
+                /* Said here because this is where the setting changes. The
+                 * engine's belief about a value it sent is provisional until
+                 * the machine confirms what it did with it. */
+                (void)adip_report_setpoint(&ctx, TOOL_GRIND_SET, 0u, value);
             }
             /* A real collar takes about two seconds; nothing here does, so the
              * result is known immediately. */
@@ -189,12 +197,14 @@ adip_action_t adip_on_invoke(const adip_invocation_t *inv,
         case TOOL_SET_TEMP:
             if (arg_num(inv, "temperature", &value)) {
                 brew_temp = value;
+                (void)adip_report_setpoint(&ctx, TOOL_SET_TEMP, 0u, value);
             }
             return ADIP_ACTION_DONE;
 
         case TOOL_DOSE:
             if (arg_num(inv, "mass", &value)) {
                 dose_mass = value;
+                (void)adip_report_setpoint(&ctx, TOOL_DOSE, 0u, value);
             }
             return ADIP_ACTION_DONE;
 
@@ -337,6 +347,18 @@ int main(void)
     }
 
     adip_set_signal_buffer(&ctx, batch, ADIP_MAX_BATCH);
+    adip_set_setpoint_buffer(&ctx, held,
+                             (uint8_t)(sizeof(held) / sizeof(held[0])));
+
+    /*
+     * Where each adjustable mechanism stands at power-on. An engine that has
+     * just connected knows nothing, and without this it has no position to
+     * plan a first correction from. A product reads these back from its own
+     * non-volatile store; they are held in variables here.
+     */
+    (void)adip_report_setpoint(&ctx, TOOL_GRIND_SET, 0u, grind_setting);
+    (void)adip_report_setpoint(&ctx, TOOL_SET_TEMP, 0u, brew_temp);
+    (void)adip_report_setpoint(&ctx, TOOL_DOSE, 0u, dose_mass);
 
     /*
      * Both bitmaps default to the safe reading: nothing satisfied, so nothing

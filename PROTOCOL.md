@@ -1218,8 +1218,19 @@ engine-bound because it determines the coffee. That is the line 8.3.2 draws.
    validation rather than refusing the session.
 3. Engine opens a session. The appliance MAY refuse if another session holds
    control.
-4. Engine maintains a heartbeat at `session.heartbeat_interval_ms`.
-5. Engine closes the session, or the appliance times it out.
+4. Appliance reports its setpoints, per §10.2.5, and the engine SHOULD wait
+   briefly for them before acting on an instruction. An engine that acts first
+   may be asked to move a mechanism whose position it does not yet know, and
+   must then refuse something it would have been able to do a moment later.
+5. Engine maintains a heartbeat at `session.heartbeat_interval_ms`.
+6. Engine closes the session, or the appliance times it out.
+
+Step 4 was absent from this list, and an engine therefore had no defined way to
+learn what the machine was set to. It could determine how far a mechanism
+should move and not what to send to move it there, which left it planning from
+what it remembered of its own earlier commands. That is wrong whenever anything
+else has touched the machine, and the paragraph below requires that anything
+else can.
 
 The operator MUST be able to take control at any moment by physical means. A
 physical override MUST abort an engine-initiated operation and MUST emit an
@@ -1620,10 +1631,11 @@ in both cases with `MALFORMED`.
 | 3 | signal batch | appliance to engine |
 | 4 | event | appliance to engine |
 | 5 | heartbeat | engine to appliance, and its reply |
+| 6 | setpoint report | appliance to engine |
 
-An appliance MUST reject kinds 2, 3 and 4 arriving inbound, and an engine MUST
-reject kind 1 arriving inbound. Each is only ever sent in one direction, and
-accepting a reversed message would mean acting on an echo.
+An appliance MUST reject kinds 2, 3, 4 and 6 arriving inbound, and an engine
+MUST reject kind 1 arriving inbound. Each is only ever sent in one direction,
+and accepting a reversed message would mean acting on an echo.
 
 Unknown keys within a recognised message MUST be ignored, so a minor version may
 add optional fields per §11.
@@ -1644,6 +1656,9 @@ event        { 0: 4, 1: <event index>, 2: <t_ms>,
 
 heartbeat    { 0: 5 }                                    engine to appliance
 heartbeat    { 0: 5, 1: <busy, bool>, 2: <faulted, bool> }          the reply
+
+setpoints    { 0: 6, 1: [ [ <tool index>, <parameter index>,
+                            <quantity> ], ... ] }
 ```
 
 `invocation id` is an unsigned 32-bit integer, chosen by the engine, unique
@@ -1665,6 +1680,35 @@ liveness is detectable in both directions: the appliance detects a dead engine
 through the timeout of §4.6 requirement 4, and without a reply the engine has no
 equivalent. They also tell it whether the machine is mid-operation or waiting
 for a person to clear a fault, which it otherwise learns only by being refused.
+
+A **setpoint report** states what each of the appliance's mechanisms is
+currently commanded to. `<tool index>` indexes the declaration's `tools` array
+and `<parameter index>` indexes that tool's parameters in declaration order, so
+no names cross the wire.
+
+A setpoint is not a signal. A signal is something the machine measured; a
+setpoint is what it was told to reach. A heater commanded to 62 C may be
+measuring 45 C on its way there, and an engine sizing the next correction
+adjusts the command rather than the thermometer. An appliance MUST report the
+commanded value and MUST NOT substitute a measurement for it.
+
+An appliance SHOULD report its setpoints on first contact, and SHOULD report a
+value that has changed, for whatever reason: an invocation the engine sent, a
+control on the machine's own panel, a service menu, a position restored at
+power-on. §9.1 requires that an operator can take control by physical means at
+any moment, so a value the engine merely remembers is stale by mandate, and
+this is the only way an engine can be right about a setting it did not make
+itself.
+
+An appliance that reports nothing is conforming and limits what an engine can
+do for it: an engine MUST NOT assume a position it has not been given, so a
+correction it cannot size is refused. An empty report is distinct from no
+report and means the machine has no numeric parameters to describe.
+
+An appliance MUST reject a setpoint whose unit is not the one its declaration
+names for that parameter, in the direction it is generated, for the same reason
+§9.2 requires it of an invocation: an engine planning from the wrong quantity
+would send a value in a unit the machine never had.
 
 An appliance MUST treat an arriving heartbeat as evidence of liveness, exactly
 as it treats any other valid frame, and MUST reply. An engine MUST send one at

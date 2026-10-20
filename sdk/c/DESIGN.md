@@ -449,6 +449,36 @@ Footprint after M6: 12212 B text, 0 data, 0 bss on x86-64, 7298 B on a
 Cortex-M4. The budget was raised from 12
 to 16 KB in section 8, with the reasoning, rather than met by squeezing.
 
+**M6a. Setpoint reporting. DONE.** ADI-P 9.1 established a session in five
+steps and none of them established what the machine was currently set to. The
+engine could work out how far a mechanism should move and not what to send to
+move it there, so it planned from what it remembered having sent. The same
+clause requires that an operator can take control by physical means at any
+moment, which makes an engine-side record of a setting stale by mandate. The
+appliance already owns its interlocks, its preconditions, whether it is busy
+and whether it is faulted; settings were the piece left out of that list.
+
+Message kind 6 carries a list of `[tool, parameter, value]`, addressed by
+position as signals and events already are, so no names cross the wire. The
+library side is `adip_set_setpoint_buffer` and `adip_report_setpoint`, with the
+caller owning the storage as it does for the receive buffer and the sample
+batch, so a machine that reports nothing pays no RAM for the ability. No fourth
+port function was needed.
+
+Three behaviours are load-bearing. A value already held sends nothing, or a
+link with four dials carries a frame per poll for no information. The report
+precedes the heartbeat reply, because the engine drains what is waiting and
+then acts, and a report sent on the following poll arrives one request late.
+Nothing is sent before a peer has spoken, because a machine powers up long
+before an engine attaches and those bytes reach no one, after which the value
+was marked as reported and lost. A heartbeat arriving after a gap longer than
+`control_timeout_ms` marks the set dirty, so an engine that has just connected
+is told afresh.
+
+Footprint after M6a: 7820 B text on a Cortex-M4, up from 7298. `adip_ctx_t` is
+724 bytes, up from 712, and the 496 recorded at M5 had already been overtaken
+before this work.
+
 **M7. Port and integrate.** Reference port for one real MCU, then run the
 conformance suite against a device rather than a simulator.
 

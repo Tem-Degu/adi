@@ -282,6 +282,28 @@ changes nothing about how a request is validated. A note must not state a target
 or an effect magnitude, because those belong in a style and in the skill where
 they are validated, and a figure written twice will diverge.
 
+### What the machine reports
+
+A declaration says what a machine can do. What it is doing, and what it is set
+to, come from the machine itself while a session is open.
+
+| | |
+|---|---|
+| Signals | Measured readings, batched, from sensors |
+| Events | Something happened, including a fault and a physical override |
+| Setpoints | What each mechanism is commanded to |
+
+A setpoint is not a reading. A heater commanded to 62 degrees reads 45 on the
+way there, and the engine needs the commanded value, because a correction is
+planned from where a mechanism stands. The engine may only send an absolute
+value, so without a present position it cannot work out what to send.
+
+The appliance is the authority on its own settings. ADI-P 9.1 requires that an
+operator can take control by physical means at any moment, which makes a value
+the engine remembers having sent stale by mandate. A machine that reports no
+setpoints conforms, and the engine will be unable to plan a correction for a
+mechanism until it has set that mechanism itself.
+
 ## Build
 
 ```sh
@@ -753,11 +775,11 @@ messages over a transport, and a cycle runs end to end: observe, diagnose,
 plan, check the safety envelope, invoke, record, remember. All three autonomy
 levels run against a real appliance.
 
-The appliance library occupies **about 7.3 KB of flash on a Cortex-M4** with no
+The appliance library occupies **about 7.8 KB of flash on a Cortex-M4** with no
 static or heap allocation, against the 16 KB budget stated in
 [`c/DESIGN.md`](./c/DESIGN.md). A product adds its own generated tables.
 
-The full appliance test suite, 332 checks, passes on an emulated Cortex-M3:
+The full appliance test suite, 361 checks, passes on an emulated Cortex-M3:
 
 ```sh
 cd c

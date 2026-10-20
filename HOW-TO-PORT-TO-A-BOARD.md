@@ -37,7 +37,8 @@ not own a thread, and it does not own a clock. You hand it bytes and call it
 from your main loop.
 
 Your side of the work is four things: a declaration, three port functions, a
-transport, and one handler. The first three are this document. The handler is
+transport, and one handler. The appliance also reports what it is set to,
+which is part of the main loop and of each handler. The first three are this document. The handler is
 the next one.
 
 ---
@@ -178,6 +179,7 @@ to your build. The header gives you counts to check against:
 #define ADIP_CM1_TOOL_COUNT   1
 #define ADIP_CM1_SIGNAL_COUNT 1
 #define ADIP_CM1_EVENT_COUNT  1
+#define ADIP_CM1_MAX_PARAMS   1
 ```
 
 and the source gives you one symbol, `adip_device_cm1`, which is the device
@@ -323,9 +325,10 @@ void USART1_IRQHandler(void)
 ### The main loop
 
 ```c
-static adip_ctx_t     ctx;
-static uint8_t        rx[ADIP_RX_MIN];
-static adip_sample_t  batch[ADIP_MAX_BATCH];
+static adip_ctx_t      ctx;
+static uint8_t         rx[ADIP_RX_MIN];
+static adip_sample_t   batch[ADIP_MAX_BATCH];
+static adip_setpoint_t held[ADIP_CM1_TOOL_COUNT * ADIP_CM1_MAX_PARAMS];
 
 int main(void)
 {
@@ -338,6 +341,13 @@ int main(void)
         return 1;
     }
     adip_set_signal_buffer(&ctx, batch, ADIP_MAX_BATCH);
+    adip_set_setpoint_buffer(&ctx, held,
+                             (uint8_t)(sizeof(held) / sizeof(held[0])));
+
+    /* Where each mechanism stands at power-on. A product reads this back from
+       its own non-volatile store; do not assume a value you did not read. */
+    adip_report_setpoint(&ctx, ADIP_TOOL_CM1_ADI_ESPRESSO_GRIND_SET_SETTING,
+                         0u, grind_setting_now());
 
     /* Both bitmaps default to the safe reading: nothing satisfied, so nothing
        is invocable until the firmware says otherwise. Set these from your
@@ -369,8 +379,7 @@ int main(void)
 }
 ```
 
-That skeleton, with the declaration above and stubs for the four hardware
-functions, compiles against `libadip` under `-Wall -Wextra -pedantic
+That skeleton, with the declaration above and stubs for the hardware functions, compiles against `libadip` under `-Wall -Wextra -pedantic
 -Wconversion -Wsign-conversion` with no warnings. If yours does not, the
 difference is in your code rather than in the shape of this.
 
@@ -392,6 +401,39 @@ is in fact dead.
 
 The library already applies this rule. Do not add a "bytes seen recently"
 check of your own alongside it.
+
+### Telling the engine what you are set to
+
+The engine plans a correction from where a mechanism stands, and it cannot
+read your dials. ADI-P 9.1 also requires that an operator can take control by
+physical means at any moment, so a value the engine merely remembers having
+sent is stale by mandate. The appliance reports its own settings, as it already
+reports its interlocks and its faults.
+
+Call `adip_report_setpoint` in two places:
+
+- once at startup, for every parameter, with the value the mechanism actually
+  holds, read back from your own store
+- in each handler, after the command is accepted, with the value you took
+
+```c
+adip_report_setpoint(&ctx, ADIP_TOOL_CM1_ADI_ESPRESSO_GRIND_SET_SETTING,
+                     0u, setting);
+```
+
+The call records the value; `adip_poll` sends it. Several changes in one pass
+therefore cost one frame. A value equal to the one already held sends nothing,
+and nothing is sent at all until a peer has spoken, because a machine powers
+up long before an engine attaches. After a silence longer than
+`control_timeout_ms` the whole set is sent again, so an engine that has just
+connected is told afresh without your firmware tracking sessions.
+
+A wrong unit, or a tool or parameter index the declaration does not have, is
+refused with `ADIP_ERR_ARG` and never reaches the wire.
+
+The startup report is the one most easily left out, and leaving it out gives
+you a machine the engine can command but cannot correct: it has no position to
+plan from until it has set something itself.
 
 ---
 
@@ -550,6 +592,9 @@ which takes one mechanism from a pin to something the engine can reason about.
 - [ ] Bytes fed as they arrive, not assembled into frames first
 - [ ] `adip_poll` called every loop, not only when bytes arrive
 - [ ] Preconditions and interlocks set from real sensors
+- [ ] `adip_set_setpoint_buffer` called before any report
+- [ ] Every parameter reported at startup, read back rather than assumed
+- [ ] Every handler reports the value it accepted
 - [ ] `make test` passes on the target
 - [ ] `status` answers from the engine
 - [ ] Reply deadline and failsafe interval measured on hardware
