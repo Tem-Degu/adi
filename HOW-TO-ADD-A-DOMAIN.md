@@ -11,6 +11,10 @@ This guide has two parts. Part one needs no programming beyond your own
 firmware. Part two is for when you want the machine to know why something went
 wrong.
 
+**When you finish part one, you will have** a machine that takes spoken
+requests about its own results, answers questions about them, and corrects one
+that has drifted. **After part two** it can also say why a result went wrong.
+
 Read [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) and
 [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) first. This one assumes your
 machine already answers and has at least one tool.

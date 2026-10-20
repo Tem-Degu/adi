@@ -9,6 +9,11 @@ It stops at the first heartbeat. Making a mechanism callable is the next job and
 is covered by [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md), which assumes
 you have finished here.
 
+**When you finish, you will have** a board that connects, identifies itself,
+answers a heartbeat, reports what it is set to, and enters a safe state by
+itself when the link dies. No mechanism is callable yet; that is the next
+guide.
+
 The specification is [`PROTOCOL.md`](./PROTOCOL.md). The library's own design
 notes are [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md). This guide is the practical
 path from an empty project to a working link.
@@ -537,8 +542,8 @@ make test        # on a host
 make arm-test    # on an emulated Cortex-M3, if you have the toolchain
 ```
 
-322 checks. They test the arithmetic, the decoder, the validation and the
-failsafe. If they pass on your target and your link answers `status`, the port
+364 checks across seven suites. They test the arithmetic, the decoder, the
+validation and the failsafe. If they pass on your target and your link answers `status`, the port
 is done.
 
 What neither emulation nor these tests establish is **real timing against real

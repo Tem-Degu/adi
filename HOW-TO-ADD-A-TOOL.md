@@ -12,6 +12,11 @@ cannot yet, start with
 [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md), which ends where
 this begins.
 
+**When you finish, you will have** one mechanism the engine can call, with its
+range and its units enforced in two places, and, if you write the optional
+skill entry, one the engine will choose by itself to reach a result somebody
+asked for.
+
 The specification is [`PROTOCOL.md`](./PROTOCOL.md). This guide is the
 practical path through it.
 

@@ -29,8 +29,11 @@ toaster, a printer and a washing machine, grouped together](./assets/appliances.
 
 ## Try it
 
-Requires a Rust toolchain and a C compiler. The build fetches crates; after that nothing here reaches a network, and no account,
-API key or model download is involved.
+Three steps, in order. The first needs a Rust toolchain and a C compiler and
+nothing else: no account, no API key, no model download. The build fetches
+crates; after that nothing here reaches a network.
+
+### 1. Watch a machine correct itself
 
 ```sh
 git clone https://github.com/Tem-Degu/adi.git
@@ -58,7 +61,71 @@ The appliance is a real build of the C library running as a separate process.
 That value crossed the same framing, checksum, decoding, range validation and
 safety envelope that would run on a machine.
 
-[Running it](#running-it) covers the other levels, speech, and the tests.
+### 2. Say something to it
+
+This step needs a model, because turning words into a request is the one thing
+no amount of declaration can do. One command says what to obtain:
+
+```sh
+cargo run -p adi-cli -- models check --config models/models.example-local.yaml
+# obtain the files it names, then
+cargo run -p adi-cli -- run --config models/models.example-local.yaml
+```
+
+Now say what you want in plain words, or ask it something. A request becomes a
+goal, the engine works out which mechanism serves it and what value to send,
+and the appliance checks that value again before acting. Step 3 shows a full
+exchange.
+
+A hosted model can serve the same seam where a network is available; see
+[Using a hosted model](./sdk/MODELS.md#using-a-hosted-model).
+[`sdk/MODELS.md`](./sdk/MODELS.md) also covers which models were measured and
+what they scored. The short version: use a 4B class model or better, because
+the smaller one we measured guessed where it should have asked.
+
+### 3. Run a machine that is not an espresso machine
+
+Two further appliances are included as firmware for an emulated
+microcontroller, on a profile that ships no knowledge of its own, so everything
+they reason about comes from a file their manufacturer wrote. This needs
+`arm-none-eabi-gcc` and `qemu-system-arm`, both free, and no board.
+
+```sh
+cd c && make shower && cd ..
+# prints the pty to use below
+qemu-system-arm -M lm3s6965evb -nographic -serial pty -kernel c/build/arm/shower.elf
+
+cargo run -p adi-cli -- run --serial /dev/pts/N \
+  --declaration examples/declarations/shower.yaml \
+  --skill examples/declarations/shower.skill.yaml \
+  --knowledge examples/declarations/shower.knowledge.yaml \
+  --config models/models.example-local.yaml
+```
+
+```
+> make it a bit warmer
+  understood   Adjust
+  target       x.rainline.water_temperature = now +2 C
+  measured     38 C
+  sent         x.rainline.mixer.set_temperature
+               celsius = 40 C
+  accepted     by the appliance
+```
+
+### The machines included
+
+| Machine | What it is | How it runs |
+|---|---|---|
+| Example EX-900 espresso machine | The first domain, with a profile behind it that can tell two faults apart | A host process, driven over stdin and stdout |
+| Dryline DH-20 food dehydrator | One mechanism and one outcome, on `base/v1` | Firmware on an emulated Cortex-M3, over a UART |
+| Rainline SX-2 shower mixer | Two mechanisms and two outcomes, on `base/v1` | Firmware on an emulated Cortex-M3, over a UART |
+
+The last two exist to answer one question: whether a manufacturer can describe
+a machine nobody wrote a profile for and have it understood, corrected and
+actuated. Their declarations are in `sdk/examples/declarations/` and their
+firmware in `sdk/c/dehydrator/` and `sdk/c/shower/`.
+
+[Running it](#running-it) covers the autonomy levels, speech and the tests.
 
 ---
 
@@ -264,28 +331,21 @@ knowing which correction would make one of them worse, is what a domain profile
 holds. `sdk/examples/declarations/printer.*` is a worked example, and
 [`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) covers both.
 
-### Documents you should read to get started
+### Where to start
 
-Two guides, in order.
+Three guides, in the order you need them, listed with everything else under
+[Documents](#documents):
 
-[`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) is first. It covers
-getting the library onto your hardware and answering a heartbeat: the
-declaration, the generated tables, the three functions above, the transport, and
-what a working link looks like. It stops before any mechanism is callable.
+1. [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md), until the link
+   answers.
+2. [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md), until a mechanism moves.
+3. [`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md), if your machine is not
+   an espresso machine.
 
-[`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) is next, and assumes the link
-works. It takes one mechanism from a pin to something the engine can reason
-about, including the electrical steps and the failure cases.
-
-[`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) is for a machine that is
-not an espresso machine. It covers describing your machine's outcomes in a file,
-which needs no code and is enough for it to take spoken requests and correct
-itself when something drifts, and then writing a profile when you want it to
-identify causes.
-
-You can do a good deal of all three before any board exists. The example appliance
-is a host build of the same C library, driven over stdin and stdout, which is a
-real transport binding rather than a simulation.
+You can do a good deal of all three before any board exists. The example
+appliance is a host build of the same C library driven over stdin and stdout,
+and the two firmware examples run on an emulated Cortex-M3, which are real
+transport bindings rather than simulations.
 
 ## Autonomy
 
@@ -403,9 +463,8 @@ and what each request cost. Run it before committing to a board.
 
 ADI is designed to run fully locally and needs no network, account or key. Where
 a network is available, a hosted model can serve the interpreter or either
-speech seam. See **Using a hosted model** in
-[`sdk/README.md`](./sdk/README.md). D0 uses no model at all, so the
-deterministic path is unaffected.
+speech seam. See [Using a hosted model](./sdk/MODELS.md#using-a-hosted-model).
+D0 uses no model at all, so the deterministic path is unaffected.
 
 Storage depends on which models are installed. A speech recogniser, an
 interpreter and a synthesiser together are roughly 1 to 3 GB at the quantisations
@@ -421,40 +480,17 @@ supply.
 
 ## Running it
 
-Requires a Rust toolchain and a C compiler.
+[Try it](#try-it) is the first run. This section is what to do after it.
 
-```sh
-git clone https://github.com/Tem-Degu/adi.git
-cd adi/sdk
-
-cargo build --release
-cd c && make example && cd ..
-
-cargo run -p adi-cli -- run --level d0
-```
-
-This starts the example appliance as a separate process, opens a session
-against it, and presents a prompt. For a board running your own firmware,
-give the port instead:
+`adi run` starts the example appliance as a separate process and opens a
+session against it. For a board running your own firmware, give the port
+instead:
 
 ```sh
 cargo run -p adi-cli -- run --level d0 --serial /dev/ttyUSB0 --baud 115200
 ```
 
-Typing `cycle` observes a finished cycle:
-
-```
-> cycle
-  observing    an 18 s shot, described as sour
-  diagnosed    under_extracted
-  chose        adi.espresso.grind.set_setting
-  sent         setting = 20 Step
-  accepted     by the appliance
-```
-
-The appliance is a real build of the C library running as a separate process.
-Every value crosses the same framing, checksum, decoding, range validation and
-safety envelope that would run on a machine.
+`--baud` defaults to 115200. Typing `help` at the prompt lists the commands.
 
 ### Running at each level
 
@@ -513,7 +549,8 @@ Ordered by when you need them rather than by importance.
 
 | File | Read it | Contents |
 |---|---|---|
-| [`sdk/README.md`](./sdk/README.md) | To run it | The implementation: layout, build, model configuration and current limitations. |
+| [`sdk/README.md`](./sdk/README.md) | To run it | The implementation: layout, build, what a machine declares, what it reports, and the current limitations. |
+| [`sdk/MODELS.md`](./sdk/MODELS.md) | Before choosing a model | Which models were measured and what they scored, choosing hardware, using a model or a hosted provider of your own, and the speech seams. |
 | [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) | First, on real hardware | Getting `libadip` onto your board and talking to an engine: the declaration, the generated tables, the three port functions, the transport, and the first heartbeat. Stops before any mechanism is callable. |
 | [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | Next, once the link works | One mechanism from a pin to something the engine can reason about: driver, handler, declaration entry, and the optional skill entry. Includes the electrical steps and the failure cases. |
 | [`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) | For a machine that is not espresso | What a domain is, and the two ways to supply one. Describing your machine's outcomes in a file, which needs no code, and writing a profile when you want it to identify causes rather than report drift. |
@@ -521,9 +558,9 @@ Ordered by when you need them rather than by importance.
 | [`PROTOCOL.md`](./PROTOCOL.md) | As the reference | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. Normative; the two guides above are the practical paths through it. |
 | [`ROADMAP.md`](./ROADMAP.md) | For where this is going | The build plan, in phases. |
 
-A firmware engineer integrating a machine needs the two guides and the parts of
-`PROTOCOL.md` they refer to. Reading the specification front to back first is a
-reasonable thing to do and is not the shortest route.
+A firmware engineer integrating a machine needs the first two guides and the
+parts of `PROTOCOL.md` they refer to. Reading the specification front to back
+first is a reasonable thing to do and is not the shortest route.
 
 ## Status
 
