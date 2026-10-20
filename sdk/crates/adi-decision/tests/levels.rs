@@ -576,6 +576,61 @@ fn a_step_with_no_present_value_is_refused() {
     assert!(adi_decision::decide(&planner, &selector, &goals(), &ctx(), &BTreeMap::new()).is_err());
 }
 
+// ------------------------------------------- an unknown present position
+
+/// A missing present value is the engine's own gap, not a bad answer, so the
+/// model is not asked again.
+///
+/// It used to surface as `MalformedSelection`, which is in the retryable set,
+/// so a request the engine could not plan spent a second model call being told
+/// the same thing. On a local model that is another fifteen seconds for an
+/// answer that cannot help: no value the model returns supplies a position the
+/// engine never had.
+#[test]
+fn an_unknown_present_position_does_not_ask_the_model_twice() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct Counting(Rc<Cell<usize>>);
+
+    impl ActionChooser for Counting {
+        fn choose(
+            &self,
+            _: &[adi_decision::Goal],
+            _: &[Candidate],
+            _: &SelectionContext<'_>,
+        ) -> Result<Vec<ProposedStep>, String> {
+            self.0.set(self.0.get() + 1);
+            Ok(vec![ProposedStep { candidate: 0, value: 25.0 }])
+        }
+    }
+
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+
+    let calls = Rc::new(Cell::new(0));
+    let selector = ModelActionSelector::new(Counting(Rc::clone(&calls)), &d).unwrap();
+
+    // No present value for any parameter, which is what a session that has
+    // observed nothing and sent nothing knows.
+    let err = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &BTreeMap::new())
+        .expect_err("there is nothing to move from");
+
+    assert_eq!(calls.get(), 1, "asking again cannot supply a position");
+
+    let text = err.to_string();
+    assert!(
+        text.contains("currently set to"),
+        "the refusal should say what is missing: {text}"
+    );
+    assert!(
+        !text.contains("malformed"),
+        "and must not blame the model: {text}"
+    );
+}
+
 // --------------------------------------------- a correction that corrects
 
 /// The defect this group exists for.

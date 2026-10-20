@@ -157,6 +157,24 @@ pub enum DecisionError {
     UndeclaredSelection(String),
     #[error("model returned a malformed selection: {0}")]
     MalformedSelection(String),
+    /// The engine does not know where the mechanism currently stands, so there
+    /// is nothing to move from.
+    ///
+    /// Not the model's fault and not worth retrying: the same request fails the
+    /// same way until the engine has observed a cycle or sent a value itself,
+    /// which is its only knowledge of a parameter's position. ADI-P defines no
+    /// message for asking an appliance where a dial is.
+    ///
+    /// This was reported as a malformed selection, which blamed a model that
+    /// had answered correctly and spent a second model call retrying something
+    /// no answer could fix.
+    #[error(
+        "the engine does not know what '{parameter}' on '{tool}' is currently set \
+         to, so it cannot work out what to send. It learns a position by \
+         observing a cycle or by setting it, and neither has happened in this \
+         session."
+    )]
+    NoPresentValue { parameter: String, tool: String },
     /// The backend could not be reached or did not answer. Distinct from
     /// answering badly, which is MalformedSelection, and from there being no
     /// backend at all, which is NoModelBackend and a configuration error.
@@ -701,10 +719,10 @@ fn attempt(
     let mut out = Vec::with_capacity(resolved.len());
     for (step, chosen) in resolved {
         let present = current.get(&chosen.parameter).copied().ok_or_else(|| {
-            DecisionError::MalformedSelection(format!(
-                "no present value for parameter '{}'",
-                chosen.parameter
-            ))
+            DecisionError::NoPresentValue {
+                parameter: chosen.parameter.clone(),
+                tool: chosen.tool.0.clone(),
+            }
         })?;
 
         // The goal this step serves, found by the variable its candidate moves.

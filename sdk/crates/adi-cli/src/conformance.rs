@@ -41,8 +41,16 @@ pub struct Case {
     /// about the style alone.
     #[serde(default)]
     pub material: Option<String>,
-    /// A spoken request rather than a completed cycle. The engine has no
-    /// request path yet, so such a case must declare `pending`.
+    /// A spoken request rather than a completed cycle.
+    ///
+    /// Turning words into intent needs a model, so a case carrying only words
+    /// needs `--interpreter`; with `intent` below it runs deterministically.
+    ///
+    /// This said the engine had no request path, and it had one: `adi run`
+    /// called `Session::request`, which no test did. The checks below reach
+    /// the same decision by their own route and stop at which tool was
+    /// chosen, so they passed while a request could not move a mechanism at
+    /// all. See `a_request_moves_a_mechanism` in adi-session.
     #[serde(default)]
     pub request: Option<String>,
     /// The structured form of `request`. What a model would have produced, and

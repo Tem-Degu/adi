@@ -150,6 +150,133 @@ fn agreeable(count: usize) -> Recorded {
     t
 }
 
+// -------------------------------------------------------------- the request
+//
+// The path a spoken instruction takes once it is structured intent, and the
+// one path in this crate that had no test at all. `Session::request` had a
+// single caller, the interactive prompt, so nothing ever checked that asking
+// for something moved a mechanism. It did not: the planner was handed an empty
+// map of present settings and refused every step for want of a position to
+// move from.
+//
+// The conformance runner reaches the same decision by its own route and stops
+// one step earlier, at which tool was chosen rather than what value was sent,
+// so it passed throughout.
+
+fn asking_for(variable: &str, value: f64, unit: Unit) -> adi_protocol::intent::Intent {
+    let mut targets = BTreeMap::new();
+    targets.insert(
+        VariableId::from(variable),
+        adi_protocol::intent::TargetSpec::Absolute(Quantity::new(value, unit)),
+    );
+
+    adi_protocol::intent::Intent {
+        kind: adi_protocol::intent::IntentKind::Adjust,
+        style: None,
+        material: None,
+        targets,
+    }
+}
+
+/// The headline capability: a person asks for something and the machine moves.
+#[test]
+fn a_request_moves_a_mechanism() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+    let transport = agreeable(4);
+    let log = transport.log();
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    // A cycle on target, so nothing is corrected and the only thing the engine
+    // takes from it is where the mechanism stands.
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+    assert!(log.invocations().is_empty(), "the cycle itself needed nothing");
+
+    let turn = session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 1_000)
+        .expect("a request for something a declared tool can move is servable");
+
+    assert_eq!(turn.performed.len(), 1, "one variable, one action");
+    assert_eq!(
+        log.invocations().len(),
+        1,
+        "and it reached the wire, which is the whole point"
+    );
+}
+
+/// A correction moves the machine, so the next request must plan from where it
+/// put it and not from where the last cycle found it.
+///
+/// Asserted by asking for the same thing twice. Working from the cycle alone,
+/// both requests see position 20 and send the identical value; working from
+/// what was sent, the second starts nearer the goal and sends something else.
+#[test]
+fn a_request_plans_from_what_was_last_sent() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+    let transport = agreeable(8);
+    let log = transport.log();
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+
+    let first = session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 1_000)
+        .expect("servable");
+    let second = session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 2_000)
+        .expect("servable");
+
+    let sent = |turn: &adi_session::Turn| -> f64 {
+        turn.records[0]
+            .arguments
+            .get("position")
+            .expect("the correction set position")
+            .value
+    };
+
+    assert_eq!(log.invocations().len(), 2, "both requests acted");
+    assert_ne!(
+        sent(&first),
+        sent(&second),
+        "the second request planned from the first one's result, not from the cycle"
+    );
+}
+
+/// A session that has observed nothing and sent nothing does not know where
+/// any mechanism stands, and ADI-P has no message for asking the appliance.
+/// Refusing is correct; the refusal has to say so.
+#[test]
+fn a_request_with_no_known_position_says_what_is_missing() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+    let mut session = Session::open(
+        &d,
+        Some(&s),
+        &dom,
+        AutonomyLevel::D0,
+        Box::new(Recorded::new()),
+    )
+    .expect("opens");
+
+    let err = session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 0)
+        .expect_err("nothing is known about any position yet");
+
+    let text = err.to_string();
+    assert!(
+        text.contains("position"),
+        "the refusal should name the parameter: {text}"
+    );
+    assert!(
+        !text.contains("malformed"),
+        "and must not blame the model, which was not consulted: {text}"
+    );
+}
+
 // ----------------------------------------------------------------- the loop
 
 #[test]

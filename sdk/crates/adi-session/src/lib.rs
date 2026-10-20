@@ -277,7 +277,7 @@ impl<'a> Session<'a> {
             });
         }
 
-        let current = self.current_settings(&cycle);
+        let current = self.current_settings(&cycle.settings);
         let planner = Planner::new(self.declaration, self.skill, self.domain);
         let context = SelectionContext {
             history: &self.history,
@@ -343,7 +343,7 @@ impl<'a> Session<'a> {
             self.selector.as_ref(),
             &goals,
             &context,
-            &BTreeMap::new(),
+            &self.present_settings(),
         )?;
 
         self.perform(
@@ -644,6 +644,50 @@ impl<'a> Session<'a> {
         });
     }
 
+    /// What the engine knows the machine is set to, for a request that has no
+    /// cycle of its own to read.
+    ///
+    /// ADI-P has five message kinds and none of them reports a parameter's
+    /// current value, so the engine cannot ask the appliance where a dial is.
+    /// Its knowledge has exactly two sources, and this is both of them: the
+    /// settings a cycle reported, and the values it has since sent itself.
+    ///
+    /// The order matters. A cycle records what the machine was set to while it
+    /// ran, and a correction sent after it moved the machine on, so the
+    /// decisions are applied over the cycle and the newest wins. Taking the
+    /// cycle alone would plan the next request from a setting that has already
+    /// been superseded.
+    ///
+    /// `DecisionRecord::arguments` is the value actually sent, after clamping,
+    /// and `perform` extends the history only once every invocation in the
+    /// turn has been accepted, so a refused correction never appears here and
+    /// never moves the engine's idea of the machine. The exception is a turn
+    /// whose first step was accepted and whose second was refused: the first
+    /// has moved the machine and is absent from the history. ADI-P 9.5 allows
+    /// one variable at a time, which makes multi-step turns rare, and
+    /// correcting it belongs with the partial-application problem rather than
+    /// here.
+    ///
+    /// Empty is a truthful answer on a session that has observed nothing and
+    /// sent nothing. The planner refuses rather than assuming a position, and
+    /// says which parameter it could not place.
+    fn present_settings(&self) -> BTreeMap<String, Quantity> {
+        let mut present = match self.memory.last() {
+            Some(remembered) => self.current_settings(&remembered.settings),
+            None => BTreeMap::new(),
+        };
+
+        // Oldest first, so the most recent value for a parameter is the one
+        // left standing. `history` is extended in turn order.
+        for record in &self.history {
+            for (parameter, value) in &record.arguments {
+                present.insert(parameter.clone(), *value);
+            }
+        }
+
+        present
+    }
+
     /// What the machine is set to now, for the planner to move from.
     ///
     /// Keyed by parameter name, because that is what the planner asks for and
@@ -656,10 +700,13 @@ impl<'a> Session<'a> {
     /// response and handing back the variable's value gives the planner
     /// seconds where it asked for steps, and it correctly refuses. The
     /// conformance runner had this same confusion once.
-    fn current_settings(&self, cycle: &Cycle) -> BTreeMap<String, Quantity> {
+    fn current_settings(
+        &self,
+        settings: &BTreeMap<adi_protocol::ids::VariableId, Quantity>,
+    ) -> BTreeMap<String, Quantity> {
         let mut current = BTreeMap::new();
 
-        for (variable, value) in &cycle.settings {
+        for (variable, value) in settings {
             // Under its own name first, which covers the case where a cycle
             // records a setting by the parameter that sets it.
             current.insert(variable.0.clone(), *value);
