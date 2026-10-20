@@ -128,6 +128,17 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         declaration.device.vendor, declaration.device.model
     );
 
+    // Before the link, not after. A local model takes tens of seconds to load
+    // and a hosted one may have weights to fetch, and an appliance publishes
+    // from the moment the port opens whether or not anybody is reading. Open
+    // first and that reading goes into a buffer that fills and then drops
+    // bytes, so the first request of the session is served from no state at
+    // all while the engine was busy starting a model. It is also the ordinary
+    // courtesy of not holding a link you cannot answer on.
+    let interpreter = load_interpreter(config_path.as_deref(), domain.as_ref(), &declaration.device)?;
+    let voice = Voice::load(config_path.as_deref())?;
+    let chooser = load_chooser(config_path.as_deref(), requested)?;
+
     let transport: Box<dyn adi_session::Transport> = match &serial_path {
         Some(path) => {
             println!("  appliance    {path} at {baud} baud");
@@ -162,9 +173,8 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // ADI-P 3.3 makes D2 the default. It needs a chooser, so without one the
     // session opens at D0, which is deterministic and needs no model. The
     // level is reported either way rather than assumed, because a record
-    // naming a level that did not run is the one thing 3.3 forbids.
-    let chooser = load_chooser(config_path.as_deref(), requested)?;
-
+    // naming a level that did not run is the one thing 3.3 forbids. The
+    // chooser was started above, with the other model seams.
     let mut session = match (requested, chooser) {
         (AutonomyLevel::D2, Some((chooser, label))) => {
             println!("  chooser      {label}");
@@ -210,9 +220,6 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("  autonomy     {}", session.level().as_str());
-
-    let interpreter = load_interpreter(config_path.as_deref(), domain.as_ref(), &declaration.device)?;
-    let voice = Voice::load(config_path.as_deref())?;
 
     println!();
     help();

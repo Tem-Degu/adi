@@ -469,6 +469,18 @@ board.
   check` reports this rather than reporting a present model file as ready.
   Three of the four seams can be served today by an external program through
   the `process` backend, and the fourth, the explainer, needs no model.
+- **A local interpreter is too slow for speech on a machine without an
+  accelerator.** On four shared cloud cores, the recommended 4B model takes two
+  to four minutes an utterance, and every example declaration allows four
+  seconds between heartbeats. While the engine waits for a model it sends none,
+  so the appliance enters its safe state and aborts what the engine started,
+  correctly. Measure on the hardware a product will ship. Speech over a hosted
+  seam completes in seconds; `MODELS.md` has both sets of runs.
+- **The chooser is started as a second process with the same command as the
+  interpreter**, so a local setup loads the weights twice and holds two copies
+  resident. The backends read the contract off each request and one process can
+  serve both seams, which is what this code's own comment claims. On a compute
+  module that duplication matters.
 - **A local model of the recommended size does not complete a correction at
   D2.** Qwen 3 4B Q4 chose the right mechanism on every cycle measured and
   proposed the setting already in force, so the correction is refused. It also

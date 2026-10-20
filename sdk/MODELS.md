@@ -521,6 +521,53 @@ a 120 second interval between calls to the heater, and the appliance enforces
 that itself. The engine reported what the machine said and the session carried
 on.
 
+### The same, with nothing hosted
+
+The four machines again, with the 4B interpreter running locally beside
+Moonshine and Piper: no key, no network, nothing leaving the building. On four
+shared cloud cores, no accelerator.
+
+| Machine | Heard | Understood | Outcome | Wall clock |
+|---|---|---|---|---|
+| Espresso | exact | "half of last time", from a sentence stating thirty seconds | refused, nothing remembered to be half of | 2m04s |
+| Dehydrator | exact | a change against the present reading, approximately right | sent 38 C, accepted | 3m14s |
+| Shower | exact | correct | refused: the chooser proposed the setting already in force | 3m51s |
+| Washer | exact | correct | stopped: the appliance faulted on the heartbeat gap | 3m54s |
+
+Read that as three separate statements.
+
+**Hearing is not the weak part.** Moonshine transcribed all four at 0.97,
+matching the hosted transcriber.
+
+**The path is mechanically complete.** Audio becomes a transcript, a transcript
+becomes an intent, the engine plans from a reading the appliance published, and
+on the dehydrator the value reached the element and was accepted. Every failure
+came from a component entitled to refuse, and each said why.
+
+**It is not usable at this speed, and the appliances are right to say so.** Two
+to four minutes an utterance, against declarations that allow four seconds
+between heartbeats. While the engine waits for a model it sends none, so the
+appliance enters its safe state and aborts what the engine started. That is the
+declaration being enforced rather than a defect, and it is the reason to
+measure latency on the hardware a product will actually ship, which the
+interpreter entry in `manifest.yaml` also says.
+
+Two model faults are worth naming because the engine caught both. Given a
+sentence with a number in it, this model twice produced a relation to a past
+cycle instead; the instruction now shows an absolute example and it still did
+so on the espresso sentence. And at D2 it proposed the value already in force,
+which the engine refuses because a correction that moves nothing is not a
+correction. D0 and D1 are unaffected by the second of those, since the engine
+computes the value at both.
+
+One defect of ours, found here and not yet fixed: at D1 and D2 the engine
+starts the chooser as its own process with the same command as the interpreter,
+so a local setup loads the weights twice and holds two copies resident. The
+backends read the contract off each request and one process can serve both
+seams, which is what this engine's own comment claims it does. On a compute
+module inside an appliance that duplication is the difference between fitting
+and not fitting.
+
 ## Running without models
 
 An engine with an unserved seam is a supported configuration. It refuses the

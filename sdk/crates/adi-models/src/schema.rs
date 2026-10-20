@@ -144,9 +144,13 @@ If the request cannot be resolved, ask instead:
 Asking is a correct answer. Do not guess a value, a style or a cycle that was
 not stated: the result of this request moves a machine.
 
-State relations rather than resolving them. \"Half of last time\" is
-{\"of\": \"last\", \"scale\": 0.5}, never a number. The engine holds the memory
-and does the arithmetic.
+A number that was said is a number. \"Thirty seconds\" is
+{\"value\": 30, \"unit\": \"s\"}, and \"down to twelve percent\" is
+{\"value\": 12, \"unit\": \"pct\"}. Do not turn it into a relation.
+
+State relations rather than resolving them, where a relation is what was said.
+\"Half of last time\" is {\"of\": \"last\", \"scale\": 0.5}, never a number. The
+engine holds the memory and does the arithmetic.
 
 A relation may also be against what the machine is reading now, which is given
 above where the machine reports it. \"A bit warmer\" is
