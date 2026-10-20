@@ -149,6 +149,7 @@ mod tests {
             cycle: None,
             memory: None,
             rejected: None,
+            settings: None,
         }
     }
 

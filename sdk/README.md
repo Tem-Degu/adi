@@ -293,6 +293,25 @@ to, come from the machine itself while a session is open.
 | Events | Something happened, including a fault and a physical override |
 | Setpoints | What each mechanism is commanded to |
 
+A signal says which outcome it measures, where it measures one:
+
+```yaml
+signals:
+  - id: "x.dryline.signal.moisture"
+    unit: pct
+    sample_rate_hz: 2
+    accuracy: { abs: 1.0, unit: pct }
+    measures: "x.dryline.moisture_content"
+```
+
+A correction is the difference between where an outcome is and where it should
+be, so a reading the engine cannot place leaves it with a target and no
+distance. Without that line the engine reads "sensor 0 is at 15.0 pct" and
+cannot tell that the sensor is the thing the request named. The field is
+optional: a signal that measures no outcome is telemetry, which is worth
+publishing and is not something anyone states a target on. `adi validate`
+checks that the outcome exists and that the two units agree.
+
 A setpoint is not a reading. A heater commanded to 62 degrees reads 45 on the
 way there, and the engine needs the commanded value, because a correction is
 planned from where a mechanism stands. The engine may only send an absolute

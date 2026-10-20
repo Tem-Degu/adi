@@ -485,6 +485,34 @@ behaviour that will make the appliance look worse than it is.
 `filtered` MUST state whether smoothing has already been applied, so the engine
 does not filter twice.
 
+`measures` names the variable a signal measures, where it measures one:
+
+```yaml
+  - id: "x.dryline.signal.moisture"
+    unit: pct
+    sample_rate_hz: 2
+    accuracy: { abs: 1.0, unit: pct }
+    measures: "x.dryline.moisture_content"
+```
+
+A correction is the difference between where an outcome is and where it should
+be. A signal is a reading from a sensor and a variable is something the engine
+reasons about, and nothing in a declaration connected the two, so an engine
+receiving a reading could not tell whether it was the quantity a request had
+just named.
+
+The field is OPTIONAL. A signal that measures no variable the engine models is
+telemetry, which is worth publishing and is not something a target is stated
+on. Where it is present the named variable MUST be one the resolved knowledge
+declares, and the signal's unit MUST be that variable's unit. An engine MUST
+discard a sample whose unit is not the declared one, because a value in one
+unit compared against a target in another yields a number that means nothing
+and would reach an actuator regardless.
+
+An engine MAY plan from the most recent such reading. One that does SHOULD
+prefer it to a value recorded in an earlier cycle, which describes what the
+machine did rather than where it stands.
+
 ### 4.4 Tools
 
 ```yaml

@@ -20,6 +20,7 @@ fn the_documented_wiring_compiles() {
         cycle: None,
         memory: None,
         rejected: None,
+        settings: None,
     };
 
     // Both calls are expected to refuse here, because the seams are the

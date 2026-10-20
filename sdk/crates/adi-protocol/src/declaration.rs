@@ -84,6 +84,23 @@ pub struct Signal {
     pub latency_ms: Option<u64>,
     #[serde(default)]
     pub derived_from: Option<SemanticId>,
+    /// The outcome this signal measures, where it measures one.
+    ///
+    /// A signal says what the machine senses. A variable says what the engine
+    /// reasons about. Nothing connected the two, so a reading arrived as
+    /// "sensor 0 reads 15.0 pct" and the engine had no way to know that sensor
+    /// was the thing a request had just named. It planned from the last
+    /// observed cycle instead, and on a machine that has run none it planned
+    /// from nothing: a request for a change computed a change of zero, which
+    /// is accepted by the appliance and moves nothing.
+    ///
+    /// Optional, because a signal need not measure an outcome. Air
+    /// temperature on its way to a setpoint is worth publishing and is not
+    /// something anyone asks for. One that does name an outcome must be in
+    /// that outcome's unit, which `adi validate` checks where the knowledge is
+    /// resolved and the session checks again before using a value.
+    #[serde(default)]
+    pub measures: Option<SemanticId>,
     #[serde(default)]
     pub filtered: bool,
     #[serde(default)]

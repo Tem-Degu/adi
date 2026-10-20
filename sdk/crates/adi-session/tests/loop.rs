@@ -365,6 +365,183 @@ fn a_setpoint_for_an_undeclared_parameter_is_ignored() {
         .is_err());
 }
 
+// --------------------------------------------------- what the appliance measures
+//
+// A correction is the difference between where an outcome is and where it
+// should be. The appliance publishes what it measures as it measures it, and a
+// signal declaring `measures` is what says which outcome a reading belongs to.
+// Without that the engine kept every reading and could place none of them, so
+// a request computed a change of zero: accepted by the appliance, and no
+// mechanism moved.
+
+/// A reading is what makes a target into a correction.
+#[test]
+fn a_measured_reading_sizes_a_request() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+
+    // Signal 1 is `adi.example.signal.elapsed`, which the declaration says
+    // measures `cycle_time`. The machine is at 30 seconds.
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Setpoints(vec![adi_wire::Setpoint {
+        tool: 0,
+        parameter: 0,
+        value: adi_wire::Num::from_quantity(Quantity::new(20.0, Unit::Step)).unwrap(),
+    }]));
+    transport.will_reply(Message::Signals(vec![adi_wire::Sample {
+        signal: 1,
+        value: adi_wire::Num::from_quantity(Quantity::new(30.0, Unit::S)).unwrap(),
+        t_ms: 1_000,
+    }]));
+    transport.will_fall_silent();
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Completed,
+        reason: None,
+    });
+    let log = transport.log();
+
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session.tick(5_000).expect("heartbeats");
+
+    assert_eq!(
+        session.measurements().get(&VariableId::from("cycle_time")),
+        Some(&Quantity::new(30.0, Unit::S)),
+        "the reading was placed on the outcome the declaration names"
+    );
+
+    // Asking for 25 against a measured 30 is a change of five seconds. The
+    // skill says a step of position moves cycle_time by -1.4 seconds, so the
+    // position has to go up.
+    let turn = session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 6_000)
+        .expect("servable");
+
+    let sent = turn.records[0]
+        .arguments
+        .get("position")
+        .expect("the correction set position")
+        .value;
+
+    assert_eq!(log.invocations().len(), 1);
+    assert!(
+        sent > 20.0,
+        "sized from the measured 30 seconds, so the position rises above the 20 it sits at; sent {sent}"
+    );
+}
+
+/// A signal that measures no outcome is telemetry. Kept off the planner rather
+/// than guessed at: the engine then sizes nothing and sends the value already
+/// in force, which is what it can honestly do.
+#[test]
+fn a_reading_that_names_no_outcome_is_not_planned_from() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+
+    // Signal 0 is the mass signal, which declares no `measures`.
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Setpoints(vec![adi_wire::Setpoint {
+        tool: 0,
+        parameter: 0,
+        value: adi_wire::Num::from_quantity(Quantity::new(20.0, Unit::Step)).unwrap(),
+    }]));
+    transport.will_reply(Message::Signals(vec![adi_wire::Sample {
+        signal: 0,
+        value: adi_wire::Num::from_quantity(Quantity::new(18.0, Unit::G)).unwrap(),
+        t_ms: 1_000,
+    }]));
+    transport.will_fall_silent();
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Completed,
+        reason: None,
+    });
+    let log = transport.log();
+
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session.tick(5_000).expect("heartbeats");
+    assert!(
+        session.measurements().is_empty(),
+        "nothing says what that sensor measures"
+    );
+
+    let turn = session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 6_000)
+        .expect("servable");
+
+    let sent = turn.records[0]
+        .arguments
+        .get("position")
+        .expect("the correction set position")
+        .value;
+
+    assert_eq!(log.invocations().len(), 1);
+    assert_eq!(
+        sent, 20.0,
+        "with nothing to measure against, the value in force is all the engine can send"
+    );
+}
+
+/// A reading in the wrong unit is refused. The engine subtracts a measurement
+/// from a target, and arithmetic across units yields a number that means
+/// nothing and would reach hardware anyway.
+#[test]
+fn a_reading_in_the_wrong_unit_is_ignored() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Signals(vec![adi_wire::Sample {
+        signal: 1,
+        value: adi_wire::Num::from_quantity(Quantity::new(30.0, Unit::G)).unwrap(),
+        t_ms: 1_000,
+    }]));
+
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session
+        .tick(5_000)
+        .expect("a reading in the wrong unit is not a link failure");
+
+    assert!(
+        session.measurements().is_empty(),
+        "elapsed is declared in seconds; grams is a different machine"
+    );
+}
+
+/// The latest reading stands. The machine is where it is now, not where it was
+/// when the first sample was taken.
+#[test]
+fn the_latest_reading_replaces_the_one_before_it() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Signals(vec![
+        adi_wire::Sample {
+            signal: 1,
+            value: adi_wire::Num::from_quantity(Quantity::new(30.0, Unit::S)).unwrap(),
+            t_ms: 1_000,
+        },
+        adi_wire::Sample {
+            signal: 1,
+            value: adi_wire::Num::from_quantity(Quantity::new(27.0, Unit::S)).unwrap(),
+            t_ms: 1_500,
+        },
+    ]));
+
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session.tick(5_000).expect("heartbeats");
+
+    assert_eq!(
+        session.measurements().get(&VariableId::from("cycle_time")),
+        Some(&Quantity::new(27.0, Unit::S))
+    );
+}
+
 // ----------------------------------------------------------------- the loop
 
 #[test]

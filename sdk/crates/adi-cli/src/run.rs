@@ -242,6 +242,15 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         // a refusal is frequently the correct outcome, and a person who has
         // just been refused is the one most likely to want to ask something
         // else. Only a broken link ends a session, and that is handled below.
+        // Find out where the machine is before acting on what was just said.
+        // The appliance reports its settings on contact and publishes its
+        // readings as it takes them, and a person typing a request has
+        // usually left a gap during which both arrived. Planning from what
+        // was true when the session opened is planning from the past, and a
+        // reading that arrived in that gap is exactly the one the request is
+        // about. A link that has died is reported by the command that follows.
+        let _ = session.tick(now_ms);
+
         let outcome = match line {
             "" => continue,
             "quit" | "exit" => break,
@@ -668,9 +677,29 @@ fn cycle(
 
 fn status(session: &mut Session<'_>, now_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
     session.tick(now_ms)?;
-    println!("  link         alive");
+
+    // What the heartbeat actually produced, rather than the fact that it was
+    // sent. This printed "alive" unconditionally, including against a port
+    // with nothing behind it, which is the one question a person runs this
+    // command to answer.
+    if session.answered_last_tick() {
+        println!("  link         alive, the appliance answered");
+    } else {
+        println!("  link         open, and nothing answered");
+        println!("               a port that opens is not evidence of a machine.");
+        println!("               check power, wiring, baud rate, and that the");
+        println!("               firmware calls adip_poll every loop.");
+    }
+
     println!("  cycles held  {}", session.memory().len());
     println!("  decisions    {}", session.history().len());
+
+    // What the machine says about itself. Empty until it reports, which a
+    // conforming appliance does on contact.
+    for (variable, value) in session.measurements() {
+        println!("  measured     {} = {} {:?}", variable.0, value.value, value.unit);
+    }
+
     Ok(())
 }
 
@@ -725,6 +754,7 @@ fn listen(
         cycle: None,
         memory: Some(session.memory()),
         rejected: None,
+        settings: None,
     };
 
     let understood = language.understand(&audio, &context)?;
@@ -749,6 +779,7 @@ fn request(
         cycle: None,
         memory: Some(session.memory()),
         rejected: None,
+        settings: None,
     };
 
     let understood = interpreter.interpret(words, &context)?;
@@ -788,15 +819,33 @@ fn act_on(
             }
             for (variable, target) in &intent.targets {
                 println!("  target       {} {}", variable.0, describe(target));
+                // What the appliance says that outcome is now. The difference
+                // between the two is the correction, so printing one without
+                // the other shows half of the arithmetic.
+                if let Some(now) = session.measurements().get(variable) {
+                    println!("  measured     {} {:?}", now.value, now.unit);
+                }
             }
 
             let turn = session.request(&intent, now_ms)?;
             if turn.performed.is_empty() {
                 println!("  result       nothing needed doing");
             }
-            for invocation in &turn.performed {
+            for (record, invocation) in turn.records.iter().zip(&turn.performed) {
                 println!("  sent         {}", invocation.tool.as_str());
+                // The value, as the cycle path has always printed it. Without
+                // it a person watching cannot tell a correction from a message
+                // that moved nothing, and those look identical from here.
+                for (name, value) in &invocation.numeric_arguments {
+                    println!("               {name} = {} {:?}", value.value, value.unit);
+                }
                 println!("  accepted     by the appliance");
+
+                for (parameter, wanted) in &record.clamped_from {
+                    println!(
+                        "  at limit     {parameter} could not reach {wanted}; this correction is partial"
+                    );
+                }
             }
         }
     }

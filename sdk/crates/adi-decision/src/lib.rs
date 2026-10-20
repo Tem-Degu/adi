@@ -96,6 +96,18 @@ pub struct SelectionContext<'a> {
     pub cycle: Option<&'a Cycle>,
     /// What the machine remembers producing.
     pub memory: Option<&'a dyn Memory>,
+    /// What each mechanism is set to now, keyed by parameter name.
+    ///
+    /// At D2 the value a chooser proposes is the absolute setting to send, so
+    /// a chooser that cannot see the present one cannot propose a sensible
+    /// value. It was taken from the observed cycle alone, which a request has
+    /// none of, and a model with nothing to add to answered with the change
+    /// instead: read as an absolute, clamped to the end of the range, and
+    /// reported as a correction that could not be carried out in full.
+    ///
+    /// Filled by `decide` from the same map the planner computes with, so the
+    /// model and the engine are working from one set of numbers.
+    pub settings: Option<&'a std::collections::BTreeMap<String, Quantity>>,
     /// Why the previous answer was refused, on a second attempt.
     ///
     /// `None` on the first attempt. A chooser that can pass this to a model
@@ -127,6 +139,7 @@ impl<'a> SelectionContext<'a> {
             history,
             cycle,
             memory: None,
+            settings: None,
             rejected: None,
         }
     }
@@ -139,6 +152,15 @@ impl<'a> SelectionContext<'a> {
 
     pub fn with_memory(mut self, memory: &'a dyn Memory) -> Self {
         self.memory = Some(memory);
+        self
+    }
+
+    /// The same context, carrying what the mechanisms are set to.
+    pub fn with_settings(
+        mut self,
+        settings: &'a std::collections::BTreeMap<String, Quantity>,
+    ) -> Self {
+        self.settings = Some(settings);
         self
     }
 }
@@ -701,7 +723,12 @@ fn attempt(
         .filter_map(|g| g.target_variable.clone())
         .collect();
     let candidates = planner.candidates_for_all(&variables);
-    let selection = selector.select(goals, &candidates, context)?;
+
+    // The selector is shown the same present settings the planner computes
+    // with. Anything else gives a model one set of numbers and the engine
+    // another, and at D2 the model's answer is the value that gets sent.
+    let seen = context.with_settings(current);
+    let selection = selector.select(goals, &candidates, &seen)?;
 
     // Resolve every step against the candidate list before planning any of it,
     // so a plan that is wrong in its last step performs none of its first.

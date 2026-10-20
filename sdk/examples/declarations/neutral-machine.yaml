@@ -36,6 +36,12 @@ signals:
     unit: s
     sample_rate_hz: 20
     accuracy: { abs: 0.05, unit: s }
+    # What this sensor measures, in the engine's terms. A correction is the
+    # difference between where an outcome is and where it should be, so a
+    # reading the engine cannot place leaves it sizing a change from nothing.
+    # The mass signal above measures no outcome and says nothing, which is the
+    # ordinary case for telemetry.
+    measures: "cycle_time"
 
 tools:
   # A discrete mechanism with a direction that carries meaning.

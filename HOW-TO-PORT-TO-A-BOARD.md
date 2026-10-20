@@ -73,6 +73,11 @@ signals:
     unit: g
     sample_rate_hz: 20
     accuracy: { abs: 0.1, unit: g }
+    # The outcome this sensor measures, where it measures one. A correction is
+    # the difference between where an outcome is and where it should be, so a
+    # reading the engine cannot place leaves it with a target and no distance.
+    # Leave it out on a sensor that measures nothing anyone states a target on.
+    measures: "yield_mass"
 
 tools:
   - id: "adi.espresso.grind.set_setting"
@@ -592,6 +597,7 @@ which takes one mechanism from a pin to something the engine can reason about.
 - [ ] Bytes fed as they arrive, not assembled into frames first
 - [ ] `adip_poll` called every loop, not only when bytes arrive
 - [ ] Preconditions and interlocks set from real sensors
+- [ ] Every sensor that measures an outcome says so, with `measures`
 - [ ] `adip_set_setpoint_buffer` called before any report
 - [ ] Every parameter reported at startup, read back rather than assumed
 - [ ] Every handler reports the value it accepted

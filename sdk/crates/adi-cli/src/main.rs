@@ -208,7 +208,7 @@ fn validate(
     knowledge_path: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let declaration = load_declaration(&path)?;
-    let _domain = domain::load_or_report(
+    let domain = domain::load_or_report(
         &declaration.domain_profile,
         knowledge_path.as_deref(),
     );
@@ -218,6 +218,103 @@ fn validate(
             eprintln!("declaration: FAILED  {e}");
             std::process::exit(1);
         }
+    }
+
+    // A signal that says which outcome it measures is checked against the
+    // knowledge, because the engine will subtract one from the other to size a
+    // correction. An outcome nobody declared cannot be targeted, so the
+    // reading would be kept and never used; a reading in another unit would be
+    // compared against a target in this one. Both are silent at run time,
+    // which is why they are stated here.
+    //
+    // Only where the profile is in this build. Without it there is no
+    // knowledge to check against, and the profile line above has already said
+    // so.
+    if let Some(domain) = &domain {
+        let knowledge = domain.knowledge();
+        let mut faults = Vec::new();
+        for signal in &declaration.signals {
+            let Some(measures) = &signal.measures else {
+                continue;
+            };
+            let id = adi_protocol::ids::VariableId(measures.0.clone());
+            match knowledge.variable(&id) {
+                None => faults.push(format!(
+                    "signal '{}' measures '{}', which this machine's knowledge does not declare",
+                    signal.id, measures
+                )),
+                Some(def) if def.unit != signal.unit => faults.push(format!(
+                    "signal '{}' is in {:?} and '{}' is declared in {:?}",
+                    signal.id, signal.unit, measures, def.unit
+                )),
+                Some(_) => {}
+            }
+        }
+        if !faults.is_empty() {
+            eprintln!("declaration: FAILED");
+            for fault in &faults {
+                eprintln!("    {fault}");
+            }
+            std::process::exit(1);
+        }
+    }
+
+    // What `libadip` can hold, from `c/include/adip.h` and
+    // `c/include/adip_tables.h`.
+    //
+    // The engine's validator knew nothing about the appliance library's
+    // compile-time limits, so a declaration could pass here and be refused by
+    // `adip_init`, which returns ADIP_ERR_UNSUPPORTED and leaves a machine
+    // that never starts. That is the worst place to find out: a green check
+    // and a dead appliance, with nothing on the link to say why. It happened
+    // on the example dehydrator, whose rate limit declared twenty invocations
+    // against a history of sixteen.
+    //
+    // These are the defaults. A manufacturer who has raised them in their own
+    // build can ignore what follows, which is why it is reported and does not
+    // stop validation.
+    let mut over = Vec::new();
+    if declaration.envelope.invariants.len() > 8 {
+        over.push(format!(
+            "{} invariants, and ADIP_MAX_INVARIANTS is 8",
+            declaration.envelope.invariants.len()
+        ));
+    }
+    if declaration.envelope.rate_limits.len() > 4 {
+        over.push(format!(
+            "{} rate limits, and ADIP_MAX_RATE_LIMITS is 4",
+            declaration.envelope.rate_limits.len()
+        ));
+    }
+    if declaration.envelope.resources.len() > 4 {
+        over.push(format!(
+            "{} resources, and ADIP_MAX_RESOURCES is 4",
+            declaration.envelope.resources.len()
+        ));
+    }
+    for limit in &declaration.envelope.rate_limits {
+        if let Some(max) = limit.max_invocations {
+            if max > 16 {
+                over.push(format!(
+                    "rate limit '{}' allows {} invocations, and ADIP_MAX_RATE_HISTORY is 16",
+                    limit.id, max
+                ));
+            }
+        }
+    }
+    if declaration.envelope.interlocks.len() > 32 {
+        over.push(format!(
+            "{} interlocks, and ADIP_MAX_INTERLOCKS is 32",
+            declaration.envelope.interlocks.len()
+        ));
+    }
+    if !over.is_empty() {
+        println!("appliance library: this declaration is beyond the defaults in libadip");
+        for line in &over {
+            println!("    {line}");
+        }
+        println!("  adip_init will return ADIP_ERR_UNSUPPORTED unless those");
+        println!("  limits are raised in the firmware build.");
     }
 
     // ADI-P 3.1 names the tools each conformance level requires. The names are

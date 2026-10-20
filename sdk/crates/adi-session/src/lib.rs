@@ -136,7 +136,35 @@ pub struct Session<'a> {
     /// engine can be right about one it did not set.
     believed: BTreeMap<String, Quantity>,
 
+    /// The latest reading of each outcome the appliance measures.
+    ///
+    /// A correction is the difference between where an outcome is and where it
+    /// should be, so without this the engine can size nothing: a request for a
+    /// change computed a change of zero, which an appliance accepts and which
+    /// moves no mechanism. The appliance publishes these as it measures them;
+    /// a signal that declares `measures` is what says which outcome a reading
+    /// belongs to.
+    ///
+    /// The latest reading only. A series belongs to a cycle, which is observed
+    /// as a whole and diagnosed by the profile; this is the present state of
+    /// the machine, which is what a request arriving now is about.
+    measured: BTreeMap<adi_protocol::ids::VariableId, Quantity>,
+
     transport: Box<dyn Transport>,
+
+    /// Whether the appliance answered the last heartbeat.
+    ///
+    /// A port that opens is not evidence of a machine, and until this existed
+    /// nothing could tell the difference: `tick` sent a heartbeat and
+    /// discarded whatever came back, so a status check reported a live link
+    /// with nothing on the other end. That cost a session of work against
+    /// firmware which, it turned out, had never started.
+    ///
+    /// An appliance is not obliged to answer, so this is reported rather than
+    /// treated as a fault. What it supports is a truthful answer to the
+    /// question a person is actually asking, which is whether anything is
+    /// listening.
+    answered_last_tick: bool,
 
     next_invocation_id: u32,
     now_ms: u64,
@@ -202,6 +230,8 @@ impl<'a> Session<'a> {
             memory: RecentCycles::default(),
             history: Vec::new(),
             believed: BTreeMap::new(),
+            measured: BTreeMap::new(),
+            answered_last_tick: false,
             transport,
             next_invocation_id: 1,
             now_ms: 0,
@@ -263,13 +293,18 @@ impl<'a> Session<'a> {
         // that crosses an emulated UART does not come back inside fifty
         // milliseconds. Later reads only drain what is already there.
         let mut wait = self.control_timeout_ms.min(500) as u32;
+        let mut heard = false;
         for _ in 0..64 {
             match self.transport.recv(wait)? {
-                Some(message) => self.absorb(&message),
+                Some(message) => {
+                    heard = true;
+                    self.absorb(&message);
+                }
                 None => break,
             }
             wait = self.heartbeat_interval_ms.min(50) as u32;
         }
+        self.answered_last_tick = heard;
         Ok(())
     }
 
@@ -353,6 +388,7 @@ impl<'a> Session<'a> {
             cycle: Some(&cycle),
             memory: Some(&self.memory),
             rejected: None,
+            settings: None,
         };
 
         let corrections = decide(
@@ -384,10 +420,20 @@ impl<'a> Session<'a> {
 
         let mut goals = Vec::new();
         for (variable, target) in &resolved.targets {
+            // What the outcome is now, which is what makes the difference
+            // between a target and a correction. A reading the appliance has
+            // just published outranks the last cycle: the cycle is what the
+            // machine did, and the reading is where it stands.
+            let present = self
+                .measured
+                .get(variable)
+                .copied()
+                .or_else(|| self.memory.last().and_then(|r| r.setting(variable)));
+
             goals.push(adi_core::request::as_diagnosis(
                 variable,
                 *target,
-                self.memory.last().and_then(|r| r.setting(variable)),
+                present,
                 knowledge,
             ));
         }
@@ -405,6 +451,7 @@ impl<'a> Session<'a> {
             cycle: None,
             memory: Some(&self.memory),
             rejected: None,
+            settings: None,
         };
 
         let corrections = decide(
@@ -441,20 +488,71 @@ impl<'a> Session<'a> {
     /// version does not act on is not a protocol error, and an engine that
     /// failed on one could not talk to a newer appliance.
     fn absorb(&mut self, message: &Message) {
-        let Message::Setpoints(reported) = message else {
-            return;
-        };
-
-        for setpoint in reported {
-            let Some(name) = self.parameter_name(setpoint.tool, setpoint.parameter) else {
-                // An index this declaration does not have. The appliance is
-                // describing a machine the engine was not given, which is a
-                // mismatched declaration rather than a value to act on.
-                continue;
-            };
-            self.believed
-                .insert(name, adi_wire::to_quantity(setpoint.value));
+        match message {
+            Message::Setpoints(reported) => {
+                for setpoint in reported {
+                    let Some(name) = self.parameter_name(setpoint.tool, setpoint.parameter) else {
+                        // An index this declaration does not have. The
+                        // appliance is describing a machine the engine was not
+                        // given, which is a mismatched declaration rather than
+                        // a value to act on.
+                        continue;
+                    };
+                    self.believed
+                        .insert(name, adi_wire::to_quantity(setpoint.value));
+                }
+            }
+            Message::Signals(samples) => {
+                for sample in samples {
+                    let Some((variable, value)) = self.measurement(sample) else {
+                        continue;
+                    };
+                    self.measured.insert(variable, value);
+                }
+            }
+            _ => {}
         }
+    }
+
+    /// What one sample measures, where the declaration says it measures
+    /// anything.
+    ///
+    /// Three ways this returns nothing, and each is a reading the engine must
+    /// not plan from. An index the declaration does not have describes a
+    /// machine the engine was not given. A signal with no `measures` is
+    /// telemetry: worth publishing, and not an outcome anyone states a target
+    /// on. A value in the wrong unit would be compared against a target in
+    /// another, and arithmetic across units yields a number that means nothing
+    /// and would be sent to hardware anyway.
+    fn measurement(
+        &self,
+        sample: &adi_wire::Sample,
+    ) -> Option<(adi_protocol::ids::VariableId, Quantity)> {
+        let signal = self.declaration.signals.get(usize::from(sample.signal))?;
+        let measures = signal.measures.as_ref()?;
+        let value = adi_wire::to_quantity(sample.value);
+        if value.unit != signal.unit {
+            return None;
+        }
+        Some((
+            adi_protocol::ids::VariableId(measures.0.clone()),
+            value,
+        ))
+    }
+
+    /// Whether anything answered the last heartbeat.
+    ///
+    /// False is not a fault: an appliance may say nothing, and the failsafe
+    /// that matters is the appliance's own. It does mean the engine has no
+    /// evidence that a machine is there, which is the difference between a
+    /// port that opened and a machine that is listening.
+    pub fn answered_last_tick(&self) -> bool {
+        self.answered_last_tick
+    }
+
+    /// The latest reading of each outcome the appliance measures.
+    pub fn measurements(&self) -> &BTreeMap<adi_protocol::ids::VariableId, Quantity> {
+        &self.measured
     }
 
     /// The parameter an index pair names, by the order both sides read from

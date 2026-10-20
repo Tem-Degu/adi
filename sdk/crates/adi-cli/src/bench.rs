@@ -165,6 +165,7 @@ fn run(
         cycle: None,
         memory: None,
         rejected: None,
+        settings: None,
     };
 
     for case in &corpus.cases {

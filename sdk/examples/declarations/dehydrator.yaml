@@ -14,7 +14,10 @@
 #
 # What it gets: spoken requests reach its tool, questions are answered from
 # what it declared, and an outcome that drifted is corrected back towards
-# target. What it does not get is a cause: the base profile reports that
+# target. Run end to end against the firmware under QEMU with a hosted model
+# on both model seams: a load measured at 15 pct against a request for 12 was
+# corrected by setting the element to 48 C, and a load at 36.5 pct dried to
+# 10.7 after the engine set 61 C. What it does not get is a cause: the base profile reports that
 # moisture is high and cannot tell a damp load from a failing fan, because
 # telling those apart is what a domain profile is for. See
 # HOW-TO-ADD-A-DOMAIN.md.
@@ -43,6 +46,13 @@ signals:
     range: { min: 0, max: 100, unit: pct }
     sample_rate_hz: 2
     accuracy: { abs: 1.0, unit: pct }
+    # The probe measures the outcome someone states a target on, and saying so
+    # is what lets a correction be sized. Without this line the engine reads
+    # "sensor 0 is at 15.0 pct" and cannot tell that the sensor is the thing
+    # the request named, so it plans a change of zero: accepted by the
+    # appliance, and nothing moves. A signal that measures no outcome leaves
+    # this out and is telemetry.
+    measures: "x.dryline.moisture_content"
 
 tools:
   - id: "x.dryline.heater.set_temperature"

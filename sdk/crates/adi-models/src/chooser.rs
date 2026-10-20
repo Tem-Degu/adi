@@ -319,12 +319,30 @@ impl ProcessChooser {
     }
 }
 
-/// What a parameter is set to now, from the cycle being corrected.
+/// What a parameter is set to now.
 ///
 /// Matched by name, or by a variable name ending with the parameter name. A
 /// cycle records `grind_setting` while the tool that moves it declares a
 /// parameter called `setting`, and the engine resolves the two the same way.
+///
+/// The engine's own record of the settings comes first, because it carries
+/// what the appliance has reported and what the engine has sent, in the order
+/// those happened. The cycle is the fallback and is older by definition: it
+/// says what the machine was set to while it ran.
+///
+/// This read the cycle alone, and a request has no cycle, so at D2 a model
+/// was asked for an absolute setting without being told the present one on
+/// every spoken request.
 fn present(context: &SelectionContext<'_>, parameter: &str) -> Option<f64> {
+    if let Some(settings) = context.settings {
+        if let Some(found) = settings
+            .iter()
+            .find(|(name, _)| name.as_str() == parameter || name.ends_with(parameter))
+        {
+            return Some(found.1.value);
+        }
+    }
+
     let cycle = context.cycle?;
 
     cycle
