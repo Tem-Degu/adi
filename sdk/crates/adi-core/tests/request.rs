@@ -115,6 +115,46 @@ fn half_of_last_time_resolves_against_memory() {
     assert_eq!(got.unit, Unit::Ml, "the unit comes from what was remembered");
 }
 
+/// The sentence a person actually says. "A bit more than it is now" names no
+/// number and no past run, and until `now` existed there was no form for it:
+/// a model shown a live reading still had to ask what it should be more than.
+#[test]
+fn a_change_relative_to_now_resolves_against_the_reading() {
+    let mut measured = std::collections::BTreeMap::new();
+    measured.insert(
+        VariableId::from("additive_volume"),
+        Quantity::new(6.0, Unit::Ml),
+    );
+
+    let resolved = request::resolve_with(
+        &relative(Reference::Now, None, Some(Quantity::new(2.0, Unit::Ml))),
+        &NoMemory,
+        &measured,
+    )
+    .expect("the appliance is reporting this one");
+
+    let got = resolved.targets[&VariableId::from("additive_volume")];
+    assert_eq!(got.value, 8.0, "two more than the six it is reading");
+    assert_eq!(got.unit, Unit::Ml);
+}
+
+/// No reading means nothing to be relative to. Refusing says so; the
+/// alternative is a number invented for a machine to act on.
+#[test]
+fn a_change_relative_to_now_without_a_reading_is_refused() {
+    let err = request::resolve_with(
+        &relative(Reference::Now, None, Some(Quantity::new(2.0, Unit::Ml))),
+        &NoMemory,
+        &std::collections::BTreeMap::new(),
+    )
+    .expect_err("nothing is being reported");
+
+    assert!(
+        err.to_string().contains("no reading"),
+        "the refusal should say what is missing: {err}"
+    );
+}
+
 /// Zero is a real answer: "none at all".
 #[test]
 fn a_scale_of_zero_is_allowed() {

@@ -332,11 +332,30 @@ impl<'a> Session<'a> {
             self.last_heartbeat_ms = 0;
             self.tick(now_ms + u64::from(attempt) * self.heartbeat_interval_ms)?;
 
-            if !self.believed.is_empty() {
+            if self.state_is_in_hand() {
                 return Ok(());
             }
         }
         Ok(())
+    }
+
+    /// Whether the engine knows enough about the machine to take an
+    /// instruction about it.
+    ///
+    /// Both halves, where the machine offers both. Waiting only for the
+    /// setpoints returned as soon as the first report arrived, and a reading
+    /// published half a second later missed the first request: a relation
+    /// stated against the present state was then refused for want of a
+    /// reading the appliance was about to send. A machine that declares no
+    /// signal measuring an outcome is complete without one.
+    fn state_is_in_hand(&self) -> bool {
+        let reports_an_outcome = self
+            .declaration
+            .signals
+            .iter()
+            .any(|signal| signal.measures.is_some());
+
+        !self.believed.is_empty() && (!reports_an_outcome || !self.measured.is_empty())
     }
 
     /// Observe a finished cycle and correct if something was wrong.
@@ -416,7 +435,12 @@ impl<'a> Session<'a> {
     /// structured intent.
     pub fn request(&mut self, intent: &Intent, now_ms: u64) -> Result<Turn, SessionError> {
         self.advance_to(now_ms);
-        let resolved = adi_core::request::resolve(intent, &self.memory)?;
+        // With the readings, so a relation stated against the present state
+        // resolves. "A bit warmer" is relative to what the appliance reports
+        // now, which no past cycle can supply and a machine on its first day
+        // has none of.
+        let resolved =
+            adi_core::request::resolve_with(intent, &self.memory, &self.measured)?;
         let knowledge = self.domain.knowledge();
 
         let mut goals = Vec::new();

@@ -109,7 +109,7 @@ pub const UNDERSTOOD_SCHEMA: &str = r##"{
       "additionalProperties": false,
       "properties": {
         "of": { "type": "string",
-                "description": "A remembered cycle id, or 'last'." },
+                "description": "A remembered cycle id, 'last', or 'now' for what the machine is reading at this moment." },
         "scale": { "type": "number", "minimum": 0 },
         "offset": { "$ref": "#/$defs/absolute" }
       }
@@ -147,6 +147,18 @@ not stated: the result of this request moves a machine.
 State relations rather than resolving them. \"Half of last time\" is
 {\"of\": \"last\", \"scale\": 0.5}, never a number. The engine holds the memory
 and does the arithmetic.
+
+A relation may also be against what the machine is reading now, which is given
+above where the machine reports it. \"A bit warmer\" is
+{\"of\": \"now\", \"offset\": {\"value\": 2, \"unit\": \"c\"}}. State the size of the
+change you mean; the engine adds it to the reading, clamps the result to what
+the machine declares, and refuses it where there is no reading to add to.
+
+Where someone asks for more or less of something without saying how much, that
+is the one case to choose a size yourself rather than ask. State it as an
+offset against now, keep it modest in proportion to the range the variable is
+declared over, and let the engine clamp it. Asking remains correct where the
+request is unclear in any other way.
 
 If the person asked a question rather than requesting anything, answer it:
   {\"answer\": {\"text\": \"<what to say>\", \"drew_on\": [\"<note id>\"]}}

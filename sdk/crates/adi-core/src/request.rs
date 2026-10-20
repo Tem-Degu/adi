@@ -37,6 +37,10 @@ pub enum RequestError {
     NoReference { variable: String },
     #[error("'{variable}' was not set on the cycle it is relative to")]
     NotSetOnReference { variable: String },
+    #[error(
+        "the appliance reports no reading for '{variable}', so a change stated relative to now has nothing to be relative to"
+    )]
+    NoReading { variable: String },
     #[error("offset for '{variable}' is in {found:?}, but the remembered value is {expected:?}")]
     UnitMismatch {
         variable: String,
@@ -65,6 +69,20 @@ pub enum RequestError {
 /// the engine's job rather than the model's. The model said "half of last
 /// time"; whether last time was 8 g is a fact, not an opinion.
 pub fn resolve(intent: &Intent, memory: &dyn Memory) -> Result<ResolvedRequest, RequestError> {
+    resolve_with(intent, memory, &BTreeMap::new())
+}
+
+/// The same, with what the appliance is reading now.
+///
+/// Kept separate so a caller that holds no readings, of which there are
+/// several, is unchanged. A relation against `now` is the only thing that
+/// needs them, and a caller without them gets the refusal that says so rather
+/// than a wrong number.
+pub fn resolve_with(
+    intent: &Intent,
+    memory: &dyn Memory,
+    measured: &BTreeMap<VariableId, Quantity>,
+) -> Result<ResolvedRequest, RequestError> {
     intent.validate()?;
 
     let mut targets = BTreeMap::new();
@@ -72,19 +90,34 @@ pub fn resolve(intent: &Intent, memory: &dyn Memory) -> Result<ResolvedRequest, 
         let value = match spec {
             TargetSpec::Absolute(q) => *q,
             TargetSpec::Relative(rel) => {
-                let reference = match &rel.of {
-                    Reference::Last => memory.last(),
-                    Reference::Cycle(id) => memory.get(id),
-                }
-                .ok_or_else(|| RequestError::NoReference {
-                    variable: variable.0.clone(),
-                })?;
-
-                let base = reference.setting(variable).ok_or_else(|| {
-                    RequestError::NotSetOnReference {
-                        variable: variable.0.clone(),
+                // Where the relation starts from. `now` is what the appliance
+                // reports at this moment; the others are what a past run was
+                // set to.
+                let base = match &rel.of {
+                    Reference::Now => {
+                        *measured.get(variable).ok_or_else(|| {
+                            RequestError::NoReading {
+                                variable: variable.0.clone(),
+                            }
+                        })?
                     }
-                })?;
+                    other => {
+                        let reference = match other {
+                            Reference::Last => memory.last(),
+                            Reference::Cycle(id) => memory.get(id),
+                            Reference::Now => unreachable!("handled above"),
+                        }
+                        .ok_or_else(|| RequestError::NoReference {
+                            variable: variable.0.clone(),
+                        })?;
+
+                        reference.setting(variable).ok_or_else(|| {
+                            RequestError::NotSetOnReference {
+                                variable: variable.0.clone(),
+                            }
+                        })?
+                    }
+                };
 
                 match (rel.scale, rel.offset) {
                     (Some(scale), None) => Quantity::new(base.value * scale, base.unit),

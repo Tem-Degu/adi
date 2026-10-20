@@ -81,24 +81,37 @@ pub struct RelativeSpec {
 /// would be unambiguous but cannot appear inside an untagged enum, and this
 /// reads better for the people writing it besides.
 ///
-/// **`last` is reserved.** A cycle id equal to "last" is read as the most
-/// recent cycle, so ids must not use that word.
+/// **`last` and `now` are reserved.** A cycle id equal to either word is read
+/// as the reference of that name, so ids must not use them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum Reference {
     /// The most recent cycle. "Last time."
     Last,
+    /// What the appliance is reading at this moment. "A bit warmer than it
+    /// is now."
+    ///
+    /// The other two references are past runs, which a machine on its first
+    /// day has none of, and a request about the present state could not be
+    /// expressed at all: a model shown a live reading still had no form to
+    /// state a relation against it, so it had to ask what the person meant.
+    /// The engine resolves this from the readings the appliance publishes,
+    /// as it resolves the others from memory.
+    Now,
     /// A specific one. "The one on Tuesday", once the language layer has
     /// resolved which that was.
     Cycle(String),
 }
 
 pub const REFERENCE_LAST: &str = "last";
+pub const REFERENCE_NOW: &str = "now";
 
 impl From<String> for Reference {
     fn from(s: String) -> Self {
         if s == REFERENCE_LAST {
             Reference::Last
+        } else if s == REFERENCE_NOW {
+            Reference::Now
         } else {
             Reference::Cycle(s)
         }
@@ -109,6 +122,7 @@ impl From<Reference> for String {
     fn from(r: Reference) -> Self {
         match r {
             Reference::Last => REFERENCE_LAST.to_string(),
+            Reference::Now => REFERENCE_NOW.to_string(),
             Reference::Cycle(id) => id,
         }
     }

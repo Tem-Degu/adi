@@ -542,6 +542,66 @@ fn the_latest_reading_replaces_the_one_before_it() {
     );
 }
 
+/// End to end for the sentence a person says: a relation against the reading
+/// the appliance is publishing, with no cycle behind it.
+#[test]
+fn a_change_relative_to_now_moves_a_mechanism() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Setpoints(vec![adi_wire::Setpoint {
+        tool: 0,
+        parameter: 0,
+        value: adi_wire::Num::from_quantity(Quantity::new(20.0, Unit::Step)).unwrap(),
+    }]));
+    transport.will_reply(Message::Signals(vec![adi_wire::Sample {
+        signal: 1,
+        value: adi_wire::Num::from_quantity(Quantity::new(30.0, Unit::S)).unwrap(),
+        t_ms: 1_000,
+    }]));
+    transport.will_fall_silent();
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Completed,
+        reason: None,
+    });
+    let log = transport.log();
+
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session.tick(5_000).expect("heartbeats");
+
+    // "Five seconds quicker than it is now", against a measured 30.
+    let intent = adi_protocol::intent::Intent {
+        kind: adi_protocol::intent::IntentKind::Adjust,
+        style: None,
+        material: None,
+        targets: BTreeMap::from([(
+            VariableId::from("cycle_time"),
+            adi_protocol::intent::TargetSpec::Relative(adi_protocol::intent::RelativeSpec {
+                of: adi_protocol::intent::Reference::Now,
+                scale: None,
+                offset: Some(Quantity::new(-5.0, Unit::S)),
+            }),
+        )]),
+    };
+
+    let turn = session.request(&intent, 6_000).expect("servable");
+
+    let sent = turn.records[0]
+        .arguments
+        .get("position")
+        .expect("the correction set position")
+        .value;
+
+    assert_eq!(log.invocations().len(), 1);
+    assert!(
+        sent > 20.0,
+        "twenty five seconds against a measured thirty is a real change; sent {sent}"
+    );
+}
+
 // ----------------------------------------------------------------- the loop
 
 #[test]

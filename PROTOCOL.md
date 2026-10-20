@@ -1364,9 +1364,25 @@ targets:
   milk_volume: { value: 120, unit: ml }
 ```
 
-A target is either **absolute**, `{ value, unit }`, or **relative** to a
-remembered cycle, naming `of` plus at most one of `scale` and `offset`. Absent
-both means "the same as then".
+A target is either **absolute**, `{ value, unit }`, or **relative**, naming
+`of` plus at most one of `scale` and `offset`. Absent both means "the same as
+then".
+
+`of` names a remembered cycle, `last` for the most recent, or `now` for what
+the appliance is reporting at this moment (§4.3 `measures`, §10.2.5):
+
+```yaml
+targets:
+  water_temperature: { of: now, offset: { value: 2, unit: c } }
+```
+
+`now` exists because the other references are past runs. A machine that has
+run none could not be addressed relatively at all, so "a bit warmer than it is"
+had no form and had to be refused however clearly it was said. An engine MUST
+resolve `now` from the reading the appliance reports for that variable, and
+MUST refuse the target where it holds none: there is then nothing for the
+relation to be relative to, and a value invented in its place would reach an
+actuator.
 
 **A relative target MUST be resolved by the engine, not by the model.** "Half of
 last time" is expressible without the model knowing what last time was. A model
@@ -1378,15 +1394,19 @@ An engine MUST reject an intent that gives both a scale and an offset for one
 variable, a negative scale, or any non-finite number. A scale of zero is valid
 and means none at all.
 
-`last` is reserved as a reference. A cycle identifier MUST NOT be that word.
+`last` and `now` are reserved as references. A cycle identifier MUST NOT be
+either word.
 
 #### 9.4.1 What the model is given
 
 The reasoning on this path is the model's. An engine MUST therefore supply it
 with what reasoning requires: the utterance, the declared styles and materials,
 the declared variables **with their units and meanings** (§7.3), the decision
-history, and **the cycles the machine remembers**, meaning the same store the
-engine resolves a relative target against.
+history, **the cycles the machine remembers**, meaning the same store the
+engine resolves a relative target against, and **what the appliance is
+currently reporting** for each variable it measures, which is what a target
+relative to `now` resolves against and what a question about the present state
+is answered from.
 
 A variable supplied as a bare identifier can be mapped onto a request only where
 the model was trained on the domain, which is not a property a profile may

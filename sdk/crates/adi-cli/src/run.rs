@@ -874,6 +874,7 @@ fn describe(target: &adi_protocol::intent::TargetSpec) -> String {
         TargetSpec::Relative(r) => {
             let of = match &r.of {
                 Reference::Last => "last".to_string(),
+                Reference::Now => "now".to_string(),
                 Reference::Cycle(id) => id.clone(),
             };
             match (r.scale, &r.offset) {
