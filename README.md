@@ -119,11 +119,37 @@ cargo run -p adi-cli -- run --serial /dev/pts/N \
 | Example EX-900 espresso machine | The first domain, with a profile behind it that can tell two faults apart | A host process, driven over stdin and stdout |
 | Dryline DH-20 food dehydrator | One mechanism and one outcome, on `base/v1` | Firmware on an emulated Cortex-M3, over a UART |
 | Rainline SX-2 shower mixer | Two mechanisms and two outcomes, on `base/v1` | Firmware on an emulated Cortex-M3, over a UART |
+| Northwash NW-8 washing machine | A door that must be latched, on `base/v1` | Firmware on an emulated Cortex-M3, over two UARTs |
 
-The last two exist to answer one question: whether a manufacturer can describe
-a machine nobody wrote a profile for and have it understood, corrected and
-actuated. Their declarations are in `sdk/examples/declarations/` and their
-firmware in `sdk/c/dehydrator/` and `sdk/c/shower/`.
+The last three exist to answer one question: whether a manufacturer can
+describe a machine nobody wrote a profile for and have it understood,
+corrected and actuated. Their declarations are in
+`sdk/examples/declarations/` and their firmware in `sdk/c/dehydrator/`,
+`sdk/c/shower/` and `sdk/c/washer/`.
+
+The washing machine is the one to run to see a machine refuse. Its second
+serial port stands in for the door latch, so opening the door is something you
+can do by hand:
+
+```sh
+cd c && make washer && cd ..
+# prints two ptys: the first is the link, the second is the door
+qemu-system-arm -M lm3s6965evb -nographic -serial pty -serial pty \
+  -kernel c/build/arm/washer.elf
+```
+
+Send `o` to the second port to open the door and `c` to shut it. With it open,
+every instruction is refused by the appliance itself, and an operation already
+running is stopped:
+
+```
+> spin them drier
+  target       x.northwash.residual_moisture = 45 Pct
+  measured     55 Pct
+  refused      by the appliance: a door, guard or cover is open. The appliance
+               enforces this itself, so nothing the engine sends will get
+               around it
+```
 
 [Running it](#running-it) covers the autonomy levels, speech and the tests.
 

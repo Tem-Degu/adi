@@ -81,6 +81,15 @@ pub enum SessionError {
     Link(String),
     #[error("the appliance refused the call: {0:?}")]
     Refused(RejectReason),
+    /// The appliance started the operation and then stopped it.
+    ///
+    /// Distinct from a refusal, which never started. ADI-P 9.1 requires that
+    /// an operator can take control by physical means at any moment and that
+    /// doing so aborts an engine-initiated operation, so this is the ordinary
+    /// outcome of somebody opening a door, and what it means for the machine
+    /// is not what a refusal means: part of the operation happened.
+    #[error("the appliance stopped the operation: {0:?}")]
+    Aborted(RejectReason),
     #[error("the appliance went quiet")]
     Silent,
     #[error(transparent)]
@@ -682,7 +691,7 @@ impl<'a> Session<'a> {
                         ))
                     }
                     Outcome::Aborted => {
-                        return Err(SessionError::Refused(
+                        return Err(SessionError::Aborted(
                             reason.unwrap_or(RejectReason::Fault),
                         ))
                     }

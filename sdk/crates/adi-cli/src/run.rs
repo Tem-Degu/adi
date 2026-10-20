@@ -532,6 +532,39 @@ fn read_wav(path: &Path) -> Result<adi_language::Audio, Box<dyn std::error::Erro
 /// The underlying errors are precise and are written for a developer reading a
 /// log. A person at a prompt needs to know whether to try something else, and
 /// the raw Debug form of a Rust enum does not tell them.
+/// What an appliance's refusal code means, for somebody standing at a prompt.
+///
+/// The codes are ADI-P 9.2 and are written for a log. Each of these has a
+/// different thing to do about it, which is the only reason to translate them.
+fn plainly(reason: &str) -> &str {
+    match reason {
+        "Interlock" => {
+            "a door, guard or cover is open. The appliance enforces this itself, so nothing the engine sends will get around it"
+        }
+        "Busy" => "the machine is already doing something. Try again when it has finished",
+        "RateLimited" => {
+            "too soon after the last call of that tool. The declaration states the interval"
+        }
+        "PreconditionFailed" => {
+            "a condition that tool requires does not hold. The declaration lists them under the tool"
+        }
+        "EnvelopeViolation" | "InvariantViolation" => {
+            "that would breach a limit the appliance enforces itself, so none of it ran"
+        }
+        "ResourceExhausted" => "something the tool consumes has run out",
+        "Fault" => "the machine is faulted and will not act until that is cleared",
+        "NotAuthorised" => "the machine does not permit the engine to use that tool",
+        "UnknownTool" => {
+            "the appliance has no such tool, so it and the engine are working from different declarations"
+        }
+        "OutOfRange" | "UnitMismatch" => {
+            "the appliance rejected the value itself, which means the engine sent something it should have caught. Worth reporting"
+        }
+        "Malformed" => "the appliance could not decode the message",
+        other => other,
+    }
+}
+
 fn report(error: &(dyn std::error::Error + 'static)) {
     let text = error.to_string();
 
@@ -544,8 +577,15 @@ fn report(error: &(dyn std::error::Error + 'static)) {
     } else if text.contains("envelope") {
         println!("  refused       that would breach a safety limit, so none of it ran.");
         println!("                {text}");
-    } else if text.contains("appliance refused") {
-        println!("  refused       the appliance declined it: {text}");
+    } else if let Some(reason) = text.strip_prefix("the appliance stopped the operation: ") {
+        // It started and was stopped, which is not the same as never having
+        // run. Somebody opening a door mid-cycle is the ordinary case.
+        println!("  stopped       by the appliance, part way through: {}", plainly(reason));
+    } else if let Some(reason) = text.strip_prefix("the appliance refused the call: ") {
+        // The appliance's own refusal, in words. It said why in a code, and
+        // printing the code inside a sentence that already says the appliance
+        // refused tells a person nothing they can act on.
+        println!("  refused       by the appliance: {}", plainly(reason));
     } else if text.contains("both move") || text.contains("one iteration") {
         println!("  refused       the plan changed one thing two ways, which would make");
         println!("                the result impossible to attribute. Nothing ran.");

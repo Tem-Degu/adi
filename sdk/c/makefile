@@ -54,7 +54,7 @@ OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 # the directory, calls it up to date and does nothing. `example` was declared
 # for that reason; `arm` and `dehydrator` collide with arm/ and dehydrator/ the
 # same way and were not.
-.PHONY: all test clean size regen example arm arm-test arm-size dehydrator dehydrator-run shower shower-run
+.PHONY: all test clean size regen example arm arm-test arm-size dehydrator dehydrator-run shower shower-run washer washer-run
 
 TESTS = $(BUILD)/test_m1 $(BUILD)/test_m2 $(BUILD)/test_m3 $(BUILD)/test_m4 \
         $(BUILD)/test_m5 $(BUILD)/test_signals $(BUILD)/test_setpoints
@@ -113,6 +113,8 @@ regen:
 	    examples/declarations/ex900.yaml --out c/generated --name ex900
 	cd .. && cargo run --quiet -p adi-cli -- generate-c \
 	    examples/declarations/shower.yaml --out c/generated --name sx2
+	cd .. && cargo run --quiet -p adi-cli -- generate-c \
+	    examples/declarations/washer.yaml --out c/generated --name nw8
 
 # Footprint of the library alone, without the test harness. DESIGN.md section 8
 # targets under 12 KB of flash for the whole runtime.
@@ -227,6 +229,28 @@ shower: $(ARMBUILD)/shower.elf
 
 shower-run: $(ARMBUILD)/shower.elf
 	$(QEMU) -M lm3s6965evb -nographic -serial pty -kernel $(ARMBUILD)/shower.elf
+
+# ----------------------------------------------- a fourth machine, as firmware
+#
+# A washing machine, on the base profile, for the same emulated core. It adds
+# an interlock: the door must be latched or nothing is invocable, and the
+# refusal comes from the appliance. See examples/declarations/washer.yaml.
+#
+#   make washer      build the firmware
+#   make washer-run  run it under QEMU with two ptys: the first is the
+#                    protocol link, the second stands in for the door latch.
+#                    Send `o` to the second to open the door and `c` to shut
+#                    it.
+
+NW8 = generated/adip_generated_nw8.c
+
+$(ARMBUILD)/washer.elf: arm/startup.c $(ARMLD) $(SRC) $(NW8) washer/main.c | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NW8) washer/main.c -o $@ $(ARMLIBS)
+
+washer: $(ARMBUILD)/washer.elf
+
+washer-run: $(ARMBUILD)/washer.elf
+	$(QEMU) -M lm3s6965evb -nographic -serial pty -serial pty -kernel $(ARMBUILD)/washer.elf
 
 # Every ARM rule lists its sources. They were order-only before, with nothing
 # but the build directory as a prerequisite, so once a .elf existed make

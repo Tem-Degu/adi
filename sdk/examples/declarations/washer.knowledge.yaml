@@ -1,0 +1,70 @@
+# What the Northwash NW-8 reasons about. Pairs with washer.yaml.
+#
+# On a machine declaring `base/v1` this file is the domain. The profile ships
+# no variables, no styles and no notes, so everything here is the whole of
+# what the engine knows about washing.
+
+namespace: "x.northwash"
+extension_version: "1.0"
+extends: { domain_profile: "base/v1", base_min_version: "1.0" }
+
+variables:
+  x.northwash.wash_temperature:
+    unit: c
+    description: >
+      Temperature of the wash water in the drum. Higher shifts grease and
+      stains and is harder on fabric and colours; lower is gentler and uses
+      less energy. This is what someone means by a hot wash or a cold wash.
+
+  x.northwash.residual_moisture:
+    unit: pct
+    description: >
+      How much water is left in the load after the final spin, as a share of
+      the dry weight. Lower comes out drier and takes less time on a line or
+      in a dryer; higher comes out wetter and less creased.
+
+styles:
+  - id: "x.northwash.style.everyday"
+    description: >
+      An ordinary mixed wash. What someone means by a normal wash, a daily
+      load, or just washing clothes.
+    targets:
+      x.northwash.wash_temperature: { min: 38.0, max: 42.0, unit: c }
+      x.northwash.residual_moisture: { min: 45.0, max: 55.0, unit: pct }
+
+  - id: "x.northwash.style.delicate"
+    description: >
+      Wool, silk and anything that must not be stretched or creased. Cool
+      water and a gentle spin, so it comes out wetter on purpose.
+    targets:
+      x.northwash.wash_temperature: { min: 20.0, max: 30.0, unit: c }
+      x.northwash.residual_moisture: { min: 70.0, max: 85.0, unit: pct }
+
+  - id: "x.northwash.style.towels"
+    description: >
+      Towels, bedding and anything heavy that should come out as dry as the
+      machine can manage. The hottest wash this machine allows and the hardest
+      spin.
+    targets:
+      x.northwash.wash_temperature: { min: 55.0, max: 60.0, unit: c }
+      x.northwash.residual_moisture: { min: 30.0, max: 40.0, unit: pct }
+
+notes:
+  - id: "x.northwash.note.door"
+    text: >
+      Nothing runs with the door unlatched. The heater and the drum are both
+      held off by the latch switch, in hardware as well as in software, so an
+      instruction given while the door is open is refused by the machine
+      rather than queued until it closes.
+
+  - id: "x.northwash.note.spin_and_creasing"
+    text: >
+      A harder spin leaves the load drier and creases it more. Where something
+      will be ironed anyway that is a good trade; where it will be worn
+      straight from the line it is not.
+
+  - id: "x.northwash.note.cold_washing"
+    text: >
+      Modern detergents work at low temperatures, and a cooler wash is kinder
+      to colours and uses less energy. Heat still matters for grease, for
+      bedding, and for anything that needs to come out hygienically clean.

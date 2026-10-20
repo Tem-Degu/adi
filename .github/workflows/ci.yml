@@ -113,3 +113,9 @@ jobs:
       - name: A third machine, as firmware
         working-directory: sdk/c
         run: make shower
+
+      # And a fourth, which is the one with an interlock, so a change that
+      # breaks the gate every appliance depends on fails here.
+      - name: A fourth machine, as firmware
+        working-directory: sdk/c
+        run: make washer

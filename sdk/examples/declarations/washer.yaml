@@ -1,0 +1,135 @@
+# A washing machine, the Northwash NW-8.
+#
+# Written by following HOW-TO-PORT-TO-A-BOARD.md and HOW-TO-ADD-A-TOOL.md in
+# order. The firmware that answers this declaration is in c/washer/.
+#
+# Two mechanisms and one interlock, which is what this adds to the machines
+# beside it: a door that must be shut. Nothing here is invocable while it is
+# open, and the refusal comes from the appliance on its own authority rather
+# than from the engine being careful.
+#
+# `base/v1`, because no domain profile for laundry exists. Everything the
+# engine reasons about comes from washer.knowledge.yaml.
+
+adip_version: "0.2"
+domain: "laundry"
+domain_profile: "base/v1"
+conformance_level: advisory
+
+device:
+  vendor: "Northwash"
+  model: "NW-8"
+  firmware_version: "1.0.0"
+  declaration_id: "sha256:washerexample"
+
+session:
+  max_concurrent: 1
+  heartbeat_interval_ms: 1000
+  # Generous, because the reply crosses an emulated UART.
+  control_timeout_ms: 4000
+
+signals:
+  - id: "x.northwash.signal.drum_temperature"
+    unit: c
+    range: { min: 0, max: 95, unit: c }
+    sample_rate_hz: 2
+    accuracy: { abs: 1.0, unit: c }
+    measures: "x.northwash.wash_temperature"
+
+  - id: "x.northwash.signal.residual_moisture"
+    unit: pct
+    range: { min: 0, max: 100, unit: pct }
+    sample_rate_hz: 2
+    accuracy: { abs: 2.0, unit: pct }
+    measures: "x.northwash.residual_moisture"
+
+  # Telemetry. The load cell measures nothing anyone states a target on, so it
+  # names no outcome, which is the ordinary case for a sensor.
+  - id: "x.northwash.signal.load_mass"
+    unit: g
+    range: { min: 0, max: 9000, unit: g }
+    sample_rate_hz: 2
+    accuracy: { abs: 50.0, unit: g }
+
+tools:
+  - id: "x.northwash.wash.set_temperature"
+    name: "set_temperature"
+    description: >
+      Heating element in the sump, with the thermistor on the drum return.
+      The wash water reaches a new setting in roughly a minute per ten
+      degrees, and the element is interlocked to the door latch in hardware as
+      well as in this firmware.
+    parameters:
+      celsius:
+        type: integer
+        unit: c
+        min: 20
+        max: 60
+        resolution: 10
+        monotonic: higher_is_more
+    effects: ["x.northwash.wash_temperature"]
+    duration_ms_typ: 60000
+    duration_ms_max: 600000
+    reversible: false
+    abortable: true
+    authority: ["engine", "operator"]
+    hazard: ["hot_surface"]
+
+  - id: "x.northwash.spin.set_speed"
+    name: "set_speed"
+    description: >
+      Final spin, as a percentage of the drum's rated speed. A faster spin
+      leaves less water in the load and creases it more, which is why a
+      delicate programme asks for less of it.
+    parameters:
+      pct:
+        type: integer
+        unit: pct
+        min: 0
+        max: 100
+        resolution: 10
+        monotonic: higher_is_more
+    effects: ["x.northwash.residual_moisture"]
+    duration_ms_typ: 5000
+    duration_ms_max: 30000
+    reversible: false
+    abortable: true
+    authority: ["engine", "operator"]
+    hazard: ["moving_parts"]
+
+events:
+  - id: "x.northwash.event.fault"
+    payload:
+      code: { type: string }
+      severity: { type: enum, values: ["warning", "error", "critical"] }
+      recoverable: { type: boolean }
+
+envelope:
+  enforced_by: both
+  independent_of_engine: true
+
+  limits:
+    - { parameter: "celsius", unit: c, hard_max: 60 }
+    - { parameter: "pct", unit: pct, hard_max: 100 }
+
+  interlocks:
+    # The whole machine, not one mechanism. A door that is not latched stops
+    # the heater and the drum both, and the appliance enforces it whatever the
+    # engine believes.
+    - { id: "door_closed", blocks: ["*"] }
+
+  rate_limits:
+    - id: "element_settling"
+      tools: ["x.northwash.wash.set_temperature"]
+      min_interval_s: 20.0
+      # Sixteen is the most libadip tracks per rate limit, as
+      # ADIP_MAX_RATE_HISTORY in c/include/adip.h.
+      max_invocations: 12
+      window_s: 3600.0
+
+  failsafe:
+    on_control_timeout: "abort_to_safe"
+    on_signal_loss: "abort_to_safe"
+    on_fault: "abort_to_safe"
+    safe_state: "heater_off_drum_stopped_valves_shut"
+    max_time_to_safe_ms: 1000

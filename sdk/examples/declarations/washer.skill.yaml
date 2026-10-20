@@ -1,0 +1,35 @@
+# How far each control moves the outcome on the Northwash NW-8.
+#
+# Without an entry here a tool is callable and never selectable: the engine
+# builds its candidate list from these responses, so a tool naming no outcome
+# is never offered and no spoken request can arrive at it.
+
+skill_version: "1.0"
+skill_id: "skill/NW-8/1.0"
+
+applies_to:
+  vendor: "Northwash"
+  model: "NW-8"
+  firmware_range: { min: "1.0.0", max: "1.9.99" }
+
+responses:
+  # A thermostat holds what it is asked for, so a degree of setting is a
+  # degree in the drum once it has got there.
+  - tool: "x.northwash.wash.set_temperature"
+    parameter: "celsius"
+    variable: "x.northwash.wash_temperature"
+    per_unit: 1.0
+    unit: c
+    valid_range: { min: 20.0, max: 60.0 }
+    confidence: 0.9
+
+  # A faster spin leaves less water behind, so the sign is negative. The
+  # magnitude is a bench estimate across a cotton load and varies with what is
+  # in the drum, which is what the confidence says.
+  - tool: "x.northwash.spin.set_speed"
+    parameter: "pct"
+    variable: "x.northwash.residual_moisture"
+    per_unit: -0.45
+    unit: pct
+    valid_range: { min: 0.0, max: 100.0 }
+    confidence: 0.7
