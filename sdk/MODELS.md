@@ -387,6 +387,45 @@ What the SDK will not do for you is capture, playback, resampling, echo
 cancellation or noise suppression. Those are the parts that need the device in
 front of you, and no worked example against a real audio library is supplied yet.
 
+### The path from a recording, verified
+
+`adi run` takes `listen <file.wav>`, which is the same path a capture pipeline
+takes, minus the capture. Signed 16 bit mono at the rate the transcriber asks
+for, which for Moonshine is 16 kHz.
+
+This was run against the washing machine firmware on an emulated Cortex-M3,
+with Moonshine serving the transcriber locally and a hosted model serving the
+interpreter:
+
+```
+> listen spoken.wav
+  heard        46068 samples at 16000 Hz
+  transcript   "These towels came out soaking wet, spin them harder."  confidence 0.97
+  understood   Adjust
+  style        x.northwash.style.towels
+  target       x.northwash.residual_moisture = now -10 Pct
+  measured     90 Pct
+  sent         x.northwash.spin.set_speed
+               pct = 20 Pct
+  accepted     by the appliance
+```
+
+Every step there is a real one: the transcript came from the weights, the style
+was recognised from the description its manufacturer wrote, the engine sized the
+change from the reading the appliance published, and the value crossed the
+framing, the checksum and the range check on the way to the drum.
+
+The recording in that run was synthesised with the Piper voice rather than
+spoken by a person, because the test ran on a machine with no microphone. To use
+your own voice, record a sentence and convert it:
+
+```sh
+ffmpeg -i yours.m4a -ac 1 -ar 16000 -c:a pcm_s16le spoken.wav
+```
+
+A rate other than the one the transcriber asks for is refused rather than
+resampled, so the conversion is not optional.
+
 ## Running without models
 
 An engine with an unserved seam is a supported configuration. It refuses the

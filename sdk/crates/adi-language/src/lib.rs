@@ -296,6 +296,20 @@ where
         audio: &Audio,
         context: &SelectionContext<'_>,
     ) -> Result<Understood, LanguageError> {
+        self.understand_heard(audio, context).map(|(_, u)| u)
+    }
+
+    /// The same, returning what was heard as well as what was made of it.
+    ///
+    /// The transcript is the input to everything downstream, and a caller that
+    /// cannot see it cannot tell a misheard word from a model that reasoned
+    /// badly about the right one. ADI-P 9.3 requirement 5 wants it recorded
+    /// for the same reason.
+    pub fn understand_heard(
+        &self,
+        audio: &Audio,
+        context: &SelectionContext<'_>,
+    ) -> Result<(Transcript, Understood), LanguageError> {
         if audio.samples.is_empty() {
             return Err(LanguageError::NoAudio);
         }
@@ -309,18 +323,25 @@ where
 
         let transcript = self.transcriber.transcribe(audio)?;
         if !transcript.is_reliable(self.min_transcript_confidence) {
-            return Ok(Understood::Clarify {
-                question: "Sorry, I did not catch that. Could you say it again?".into(),
-                because: format!(
-                    "transcript confidence {:.2} is below {:.2}",
-                    transcript.confidence, self.min_transcript_confidence
-                ),
-            });
+            let because = format!(
+                "transcript confidence {:.2} is below {:.2}",
+                transcript.confidence, self.min_transcript_confidence
+            );
+            return Ok((
+                transcript,
+                Understood::Clarify {
+                    question: "Sorry, I did not catch that. Could you say it again?".into(),
+                    because,
+                },
+            ));
         }
 
-        self.interpreter
+        let understood = self
+            .interpreter
             .interpret(&transcript.text, context)
-            .map_err(|e| LanguageError::Backend(e.to_string()))
+            .map_err(|e| LanguageError::Backend(e.to_string()))?;
+
+        Ok((transcript, understood))
     }
 
     /// A decision, as words and then as sound.

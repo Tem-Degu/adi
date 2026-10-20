@@ -804,7 +804,13 @@ fn listen(
         measured: Some(&readings),
     };
 
-    let understood = language.understand(&audio, &context)?;
+    // What it heard, before what was made of it. Without this line a misheard
+    // word and a model reasoning badly about the right one look identical.
+    let (transcript, understood) = language.understand_heard(&audio, &context)?;
+    println!(
+        "  transcript   \"{}\"  confidence {:.2}",
+        transcript.text, transcript.confidence
+    );
     act_on(session, understood, now_ms, voice)
 }
 

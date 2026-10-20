@@ -77,6 +77,12 @@ goal, the engine works out which mechanism serves it and what value to send,
 and the appliance checks that value again before acting. Step 3 shows a full
 exchange.
 
+With a transcriber configured as well, `listen <file.wav>` takes a recording
+instead of typing: 16 bit mono at the rate the transcriber asks for. That path
+has been run end to end against the washing machine firmware, and
+[`sdk/MODELS.md`](./sdk/MODELS.md#the-path-from-a-recording-verified) shows the
+transcript it produced and how to make a recording of your own.
+
 A hosted model can serve the same seam where a network is available; see
 [Using a hosted model](./sdk/MODELS.md#using-a-hosted-model).
 [`sdk/MODELS.md`](./sdk/MODELS.md) also covers which models were measured and
