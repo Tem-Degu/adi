@@ -560,13 +560,25 @@ which the engine refuses because a correction that moves nothing is not a
 correction. D0 and D1 are unaffected by the second of those, since the engine
 computes the value at both.
 
-One defect of ours, found here and not yet fixed: at D1 and D2 the engine
-starts the chooser as its own process with the same command as the interpreter,
-so a local setup loads the weights twice and holds two copies resident. The
-backends read the contract off each request and one process can serve both
-seams, which is what this engine's own comment claims it does. On a compute
-module inside an appliance that duplication is the difference between fitting
-and not fitting.
+One cost of ours, found here and not yet addressed: at D1 and D2 the engine
+starts the chooser as its own process with the same command as the
+interpreter, so two processes serve what the code's own comment describes as
+one model answering both questions.
+
+Measured on this machine, with the page cache dropped between the two runs, it
+is not the doubling it appears to be. `llama.cpp` maps the GGUF, so both
+processes read the same physical pages: `Pss_File` is 2428 MB in a single
+process and 1216 MB in each of two, which is the same weights counted twice.
+What is not shared is 2092 MB of private anonymous memory per process, the
+compute and cache buffers, including tensors repacked into the form the CPU
+backend wants. So the second seam costs about 2.1 GB more rather than another
+4.5 GB: `free` reported 2.25 GB of anonymous use with one process and 4.2 GB
+with two, over a 2.5 GB page cache either way.
+
+Worth having, then, and not an emergency: one process serving both seams would
+save about 45 percent of the resident footprint on a module, and the backends
+already read the contract off each request, so nothing in the protocol stands
+in the way.
 
 ## Running without models
 

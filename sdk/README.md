@@ -477,10 +477,12 @@ board.
   correctly. Measure on the hardware a product will ship. Speech over a hosted
   seam completes in seconds; `MODELS.md` has both sets of runs.
 - **The chooser is started as a second process with the same command as the
-  interpreter**, so a local setup loads the weights twice and holds two copies
-  resident. The backends read the contract off each request and one process can
-  serve both seams, which is what this code's own comment claims. On a compute
-  module that duplication matters.
+  interpreter**, where the comment beside it describes one model answering both
+  questions. Measured, the weights themselves are shared, since `llama.cpp`
+  maps the file: what is not shared is about 2.1 GB of private buffers per
+  process, so the second seam costs around 45 percent more resident memory
+  rather than another whole copy. One process serving both seams would recover
+  that; `MODELS.md` has the figures.
 - **A local model of the recommended size does not complete a correction at
   D2.** Qwen 3 4B Q4 chose the right mechanism on every cycle measured and
   proposed the setting already in force, so the correction is refused. It also
