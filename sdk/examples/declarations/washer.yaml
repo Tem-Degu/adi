@@ -10,6 +10,13 @@
 #
 # `base/v1`, because no domain profile for laundry exists. Everything the
 # engine reasons about comes from washer.knowledge.yaml.
+#
+# Run end to end against the firmware under QEMU at D0 with a scripted
+# interpreter and at D2 with a hosted model on both model seams. At D2 the
+# model recognised the towels style from the word towels, stated the change
+# against the present reading, and the engine sized and sent it. With the door
+# open the appliance refused the call at both levels, which is the point of an
+# interlock: who chose the value makes no difference to it.
 
 adip_version: "0.2"
 domain: "laundry"
