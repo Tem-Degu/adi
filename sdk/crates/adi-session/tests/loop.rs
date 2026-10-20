@@ -277,6 +277,94 @@ fn a_request_with_no_known_position_says_what_is_missing() {
     );
 }
 
+// ------------------------------------------------- what the appliance says
+//
+// ADI-P 9.1 requires that an operator can take control by physical means at
+// any moment. A setting can therefore change without the engine asking or
+// being told, which makes anything the engine merely remembers stale by
+// mandate. The appliance owns its own state, as it already owns its
+// interlocks, its preconditions and whether it is faulted.
+
+/// A report from the appliance displaces what the engine believed, which is
+/// the whole point of having one.
+#[test]
+fn a_reported_setpoint_outranks_what_the_engine_remembers() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+
+    // The cycle says the mechanism was at 20 while it ran. Somebody has since
+    // moved it to 44 by hand, and the appliance says so.
+    // Queued in the order the session will read them: the report first, which
+    // is what the heartbeat collects, then the reply to the one invocation the
+    // request goes on to send.
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Setpoints(vec![adi_wire::Setpoint {
+        tool: 0,
+        parameter: 0,
+        value: adi_wire::Num::from_quantity(Quantity::new(44.0, Unit::Step)).unwrap(),
+    }]));
+    // Then the link runs dry, as it does on a machine with nothing to say, so
+    // the heartbeat's drain stops here rather than swallowing the reply to an
+    // invocation that has not been sent yet.
+    transport.will_fall_silent();
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Completed,
+        reason: None,
+    });
+    let log = transport.log();
+
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+
+    // The heartbeat is where an idle machine's report arrives.
+    session.tick(5_000).expect("heartbeats");
+
+    let turn = session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 6_000)
+        .expect("servable");
+
+    let sent = turn.records[0]
+        .arguments
+        .get("position")
+        .expect("the correction set position")
+        .value;
+
+    assert_eq!(log.invocations().len(), 1);
+    assert!(
+        sent > 40.0,
+        "planned from the reported 44, not the remembered 20, and sent {sent}"
+    );
+}
+
+/// An index pair the declaration does not have describes a different machine.
+/// Ignored rather than guessed at, and the session carries on.
+#[test]
+fn a_setpoint_for_an_undeclared_parameter_is_ignored() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Setpoints(vec![adi_wire::Setpoint {
+        tool: 9_999,
+        parameter: 0,
+        value: adi_wire::Num::from_quantity(Quantity::new(1.0, Unit::Step)).unwrap(),
+    }]));
+
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    session.tick(5_000).expect("a bad report is not a link failure");
+
+    // Nothing was learned, so a request still refuses for want of a position
+    // rather than acting on a value meant for another machine.
+    assert!(session
+        .request(&asking_for("cycle_time", 25.0, Unit::S), 6_000)
+        .is_err());
+}
+
 // ----------------------------------------------------------------- the loop
 
 #[test]

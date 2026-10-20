@@ -123,6 +123,19 @@ pub struct Session<'a> {
     memory: RecentCycles,
     history: Vec<DecisionRecord>,
 
+    /// What each mechanism is believed to be set to, keyed by parameter name.
+    ///
+    /// Two writers, in whatever order they happen, and the later one stands.
+    /// The engine writes what it sent, which is provisional: the appliance
+    /// accepted it, so it is the best belief available until the appliance
+    /// says otherwise. The appliance writes what it reports, which is fact.
+    ///
+    /// ADI-P 9.1 requires that an operator can take control by physical means
+    /// at any moment, so a value the engine merely remembers is stale by
+    /// mandate and a machine that reports its own state is the only way the
+    /// engine can be right about one it did not set.
+    believed: BTreeMap<String, Quantity>,
+
     transport: Box<dyn Transport>,
 
     next_invocation_id: u32,
@@ -188,6 +201,7 @@ impl<'a> Session<'a> {
             safety: SafetyState::new(),
             memory: RecentCycles::default(),
             history: Vec::new(),
+            believed: BTreeMap::new(),
             transport,
             next_invocation_id: 1,
             now_ms: 0,
@@ -231,7 +245,62 @@ impl<'a> Session<'a> {
         // The reply carries busy and faulted. Absent is not an error here: a
         // heartbeat is a liveness probe, and the timeout that matters belongs
         // to the appliance.
-        let _ = self.transport.recv(self.heartbeat_interval_ms.min(50) as u32)?;
+        //
+        // Everything waiting, not the first thing waiting. An appliance that
+        // has something to say sends it when it happens rather than when the
+        // engine asks, so by the time a heartbeat goes out there may be a
+        // reply, a batch of samples and a setpoint report queued behind each
+        // other. Taking one per heartbeat leaves the rest to arrive a second
+        // late each, and the report is the one that cannot wait: a request
+        // arriving before it is read is refused for want of a position the
+        // appliance has already given.
+        //
+        // Bounded, because a machine that talks faster than this loop drains
+        // would otherwise hold it here. Anything still queued is read on the
+        // next heartbeat.
+        // The first read waits as long as an invocation would, because this is
+        // where an appliance's answer to the heartbeat arrives and a reply
+        // that crosses an emulated UART does not come back inside fifty
+        // milliseconds. Later reads only drain what is already there.
+        let mut wait = self.control_timeout_ms.min(500) as u32;
+        for _ in 0..64 {
+            match self.transport.recv(wait)? {
+                Some(message) => self.absorb(&message),
+                None => break,
+            }
+            wait = self.heartbeat_interval_ms.min(50) as u32;
+        }
+        Ok(())
+    }
+
+    /// Ask the appliance to describe itself, and wait for the answer.
+    ///
+    /// ADI-P 9.1 lists five steps for a session: fetch the declaration,
+    /// validate, open, heartbeat, close. None of them establishes what the
+    /// machine is currently set to, and without that the engine cannot plan a
+    /// correction: it knows how far a mechanism should move and not what to
+    /// send to move it there.
+    ///
+    /// A conforming appliance reports its setpoints on first contact, so this
+    /// heartbeats and reads what comes back. It is bounded and it is allowed
+    /// to learn nothing: an appliance that does not report is not faulty, it
+    /// is one whose positions the engine will have to be told another way.
+    ///
+    /// Called once after opening. Without it the first request races the
+    /// report and fails about two times in three, which is worse than failing
+    /// every time: a machine that works on the second attempt teaches the
+    /// person using it that the first one does not count.
+    pub fn synchronise(&mut self, now_ms: u64) -> Result<(), SessionError> {
+        for attempt in 0..3u32 {
+            // Each round is a fresh heartbeat, because the appliance reports
+            // on contact and one lost heartbeat should not end the matter.
+            self.last_heartbeat_ms = 0;
+            self.tick(now_ms + u64::from(attempt) * self.heartbeat_interval_ms)?;
+
+            if !self.believed.is_empty() {
+                return Ok(());
+            }
+        }
         Ok(())
     }
 
@@ -361,6 +430,47 @@ impl<'a> Session<'a> {
         )
     }
 
+    /// Take whatever the appliance says about itself out of a message.
+    ///
+    /// Called wherever the session reads from the wire, because a report
+    /// arrives when the appliance has something to say rather than when the
+    /// engine happens to be listening for it. Both read sites previously
+    /// discarded everything that was not the message they were waiting for.
+    ///
+    /// Anything else is ignored here rather than refused: a message this
+    /// version does not act on is not a protocol error, and an engine that
+    /// failed on one could not talk to a newer appliance.
+    fn absorb(&mut self, message: &Message) {
+        let Message::Setpoints(reported) = message else {
+            return;
+        };
+
+        for setpoint in reported {
+            let Some(name) = self.parameter_name(setpoint.tool, setpoint.parameter) else {
+                // An index this declaration does not have. The appliance is
+                // describing a machine the engine was not given, which is a
+                // mismatched declaration rather than a value to act on.
+                continue;
+            };
+            self.believed
+                .insert(name, adi_wire::to_quantity(setpoint.value));
+        }
+    }
+
+    /// The parameter an index pair names, by the order both sides read from
+    /// the declaration: tools in the order written, parameters sorted by name
+    /// within each. `adi generate-c` emits the appliance's tables from the
+    /// same two orderings, so an index means one thing on both sides.
+    fn parameter_name(&self, tool: u16, parameter: u16) -> Option<String> {
+        self.declaration
+            .tools
+            .get(usize::from(tool))?
+            .parameters
+            .keys()
+            .nth(usize::from(parameter))
+            .cloned()
+    }
+
     /// Move the envelope's clock forward.
     ///
     /// Rate limits and duty windows are the only part of the state that
@@ -414,6 +524,14 @@ impl<'a> Session<'a> {
             performed.push(invocation.clone());
         }
 
+        // Provisional, and superseded by the appliance's own report when one
+        // arrives. Written here because the invocation was accepted, so this
+        // is the best the engine can believe until it is told otherwise.
+        for correction in &corrections {
+            self.believed
+                .insert(correction.parameter.clone(), correction.absolute);
+        }
+
         let records = self.record(&corrections, &invocations, cycle_id, grounds);
         self.history.extend(records.iter().cloned());
 
@@ -447,7 +565,13 @@ impl<'a> Session<'a> {
                     Outcome::Accepted | Outcome::Running => accepted = true,
                     Outcome::Completed => return Ok(()),
                 },
-                Some(_) => continue,
+                Some(other) => {
+                    // Not the answer to this question, and not rubbish
+                    // either: an appliance that has just acted reports its
+                    // new setting, and that report arrives here.
+                    self.absorb(&other);
+                    continue;
+                }
                 None => break,
             }
         }
@@ -647,42 +771,30 @@ impl<'a> Session<'a> {
     /// What the engine knows the machine is set to, for a request that has no
     /// cycle of its own to read.
     ///
-    /// ADI-P has five message kinds and none of them reports a parameter's
-    /// current value, so the engine cannot ask the appliance where a dial is.
-    /// Its knowledge has exactly two sources, and this is both of them: the
-    /// settings a cycle reported, and the values it has since sent itself.
+    /// Three sources, weakest first, so the best knowledge available stands.
     ///
-    /// The order matters. A cycle records what the machine was set to while it
-    /// ran, and a correction sent after it moved the machine on, so the
-    /// decisions are applied over the cycle and the newest wins. Taking the
-    /// cycle alone would plan the next request from a setting that has already
-    /// been superseded.
+    /// The cycle is the base: it records what the machine was set to while it
+    /// ran, which is true of that run and may have been superseded since.
+    /// `believed` is laid over it, carrying both what the engine has sent and
+    /// what the appliance has reported, in the order those happened.
     ///
-    /// `DecisionRecord::arguments` is the value actually sent, after clamping,
-    /// and `perform` extends the history only once every invocation in the
-    /// turn has been accepted, so a refused correction never appears here and
-    /// never moves the engine's idea of the machine. The exception is a turn
-    /// whose first step was accepted and whose second was refused: the first
-    /// has moved the machine and is absent from the history. ADI-P 9.5 allows
-    /// one variable at a time, which makes multi-step turns rare, and
-    /// correcting it belongs with the partial-application problem rather than
-    /// here.
+    /// An appliance that reports its setpoints makes this exact, including
+    /// after someone turns a knob by hand, which ADI-P 9.1 requires be
+    /// possible at any moment. One that does not leaves the engine with what
+    /// it sent and what it last saw, which is the most that can be known about
+    /// a machine that does not say.
     ///
-    /// Empty is a truthful answer on a session that has observed nothing and
-    /// sent nothing. The planner refuses rather than assuming a position, and
-    /// says which parameter it could not place.
+    /// Empty is a truthful answer on a session that has observed nothing, sent
+    /// nothing and been told nothing. The planner then refuses rather than
+    /// assuming a position, and names the parameter it could not place.
     fn present_settings(&self) -> BTreeMap<String, Quantity> {
         let mut present = match self.memory.last() {
             Some(remembered) => self.current_settings(&remembered.settings),
             None => BTreeMap::new(),
         };
 
-        // Oldest first, so the most recent value for a parameter is the one
-        // left standing. `history` is extended in turn order.
-        for record in &self.history {
-            for (parameter, value) in &record.arguments {
-                present.insert(parameter.clone(), *value);
-            }
+        for (parameter, value) in &self.believed {
+            present.insert(parameter.clone(), *value);
         }
 
         present

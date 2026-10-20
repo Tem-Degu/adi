@@ -96,6 +96,115 @@ void adip_set_signal_buffer(adip_ctx_t *ctx, adip_sample_t *buf, uint8_t count)
     ctx->sample_count = 0u;
 }
 
+void adip_set_setpoint_buffer(adip_ctx_t *ctx, adip_setpoint_t *buf,
+                              uint8_t count)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    ctx->setpoints = buf;
+    ctx->setpoint_cap = (buf == NULL) ? 0u : count;
+    ctx->setpoint_count = 0u;
+    /* Nothing to say yet, and saying nothing is different from saying none. */
+    ctx->setpoints_dirty = false;
+}
+
+adip_status_t adip_report_setpoint(adip_ctx_t *ctx, uint16_t tool,
+                                   uint16_t parameter, adip_num_t value)
+{
+    const adip_tool_t *t;
+    uint8_t i;
+
+    if (ctx == NULL || ctx->dev == NULL) {
+        return ADIP_ERR_ARG;
+    }
+    if (ctx->setpoints == NULL) {
+        return ADIP_ERR_ARG;
+    }
+    if (tool >= ctx->dev->tool_count) {
+        return ADIP_ERR_ARG;
+    }
+
+    t = &ctx->dev->tools[tool];
+    if (parameter >= t->param_count) {
+        return ADIP_ERR_ARG;
+    }
+
+    /*
+     * The unit is checked against the declaration, as it is on an invocation
+     * and on a published sample. A setpoint in the wrong quantity is the same
+     * defect seen from the other side, and an engine that planned from it
+     * would send a value in a unit the machine never had.
+     */
+    if (value.unit != t->params[parameter].min.unit) {
+        return ADIP_ERR_ARG;
+    }
+
+    for (i = 0; i < ctx->setpoint_count; i++) {
+        if (ctx->setpoints[i].tool == tool &&
+            ctx->setpoints[i].parameter == parameter) {
+            /* Reporting the value already held is not a change, and sending a
+             * frame for it would put traffic on the link for nothing. */
+            if (adip_num_cmp(ctx->setpoints[i].value, value) == ADIP_CMP_EQ) {
+                return ADIP_OK;
+            }
+            ctx->setpoints[i].value = value;
+            ctx->setpoints_dirty = true;
+            return ADIP_OK;
+        }
+    }
+
+    if (ctx->setpoint_count >= ctx->setpoint_cap) {
+        return ADIP_ERR_NO_SPACE;
+    }
+
+    ctx->setpoints[ctx->setpoint_count].tool = tool;
+    ctx->setpoints[ctx->setpoint_count].parameter = parameter;
+    ctx->setpoints[ctx->setpoint_count].value = value;
+    ctx->setpoint_count++;
+    ctx->setpoints_dirty = true;
+    return ADIP_OK;
+}
+
+/* Send the report if anything has changed since the last one. */
+static void flush_setpoints(adip_ctx_t *ctx)
+{
+    uint8_t payload[ADIP_TX_SIZE];
+    int len;
+    int framed;
+
+    if (!ctx->setpoints_dirty || ctx->setpoints == NULL) {
+        return;
+    }
+
+    /*
+     * Nothing is said before a peer has spoken. A machine powers up and
+     * reports where its dials are long before any engine attaches, and those
+     * bytes go nowhere: the report is then marked sent and the engine that
+     * arrives later is never told. Holding it until the first heartbeat makes
+     * first contact carry it, which is the one moment it is certainly needed.
+     */
+    if (ctx->last_heartbeat_ms == 0u) {
+        return;
+    }
+
+    len = adip_encode_setpoints(ctx->setpoints, ctx->setpoint_count,
+                                payload, sizeof(payload));
+    if (len <= 0) {
+        /* Left dirty deliberately, so the next poll tries again rather than
+         * the engine planning forever from a value that moved. */
+        return;
+    }
+
+    framed = adip_frame_wrap(payload, (size_t)len, ctx->tx, sizeof(ctx->tx));
+    if (framed <= 0) {
+        return;
+    }
+
+    (void)adip_port_write(ctx->tx, (size_t)framed);
+    ctx->setpoints_dirty = false;
+}
+
 static adip_status_t send_samples(adip_ctx_t *ctx, const adip_sample_t *s,
                                   uint8_t n)
 {
@@ -463,6 +572,33 @@ static void dispatch(adip_ctx_t *ctx, const uint8_t *payload, size_t len)
     }
 
     if (kind == ADIP_KIND_HEARTBEAT) {
+        /*
+         * A heartbeat after a silence longer than the control timeout is a
+         * peer that was not there a moment ago, which is as close to "a
+         * session opened" as this protocol gets: ADI-P 9.1 has the engine open
+         * a session and defines no message for it, so heartbeats are the only
+         * evidence an appliance has.
+         *
+         * Re-reporting then matters because the new engine believes nothing,
+         * or worse, inherited what the last one believed. Judged before
+         * send_heartbeat, which does not move link_ms, and against the value
+         * set by the caller in adip_poll.
+         */
+        if (ctx->dev->control_timeout_ms > 0u &&
+            (adip_port_millis() - ctx->last_heartbeat_ms) >
+                ctx->dev->control_timeout_ms) {
+            ctx->setpoints_dirty = true;
+        }
+        ctx->last_heartbeat_ms = adip_port_millis();
+
+        /*
+         * Before the reply, not after, so both frames are on the wire
+         * together. An engine drains what is waiting when it heartbeats and
+         * then acts on what it has; a report sent on the following poll
+         * arrives after that drain and is read a heartbeat late, which is one
+         * request too late to plan the first correction with.
+         */
+        flush_setpoints(ctx);
         send_heartbeat(ctx);
         return;
     }
@@ -593,6 +729,12 @@ adip_status_t adip_poll(adip_ctx_t *ctx)
      * noticed. This is why poll belongs in the main loop rather than only on
      * a transport interrupt. */
     service_timers(ctx);
+
+    /* Before any of the early returns below. An engine cannot plan a
+     * correction without knowing where the mechanism stands, so a report that
+     * waited for inbound traffic would be withheld exactly when it is needed:
+     * on a quiet link, which is what a machine sitting idle has. */
+    flush_setpoints(ctx);
 
     if (ctx->rx_len == 0) {
         return ADIP_OK;

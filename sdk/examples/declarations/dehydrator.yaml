@@ -90,7 +90,13 @@ envelope:
     - id: "element_settling"
       tools: ["x.dryline.heater.set_temperature"]
       min_interval_s: 120.0
-      max_invocations: 20
+      # Sixteen is the most `libadip` can track per rate limit, as
+      # ADIP_MAX_RATE_HISTORY in adip.h. Twenty was declared here first and
+      # `adi validate` accepted it, because the engine's validator does not
+      # know the appliance library's compile-time limits; `adip_init` then
+      # refused the declaration with ADIP_ERR_UNSUPPORTED and the firmware
+      # never reached its main loop.
+      max_invocations: 12
       window_s: 86400.0
 
   failsafe:

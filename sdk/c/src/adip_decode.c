@@ -354,6 +354,43 @@ int adip_encode_signals(const adip_sample_t *samples, uint8_t count,
     return (int)w.pos;
 }
 
+int adip_encode_setpoints(const adip_setpoint_t *setpoints, uint8_t count,
+                          uint8_t *out, size_t out_len)
+{
+    adip_cbor_w_t w;
+    uint8_t i;
+
+    /* Unlike signals, a count of zero is legal. A machine with no numeric
+     * parameters still answers the question, and an engine must be able to
+     * tell "none to report" from "nothing arrived". */
+    if (out == NULL || (setpoints == NULL && count > 0u)) {
+        return (int)ADIP_ERR_ARG;
+    }
+
+    w.buf = out;
+    w.len = out_len;
+    w.pos = 0;
+
+    if (!adip_cbor_put_map(&w, 2u) ||
+        !adip_cbor_put_uint(&w, KEY_KIND) ||
+        !adip_cbor_put_uint(&w, ADIP_KIND_SETPOINTS) ||
+        !adip_cbor_put_uint(&w, 1u) ||
+        !adip_cbor_put_array(&w, (uint64_t)count)) {
+        return (int)ADIP_ERR_NO_SPACE;
+    }
+
+    for (i = 0; i < count; i++) {
+        if (!adip_cbor_put_array(&w, 3u) ||
+            !adip_cbor_put_uint(&w, (uint64_t)setpoints[i].tool) ||
+            !adip_cbor_put_uint(&w, (uint64_t)setpoints[i].parameter) ||
+            !adip_cbor_put_quantity(&w, setpoints[i].value)) {
+            return (int)ADIP_ERR_NO_SPACE;
+        }
+    }
+
+    return (int)w.pos;
+}
+
 int adip_encode_event(uint16_t event, uint32_t t_ms, const char *code,
                       uint8_t severity, uint8_t *out, size_t out_len)
 {

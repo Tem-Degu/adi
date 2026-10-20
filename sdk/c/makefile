@@ -45,6 +45,7 @@ T3 = test/test_m3.c
 T4 = test/test_m4.c
 T5 = test/test_m5.c
 T6 = test/test_signals.c
+T7 = test/test_setpoints.c
 
 BUILD = build
 OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
@@ -56,7 +57,7 @@ OBJ   = $(patsubst src/%.c,$(BUILD)/%.o,$(RUNTIME))
 .PHONY: all test clean size regen example arm arm-test arm-size dehydrator dehydrator-run
 
 TESTS = $(BUILD)/test_m1 $(BUILD)/test_m2 $(BUILD)/test_m3 $(BUILD)/test_m4 \
-        $(BUILD)/test_m5 $(BUILD)/test_signals
+        $(BUILD)/test_m5 $(BUILD)/test_signals $(BUILD)/test_setpoints
 
 all: $(TESTS)
 
@@ -81,6 +82,9 @@ $(BUILD)/test_m5: $(SRC) $(NEUTRAL) $(T5) | $(BUILD)
 $(BUILD)/test_signals: $(SRC) $(NEUTRAL) $(T6) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(NEUTRAL) $(T6)
 
+$(BUILD)/test_setpoints: $(SRC) $(NEUTRAL) $(T7) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $(SRC) $(NEUTRAL) $(T7)
+
 EX900 = generated/adip_generated_ex900.c
 EXAMPLE = example/main.c
 
@@ -99,6 +103,7 @@ test: $(TESTS)
 	./$(BUILD)/test_m4
 	./$(BUILD)/test_m5
 	./$(BUILD)/test_signals
+	./$(BUILD)/test_setpoints
 
 # Regenerate the tables from the declarations. Run after editing either.
 regen:
@@ -145,7 +150,8 @@ ARMLINK  = --specs=nano.specs -nostartfiles -T $(ARMLD)
 ARMLIBS  = -lc -lnosys
 
 ARMTESTS = $(ARMBUILD)/test_m1.elf $(ARMBUILD)/test_m2.elf $(ARMBUILD)/test_m3.elf \
-           $(ARMBUILD)/test_m4.elf $(ARMBUILD)/test_m5.elf $(ARMBUILD)/test_signals.elf
+           $(ARMBUILD)/test_m4.elf $(ARMBUILD)/test_m5.elf \
+           $(ARMBUILD)/test_signals.elf $(ARMBUILD)/test_setpoints.elf
 
 $(ARMBUILD):
 	mkdir -p $(ARMBUILD)
@@ -169,6 +175,9 @@ $(ARMBUILD)/test_m5.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T5) | $(ARMB
 
 $(ARMBUILD)/test_signals.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T6) | $(ARMBUILD)
 	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T6) -o $@ $(ARMLIBS)
+
+$(ARMBUILD)/test_setpoints.elf: arm/startup.c $(ARMLD) $(SRC) $(NEUTRAL) $(T7) | $(ARMBUILD)
+	$(ARMCC) $(ARMFLAGS) $(ARMLINK) arm/startup.c $(SRC) $(NEUTRAL) $(T7) -o $@ $(ARMLIBS)
 
 arm: $(ARMTESTS)
 

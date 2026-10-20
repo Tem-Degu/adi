@@ -43,6 +43,7 @@ extern "C" {
 #define ADIP_KIND_SIGNALS    3u
 #define ADIP_KIND_EVENT      4u
 #define ADIP_KIND_HEARTBEAT  5u
+#define ADIP_KIND_SETPOINTS  6u
 
 /* ------------------------------------------------------------------ limits */
 
@@ -195,6 +196,15 @@ int adip_encode_event(uint16_t event, uint32_t t_ms, const char *code,
 
 /* Encode the reply to a heartbeat. PROTOCOL.md 10.2.5. */
 int adip_encode_heartbeat(bool busy, bool faulted, uint8_t *out, size_t out_len);
+
+/*
+ * What every reported mechanism is currently commanded to. ADI-P 10.2.
+ *
+ * An empty report is legal and meaningful: the machine has no numeric
+ * parameters, or none it has told the library about yet.
+ */
+int adip_encode_setpoints(const adip_setpoint_t *setpoints, uint8_t count,
+                          uint8_t *out, size_t out_len);
 
 /* Encode a response. Returns bytes written, or a negative adip_status_t. */
 int adip_encode_response(uint32_t invocation_id, adip_outcome_t outcome,

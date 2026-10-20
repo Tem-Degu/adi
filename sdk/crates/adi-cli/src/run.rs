@@ -220,6 +220,12 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
     let mut now_ms: u64 = 0;
 
+    // ADI-P 9.1 step 4 and a half: find out what the machine is set to before
+    // taking an instruction about it. An appliance reports its setpoints on
+    // first contact, and a request that arrives before the report cannot be
+    // planned.
+    session.synchronise(now_ms)?;
+
     loop {
         print!("> ");
         std::io::stdout().flush()?;

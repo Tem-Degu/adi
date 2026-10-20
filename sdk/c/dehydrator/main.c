@@ -103,9 +103,14 @@ static void clock_service(void)
 
 /* ------------------------------------------------------------------- context */
 
-static adip_ctx_t    ctx;
-static uint8_t       rx[ADIP_RX_MIN];
-static adip_sample_t batch[ADIP_MAX_BATCH];
+static adip_ctx_t      ctx;
+static uint8_t         rx[ADIP_RX_MIN];
+static adip_sample_t   batch[ADIP_MAX_BATCH];
+
+/* One entry per numeric parameter this machine reports. The engine may not
+ * guess where a mechanism stands, so a machine that keeps this to itself
+ * cannot be asked to correct anything. */
+static adip_setpoint_t setpoints[ADIP_DH20_TOOL_COUNT * ADIP_DH20_MAX_PARAMS];
 
 /* ------------------------------------------------------------ the three ports
  *
@@ -217,6 +222,14 @@ adip_action_t adip_on_invoke(const adip_invocation_t *inv,
          */
         element_target_c = num_to_int(celsius);
 
+        /* Said once, here, because this is the only place the command
+         * changes. A report from the engine's own invocation matters as much
+         * as one from the panel: the engine's belief is provisional until the
+         * machine confirms what it actually did with the value. */
+        (void)adip_report_setpoint(&ctx,
+                                   ADIP_TOOL_DH20_X_DRYLINE_HEATER_SET_TEMPERATURE,
+                                   0u, celsius);
+
         /* The element takes about two minutes to settle, which is what
          * duration_ms_typ says. A handler must not block for it, so the move
          * is started and completed from the main loop. Shortened here because
@@ -305,6 +318,18 @@ int main(void)
         return 1;
     }
     adip_set_signal_buffer(&ctx, batch, ADIP_MAX_BATCH);
+    adip_set_setpoint_buffer(&ctx, setpoints,
+                             (uint8_t)(sizeof(setpoints) / sizeof(setpoints[0])));
+
+    /* Where the element stands at power-on, which is the report that matters
+     * most and the easiest to leave out: an engine that has just connected
+     * knows nothing, and without this it cannot plan a first correction. A
+     * product reads this back from its own non-volatile store rather than
+     * assuming, as this does. */
+    (void)adip_report_setpoint(&ctx,
+                               ADIP_TOOL_DH20_X_DRYLINE_HEATER_SET_TEMPERATURE,
+                               0u,
+                               ADIP_NUM(element_target_c, 0, ADIP_UNIT_C));
 
     /* Both bitmaps default to the safe reading, so nothing is invocable until
      * the firmware says otherwise. Note the sense of each: a precondition is

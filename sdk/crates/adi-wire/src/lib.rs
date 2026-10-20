@@ -30,6 +30,7 @@ pub enum Kind {
     Signals = 3,
     Event = 4,
     Heartbeat = 5,
+    Setpoints = 6,
 }
 
 impl Kind {
@@ -40,6 +41,7 @@ impl Kind {
             3 => Kind::Signals,
             4 => Kind::Event,
             5 => Kind::Heartbeat,
+            6 => Kind::Setpoints,
             _ => return None,
         })
     }
@@ -82,6 +84,26 @@ pub struct Sample {
     pub t_ms: u32,
 }
 
+/// One parameter's setpoint, as the appliance reports it.
+///
+/// Not a [`Sample`]. A sample is something the machine measured; this is what
+/// a mechanism is commanded to. A heater told to reach 62 C may be measuring
+/// 45 C on the way there, and the planner adjusts the command rather than the
+/// thermometer. Conflating the two would have the engine plan from a reading
+/// that is still moving.
+///
+/// Addressed by position, as events and signals already are: the declaration
+/// gives both sides the same ordered list of tools, and each tool the same
+/// ordered list of parameters. No names cross the wire.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Setpoint {
+    /// Index into the declaration's `tools`.
+    pub tool: u16,
+    /// Index into that tool's parameters, in declaration order.
+    pub parameter: u16,
+    pub value: Num,
+}
+
 /// An argument value in an invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
@@ -115,6 +137,19 @@ pub enum Message {
         busy: Option<bool>,
         faulted: Option<bool>,
     },
+    /// What the appliance's mechanisms are currently commanded to.
+    ///
+    /// ADI-P 9.1 requires that an operator can take control by physical means
+    /// at any moment, so a setting can change with the engine neither asking
+    /// nor being told. Anything the engine remembers is therefore stale by
+    /// mandate, and this is how it stops guessing: the appliance owns its own
+    /// state, as it already owns its interlocks, its preconditions and whether
+    /// it is faulted.
+    ///
+    /// Sent unsolicited, when a session opens and whenever a value changes.
+    /// There is no engine-initiated query anywhere in this protocol and this
+    /// does not add one.
+    Setpoints(Vec<Setpoint>),
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -151,6 +186,7 @@ pub fn kind_of(message: &Message) -> Kind {
         Message::Signals(_) => Kind::Signals,
         Message::Event { .. } => Kind::Event,
         Message::Heartbeat { .. } => Kind::Heartbeat,
+        Message::Setpoints(_) => Kind::Setpoints,
     }
 }
 
@@ -210,6 +246,20 @@ pub fn encode(message: &Message) -> Result<Vec<u8>, WireError> {
                 w.uint(u64::from(s.signal));
                 w.quantity(s.value);
                 w.uint(u64::from(s.t_ms));
+            }
+        }
+
+        Message::Setpoints(setpoints) => {
+            w.map(2);
+            w.uint(KEY_KIND);
+            w.uint(Kind::Setpoints as u64);
+            w.uint(1);
+            w.array(setpoints.len() as u64);
+            for sp in setpoints {
+                w.array(3);
+                w.uint(u64::from(sp.tool));
+                w.uint(u64::from(sp.parameter));
+                w.quantity(sp.value);
             }
         }
 
@@ -296,6 +346,7 @@ pub fn decode(payload: &[u8]) -> Result<Message, WireError> {
         Kind::Signals => decode_signals(&mut r, count),
         Kind::Event => decode_event(&mut r, count),
         Kind::Heartbeat => decode_heartbeat(&mut r, count),
+        Kind::Setpoints => decode_setpoints(&mut r, count),
     }
 }
 
@@ -414,6 +465,37 @@ fn decode_signals(r: &mut cbor::Reader, count: u64) -> Result<Message, WireError
     }
 
     Ok(Message::Signals(samples))
+}
+
+fn decode_setpoints(r: &mut cbor::Reader, count: u64) -> Result<Message, WireError> {
+    let mut setpoints = Vec::new();
+
+    for _ in 0..count {
+        match r.uint()? {
+            KEY_KIND => {
+                r.skip()?;
+            }
+            1 => {
+                let n = r.array()?;
+                for _ in 0..n {
+                    if r.array()? != 3 {
+                        return Err(WireError::Malformed(
+                            "a setpoint is [tool, parameter, value]",
+                        ));
+                    }
+                    let tool = u16::try_from(r.uint()?)
+                        .map_err(|_| WireError::Malformed("tool index is not 16 bit"))?;
+                    let parameter = u16::try_from(r.uint()?)
+                        .map_err(|_| WireError::Malformed("parameter index is not 16 bit"))?;
+                    let value = r.quantity()?;
+                    setpoints.push(Setpoint { tool, parameter, value });
+                }
+            }
+            _ => r.skip()?,
+        }
+    }
+
+    Ok(Message::Setpoints(setpoints))
 }
 
 fn decode_event(r: &mut cbor::Reader, count: u64) -> Result<Message, WireError> {

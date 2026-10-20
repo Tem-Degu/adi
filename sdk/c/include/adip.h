@@ -141,6 +141,10 @@ typedef struct {
      */
     uint32_t link_ms;
     uint32_t last_rx_ms;   /* last byte of any kind, for diagnostics */
+    /* Last heartbeat, for telling a new session from a continuing one. A gap
+     * wider than the control timeout means the engine on the other end is not
+     * the one that was there before, or believes nothing yet. */
+    uint32_t last_heartbeat_ms;
 
     /*
      * Set when the failsafe has fired. New invocations are refused with FAULT
@@ -173,6 +177,22 @@ typedef struct {
     adip_sample_t *samples;
     uint8_t        sample_cap;
     uint8_t        sample_count;
+
+    /*
+     * Current setpoints. The appliance owns its own state, as it already owns
+     * its interlocks, its preconditions and whether it is faulted, and ADI-P
+     * 9.1 requires that an operator can take control by physical means at any
+     * moment, so anything the engine remembers is stale by mandate.
+     *
+     * The caller owns the storage, as with samples: a machine that reports
+     * none pays no RAM for the ability.
+     */
+    adip_setpoint_t *setpoints;
+    uint8_t          setpoint_cap;
+    uint8_t          setpoint_count;
+    /* Set on a change and when the link is lost, so a reconnecting engine is
+     * told afresh rather than inheriting whatever it believed before. */
+    bool             setpoints_dirty;
 
     /*
      * Counters. An out-of-range invocation means the engine is defective, and
@@ -240,6 +260,37 @@ adip_status_t adip_complete(adip_ctx_t *ctx, uint32_t invocation_id,
  * `buf` must outlive the context. At most ADIP_MAX_BATCH samples are used.
  */
 void adip_set_signal_buffer(adip_ctx_t *ctx, adip_sample_t *buf, uint8_t count);
+
+/*
+ * Where to keep the setpoints this machine reports. `buf` must outlive the
+ * context and hold one entry per numeric parameter the firmware will report.
+ *
+ * Optional. A machine that sets this up reports its own state; one that does
+ * not leaves an engine unable to plan a correction, because an engine may not
+ * guess where a mechanism stands. See `adip_report_setpoint`.
+ */
+void adip_set_setpoint_buffer(adip_ctx_t *ctx, adip_setpoint_t *buf, uint8_t count);
+
+/*
+ * Tell the library a mechanism's commanded value, and have it told to the
+ * engine.
+ *
+ * Call it whenever the value changes and for whatever reason: an invocation
+ * the engine sent, a button on the machine's own panel, a service menu, a
+ * position restored at power-on. The last of those is the one that matters
+ * most and the easiest to forget, because an engine that has just connected
+ * knows nothing at all.
+ *
+ * The value is stored and the report is sent from the next `adip_poll`, so
+ * several changes in one control pass cost one frame. Calling it with a value
+ * already held sends nothing.
+ *
+ * Returns ADIP_ERR_ARG for an unknown tool or parameter, or for a unit the
+ * declaration does not name for it, and ADIP_ERR_NO_SPACE when the buffer has
+ * no room for a parameter not yet reported.
+ */
+adip_status_t adip_report_setpoint(adip_ctx_t *ctx, uint16_t tool,
+                                   uint16_t parameter, adip_num_t value);
 
 /*
  * Report a measurement.

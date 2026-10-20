@@ -77,7 +77,7 @@ impl Log {
 #[derive(Default)]
 pub struct Recorded {
     log: Log,
-    replies: std::collections::VecDeque<Message>,
+    replies: std::collections::VecDeque<Option<Message>>,
 }
 
 impl Recorded {
@@ -93,7 +93,19 @@ impl Recorded {
 
     /// Queue a reply for the session to receive.
     pub fn will_reply(&mut self, message: Message) -> &mut Self {
-        self.replies.push_back(message);
+        self.replies.push_back(Some(message));
+        self
+    }
+
+    /// Queue a silence: one read that finds nothing waiting.
+    ///
+    /// A real link runs dry between the things an appliance has to say, and a
+    /// reader that drains until empty needs that to be expressible. Without
+    /// it a queue of replies looks like one unbroken burst, and a test cannot
+    /// say that a report arrived during a heartbeat while the reply to a later
+    /// invocation had not been sent yet.
+    pub fn will_fall_silent(&mut self) -> &mut Self {
+        self.replies.push_back(None);
         self
     }
 }
@@ -105,6 +117,8 @@ impl Transport for Recorded {
     }
 
     fn recv(&mut self, _timeout_ms: u32) -> Result<Option<Message>, SessionError> {
-        Ok(self.replies.pop_front())
+        // An exhausted queue and a queued silence read the same way, which is
+        // what a link with nothing on it looks like.
+        Ok(self.replies.pop_front().flatten())
     }
 }

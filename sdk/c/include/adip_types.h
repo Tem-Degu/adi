@@ -124,6 +124,24 @@ adip_num_t adip_num_neg(adip_num_t a);
 double adip_num_to_double(adip_num_t n);
 #endif
 
+/*
+ * One parameter's setpoint: what a mechanism is commanded to.
+ *
+ * Not a sample. A sample is something the machine measured; this is what it
+ * was told to reach. A heater commanded to 62 C may be measuring 45 C on the
+ * way there, and an engine planning the next correction adjusts the command
+ * rather than the thermometer.
+ *
+ * Addressed by position, as signals and events already are: the declaration
+ * gives both sides the same ordered list of tools and each tool the same
+ * ordered list of parameters, so no names cross the wire.
+ */
+typedef struct {
+    uint16_t   tool;
+    uint16_t   parameter;
+    adip_num_t value;
+} adip_setpoint_t;
+
 /* ---------------------------------------------------------------- outcomes */
 
 /* Invocation lifecycle from PROTOCOL.md 9.2. */

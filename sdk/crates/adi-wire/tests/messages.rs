@@ -15,7 +15,9 @@ use std::collections::BTreeMap;
 use adi_protocol::ids::SemanticId;
 use adi_protocol::invocation::{Invocation, RejectReason};
 use adi_protocol::units::{Quantity, Unit};
-use adi_wire::{decode, encode, peek_kind, Arg, Kind, Message, Num, Outcome, Sample, WireError};
+use adi_wire::{
+    decode, encode, peek_kind, Arg, Kind, Message, Num, Outcome, Sample, Setpoint, WireError,
+};
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X} ")).collect::<String>().trim_end().to_string()
@@ -157,6 +159,18 @@ fn every_kind_survives_a_round_trip() {
             busy: Some(true),
             faulted: Some(true),
         },
+        Message::Setpoints(vec![
+            Setpoint {
+                tool: 0,
+                parameter: 0,
+                value: Num::from_quantity(Quantity::new(40.0, Unit::C)).unwrap(),
+            },
+            Setpoint {
+                tool: 2,
+                parameter: 1,
+                value: Num::from_quantity(Quantity::new(18.5, Unit::G)).unwrap(),
+            },
+        ]),
     ];
 
     for original in messages {
@@ -188,6 +202,65 @@ fn an_engine_invocation_becomes_a_message() {
         }
         other => panic!("expected an invocation, got {other:?}"),
     }
+}
+
+// --------------------------------------------------------------- setpoints
+
+/// ADI-P 10.2: what a mechanism is commanded to, addressed by position.
+///
+/// Derived by hand from the spec rather than from this encoder, which is the
+/// point of this file: a round trip proves only that one implementation agrees
+/// with itself.
+#[test]
+fn a_setpoint_report_is_exactly_these_bytes() {
+    let bytes = encode(&Message::Setpoints(vec![Setpoint {
+        tool: 0,
+        parameter: 0,
+        value: Num::from_quantity(Quantity::new(40.0, Unit::C)).unwrap(),
+    }]))
+    .unwrap();
+
+    let expected = [
+        0xA2, // map(2)
+        0x00, 0x06, // kind = 6, setpoints
+        0x01, // key 1
+        0x81, // array(1), one setpoint
+        0x83, // array(3), [tool, parameter, value]
+        0x00, // tool 0
+        0x00, // parameter 0
+        0x82, 0x05, // quantity: array(2), unit 5 = C
+        0xC4, // tag 4, decimal fraction
+        0x82, 0x00, 0x18, 0x28, // array(2), exponent 0, mantissa 40
+    ];
+
+    assert_eq!(hex(&bytes), hex(&expected));
+}
+
+/// Routing must not need the body, as for every other kind.
+#[test]
+fn a_setpoint_report_announces_its_kind() {
+    let bytes = encode(&Message::Setpoints(Vec::new())).unwrap();
+    assert_eq!(peek_kind(&bytes).unwrap(), Kind::Setpoints);
+}
+
+/// A machine that reports nothing is reporting something: it has no numeric
+/// parameters, or none it has been told about yet. An empty report is not an
+/// error and must not be read as one.
+#[test]
+fn an_empty_setpoint_report_decodes_as_empty() {
+    let bytes = encode(&Message::Setpoints(Vec::new())).unwrap();
+    assert_eq!(decode(&bytes), Ok(Message::Setpoints(Vec::new())));
+}
+
+/// A setpoint that is not three elements is malformed rather than guessed at.
+#[test]
+fn a_short_setpoint_entry_is_refused() {
+    // map(2), kind 6, key 1, array(1), array(2) where three are required
+    let bytes = [0xA2, 0x00, 0x06, 0x01, 0x81, 0x82, 0x00, 0x00];
+    assert_eq!(
+        decode(&bytes),
+        Err(WireError::Malformed("a setpoint is [tool, parameter, value]"))
+    );
 }
 
 // ---------------------------------------------------------------- refusals

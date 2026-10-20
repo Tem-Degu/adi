@@ -20,7 +20,7 @@
 //! Copyright 2026 StreetAI. Licensed under the Apache License, Version 2.0.
 
 use std::io::{ErrorKind, Read, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use adi_session::{SessionError, Transport};
 use adi_wire::{decode, encode_framed, frame, Message};
@@ -124,25 +124,50 @@ impl Transport for SerialAppliance {
         // the appliance is quiet for most of a long operation, and the engine
         // still has a heartbeat to send. Blocking would make the thing that
         // detects a dead link the thing that waits forever on one.
-        self.port
-            .set_timeout(Duration::from_millis(u64::from(timeout_ms)))
-            .map_err(|e| SessionError::Link(format!("could not set the read timeout: {e}")))?;
+        //
+        // It bounds the wait for a whole frame, not for one read. A UART
+        // delivers whatever has arrived, so a frame routinely comes in two
+        // or three pieces: a twelve byte response was seen arriving as nine
+        // bytes and then three. Returning after the first read handed the
+        // caller None, which says "nothing arrived" and is the one thing it
+        // did not mean. The session reads None as silence and gives up, so
+        // an appliance that had answered correctly was reported as having
+        // gone quiet, and every invocation over a serial link failed that
+        // way.
+        let deadline = Instant::now() + Duration::from_millis(u64::from(timeout_ms));
 
-        let mut chunk = [0u8; 256];
-        match self.port.read(&mut chunk) {
-            Ok(0) => Ok(None),
-            Ok(read) => {
-                self.incoming.push(&chunk[..read]);
-                self.incoming.take().transpose()
+        loop {
+            if let Some(message) = self.incoming.take() {
+                return Some(message).transpose();
             }
-            // Nothing arrived in time. Not an error, and not a closed link:
-            // a serial port has no end of file, so quiet and gone look
-            // identical here. Reporting silence lets the session's own
-            // liveness rule decide, which is where that decision belongs.
-            Err(e) if e.kind() == ErrorKind::TimedOut => Ok(None),
-            Err(e) => Err(SessionError::Link(format!(
-                "could not read from the appliance: {e}"
-            ))),
+
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+
+            self.port.set_timeout(remaining).map_err(|e| {
+                SessionError::Link(format!("could not set the read timeout: {e}"))
+            })?;
+
+            let mut chunk = [0u8; 256];
+            match self.port.read(&mut chunk) {
+                // A read of nothing is not a frame and not an end of file;
+                // the deadline above is what stops this going round forever.
+                Ok(0) => continue,
+                Ok(read) => self.incoming.push(&chunk[..read]),
+                // Nothing arrived in time. Not an error, and not a closed
+                // link: a serial port has no end of file, so quiet and gone
+                // look identical here. Reporting silence lets the session's
+                // own liveness rule decide, which is where that decision
+                // belongs.
+                Err(e) if e.kind() == ErrorKind::TimedOut => return Ok(None),
+                Err(e) => {
+                    return Err(SessionError::Link(format!(
+                        "could not read from the appliance: {e}"
+                    )))
+                }
+            }
         }
     }
 }
