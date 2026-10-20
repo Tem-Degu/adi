@@ -498,6 +498,29 @@ ffmpeg -i yours.m4a -ac 1 -ar 16000 -c:a pcm_s16le spoken.wav
 A rate other than the one the transcriber asks for is refused rather than
 resampled, so the conversion is not optional.
 
+### The same, on every example machine
+
+One spoken sentence per machine, run twice: once with Moonshine serving the
+transcriber locally and once with every seam hosted. The two paths produced the
+same action on each machine.
+
+| Machine | What was said | What was sent |
+|---|---|---|
+| Example EX-900 espresso | "Make the next shot take thirty seconds" | `grind.set_setting` 23 step |
+| Dryline DH-20 dehydrator | "Dry it down to twelve percent moisture" | `heater.set_temperature` 70 C, reported as partial at the declared limit |
+| Rainline SX-2 shower | "Make it a bit warmer" | `mixer.set_temperature` 40 C, from a measured 38 |
+| Northwash NW-8 washer | "These towels came out soaking wet, spin them harder" | `spin.set_speed` 20 pct, from a measured 90 |
+
+Every transcript came back at 0.85 or better. Three of the four machines are
+firmware on an emulated Cortex-M3 reached over a UART; the espresso machine is
+the same library built for a host.
+
+One run is worth describing because it looks like a failure and is not. Asked a
+second time inside two minutes, the dehydrator refused: its declaration states
+a 120 second interval between calls to the heater, and the appliance enforces
+that itself. The engine reported what the machine said and the session carried
+on.
+
 ## Running without models
 
 An engine with an unserved seam is a supported configuration. It refuses the
