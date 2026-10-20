@@ -1,0 +1,61 @@
+# Every model seam served by a hosted provider.
+#
+# The counterpart to models.example-local.yaml, which runs the same seams from
+# local weights. Nothing here needs a model file, an ONNX runtime or a
+# download, which makes it the quickest way to try the whole system before
+# committing to hardware.
+#
+#     export OPENAI_API_KEY=...
+#     adi models check --config models/models.example-hosted.yaml
+#     adi run --config models/models.example-hosted.yaml
+#
+# What it costs: every utterance leaves the building, and none of it works
+# without a network. Both are product decisions rather than protocol ones, and
+# ADI-P 9.4.2 counts a seam as the same seam wherever the weights are. D0 uses
+# no model at all, so the deterministic path is unaffected either way.
+#
+# The key is read from the environment by each backend and never passed as an
+# argument, because an argument is visible to anyone who can list processes.
+#
+# See MODELS.md, "Every seam hosted, verified", for a session run through this
+# configuration.
+
+root: .
+
+seams:
+  transcriber:
+    backend: process
+    command: python3
+    args:
+      - "examples/interpreters/openai_speech.py"
+      - "transcribe"
+      - "gpt-4o-transcribe"
+    sample_rate: 16000
+    # Below this a transcript is treated as not heard and the machine asks
+    # instead of acting. Mishearing "hotter" as "shorter" is a physical action
+    # on a machine with a heating element.
+    min_confidence: 0.6
+
+  interpreter:
+    backend: process
+    command: python3
+    args:
+      - "examples/interpreters/openai_interpreter.py"
+      - "gpt-5.5"
+
+  speaker:
+    backend: process
+    command: python3
+    args:
+      - "examples/interpreters/openai_speech.py"
+      - "speak"
+      - "gpt-4o-mini-tts"
+    # The rate the provider returns for raw PCM. The engine refuses a reply at
+    # another rate rather than resampling it.
+    sample_rate: 24000
+
+  # The explainer needs no model. RecordExplainer produces text from the
+  # decision record, which is accurate though stilted, and a hosted model here
+  # would improve the wording rather than the facts.
+  explainer:
+    backend: none

@@ -336,6 +336,78 @@ D0 uses no model at all, so none of this touches the deterministic path. A
 machine with its network removed still corrects itself. It loses speech, not
 intelligence.
 
+### Every seam hosted, verified
+
+`models/models.example-hosted.yaml` is this configuration, ready to use. It is
+the counterpart to `models.example-local.yaml`.
+`examples/interpreters/openai_speech.py` serves the transcriber and the
+speaker, as `openai_interpreter.py` serves the interpreter and the chooser.
+Between them a machine needs no model files, no ONNX runtime and nothing
+downloaded, which is the quickest way to try the whole thing before committing
+to hardware.
+
+```yaml
+seams:
+  transcriber:
+    backend: process
+    command: python3
+    args: ["examples/interpreters/openai_speech.py", "transcribe",
+           "gpt-4o-transcribe"]
+    sample_rate: 16000
+    min_confidence: 0.6
+
+  interpreter:
+    backend: process
+    command: python3
+    args: ["examples/interpreters/openai_interpreter.py", "gpt-5.5"]
+
+  speaker:
+    backend: process
+    command: python3
+    args: ["examples/interpreters/openai_speech.py", "speak",
+           "gpt-4o-mini-tts"]
+    # The rate the provider returns for raw PCM. A reply at another rate is
+    # refused rather than resampled.
+    sample_rate: 24000
+```
+
+Run against the washing machine firmware on an emulated Cortex-M3, a spoken
+request:
+
+```
+> listen spoken.wav
+  heard        46068 samples at 16000 Hz
+  transcript   "These towels came out soaking wet; spin them harder."  confidence 0.85
+  understood   Adjust
+  style        x.northwash.style.towels
+  target       x.northwash.residual_moisture = now -10 Pct
+  measured     90 Pct
+  sent         x.northwash.spin.set_speed
+               pct = 20 Pct
+  accepted     by the appliance
+```
+
+and a spoken question, answered aloud:
+
+```
+> listen question.wav
+  heard        28049 samples at 16000 Hz
+  transcript   "How wet is the load right now?"  confidence 0.95
+  answers      The load is at 80.0 pct residual moisture right now.
+  spoken       112800 samples at 24000 Hz, written to spoken.wav
+```
+
+That answer is 4.7 seconds of speech at normal level, and the figure in it came
+from the appliance's own sensor rather than from the model.
+
+Audio crosses the seam as raw signed 16-bit little-endian mono samples, base64
+encoded, in both directions. The provider wants a container on the way in and
+returns raw PCM on the way out, so the backend wraps a WAV in memory and asks
+for `pcm` rather than mp3, which avoids decoding something that did not need
+encoding. Where the provider returns log probabilities the confidence comes
+from them; where it does not, the backend falls back to the same estimate the
+local one makes, so the threshold means one thing across both.
+
 ## Wiring a microphone and a speaker
 
 The SDK handles sound once it is samples and once it has produced samples. Moving

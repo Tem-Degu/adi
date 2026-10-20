@@ -83,8 +83,13 @@ has been run end to end against the washing machine firmware, and
 [`sdk/MODELS.md`](./sdk/MODELS.md#the-path-from-a-recording-verified) shows the
 transcript it produced and how to make a recording of your own.
 
-A hosted model can serve the same seam where a network is available; see
-[Using a hosted model](./sdk/MODELS.md#using-a-hosted-model).
+Where a network is available, every seam can be hosted instead, which needs no
+model files at all:
+
+```sh
+export OPENAI_API_KEY=...
+cargo run -p adi-cli -- run --config models/models.example-hosted.yaml
+```
 [`sdk/MODELS.md`](./sdk/MODELS.md) also covers which models were measured and
 what they scored. The short version: use a 4B class model or better, because
 the smaller one we measured guessed where it should have asked.

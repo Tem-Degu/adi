@@ -253,6 +253,36 @@ mod tests {
         assert!(text.contains("bad.yaml"), "names the file: {text}");
     }
 
+    /// Every configuration the repository ships, parsed.
+    ///
+    /// These are what somebody copies on their first day, so one that does not
+    /// load is a first impression rather than a bug report. Nothing read them
+    /// until this: they were exercised only by being run by hand.
+    #[test]
+    fn every_shipped_configuration_loads() {
+        let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models");
+        let entries = std::fs::read_dir(&models)
+            .unwrap_or_else(|e| panic!("{}: {e}", models.display()));
+
+        let mut seen = 0;
+        for entry in entries {
+            let path = entry.expect("readable").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            // The manifest is a different document with a different shape.
+            if path.file_name().and_then(|n| n.to_str()) == Some("manifest.yaml") {
+                continue;
+            }
+
+            ModelsConfig::load(&path)
+                .unwrap_or_else(|e| panic!("{} does not load: {e}", path.display()));
+            seen += 1;
+        }
+
+        assert!(seen >= 3, "expected the shipped configurations, found {seen}");
+    }
+
     #[test]
     fn an_absolute_model_path_is_left_alone() {
         let absolute = if cfg!(windows) { "C:/models/x.gguf" } else { "/models/x.gguf" };
