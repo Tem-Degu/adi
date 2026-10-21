@@ -575,10 +575,27 @@ backend wants. So the second seam costs about 2.1 GB more rather than another
 4.5 GB: `free` reported 2.25 GB of anonymous use with one process and 4.2 GB
 with two, over a 2.5 GB page cache either way.
 
-Worth having, then, and not an emergency: one process serving both seams would
-save about 45 percent of the resident footprint on a module, and the backends
-already read the contract off each request, so nothing in the protocol stands
-in the way.
+Whether it is worth changing depends on where the model runs, and on this
+engine it is not urgent either way.
+
+On a hosted seam the duplicate costs 20 MB, measured, because the process holds
+no weights. On a local model it costs about 2.1 GB.
+
+Nothing is gained by the second process today, either. The engine's loop reads
+an utterance, interprets it, chooses, invokes, and only then reads again, so
+the two seams are never in use at the same moment. Within one utterance they
+cannot be: choosing a mechanism requires knowing the intent. They could only
+overlap across utterances, which needs a concurrent engine loop first, and on
+one local model that concurrency is largely illusory, since two inferences on
+the same cores halve each other rather than running in parallel. On a hosted
+seam the work happens elsewhere, so two pipes would give real parallelism to an
+engine that wanted it.
+
+So the time to make the seams share one process is when a local model is fast
+enough to ship, which is the same point at which memory becomes the binding
+constraint, and the sharing should be conditional on both seams naming the same
+command so that two programs remain possible. The backends already read the
+contract off each request, so nothing in the protocol stands in the way.
 
 ## Running without models
 
