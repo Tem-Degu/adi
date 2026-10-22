@@ -151,8 +151,9 @@ network.
 This is partly done. Models run as separate programs that the engine starts
 and exchanges one message per line with, and backends are supplied, so a
 developer obtains model files and writes no code. What remains is loading
-models inside the engine itself, which replaces two processes and a Python
-runtime with one binary. That matters for a cheaper module rather than for
+models inside the engine itself, which replaces three processes and a Python
+runtime with one binary: one program for understanding, which answers the
+interpreter and the chooser both, and one each for hearing and speaking. That matters for a cheaper module rather than for
 capability, so it is sequenced with P11.
 
 *Gate:* the P6 demonstration runs with no connection of any kind.
