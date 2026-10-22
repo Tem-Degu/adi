@@ -30,14 +30,13 @@
 //! that could silently drop one would produce a plan that looks complete and
 //! is not.
 
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use adi_core::plan::Candidate;
 use adi_decision::{ActionChooser, Goal, ProposedStep, SelectionContext, ToolChooser};
 use serde::{Deserialize, Serialize};
 
+use crate::backend::ProcessBackend;
 use crate::ModelError;
 
 // ------------------------------------------------------------- the messages
@@ -170,19 +169,15 @@ const CONSTRAINTS: &[&str] = &[
     "Serve every goal or none. A plan missing a goal is refused.",
 ];
 
-struct Pipe {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-    command: String,
-}
-
 /// A chooser that is an external program.
 ///
 /// Serves both levels. `ToolChooser` reads the index and ignores the value;
 /// `ActionChooser` requires both.
 pub struct ProcessChooser {
-    inner: Mutex<Pipe>,
+    /// Shared, because the program answering this seam is usually the one
+    /// answering the interpreter, and starting it twice costs a second set of
+    /// a model's private buffers. See `crate::backend`.
+    backend: Arc<ProcessBackend>,
     level: &'static str,
 }
 
@@ -190,32 +185,18 @@ impl ProcessChooser {
     /// Start the program. `level` is "d1" or "d2", and is sent with every
     /// request so one program can serve either.
     pub fn start(command: &str, args: &[String], level: &'static str) -> Result<Self, ModelError> {
-        let mut child = Command::new(command)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| ModelError::Backend(format!("could not start '{command}': {e}")))?;
+        let backend = ProcessBackend::start(command, args).map_err(ModelError::Backend)?;
+        Ok(Self::over(Arc::new(backend), level))
+    }
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| ModelError::Backend("the program has no standard input".into()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| ModelError::Backend("the program has no standard output".into()))?;
-
-        Ok(Self {
-            inner: Mutex::new(Pipe {
-                child,
-                stdin,
-                stdout: BufReader::new(stdout),
-                command: command.to_string(),
-            }),
-            level,
-        })
+    /// The same, over a program that is already running.
+    ///
+    /// This is how one process serves this seam and the interpreter together:
+    /// the caller starts the program once and hands the same `Arc` to both.
+    /// The level still travels with every request, so the shared program is
+    /// told which question it is being asked and by which seam.
+    pub fn over(backend: Arc<ProcessBackend>, level: &'static str) -> Self {
+        Self { backend, level }
     }
 
     fn ask(
@@ -271,29 +252,10 @@ impl ProcessChooser {
                 .unwrap_or_default(),
         };
 
-        let mut line = serde_json::to_string(&request)
+        let line = serde_json::to_string(&request)
             .map_err(|e| format!("could not encode the request: {e}"))?;
-        line.push('\n');
 
-        let mut pipe = self
-            .inner
-            .lock()
-            .map_err(|_| "the backend lock was poisoned")?;
-
-        pipe.stdin
-            .write_all(line.as_bytes())
-            .and_then(|()| pipe.stdin.flush())
-            .map_err(|e| format!("could not reach the program: {e}"))?;
-
-        let mut raw = String::new();
-        if pipe
-            .stdout
-            .read_line(&mut raw)
-            .map_err(|e| format!("could not read the reply: {e}"))?
-            == 0
-        {
-            return Err(format!("'{}' produced no output and exited", pipe.command));
-        }
+        let raw = self.backend.exchange(&line)?;
 
         let reply: Reply = serde_json::from_str(raw.trim()).map_err(|e| {
             format!(
@@ -396,11 +358,5 @@ impl ActionChooser for ProcessChooser {
     }
 }
 
-impl Drop for ProcessChooser {
-    fn drop(&mut self) {
-        if let Ok(mut pipe) = self.inner.lock() {
-            let _ = pipe.child.kill();
-            let _ = pipe.child.wait();
-        }
-    }
-}
+// The child is reaped by `ProcessBackend`'s own `Drop`, when the last seam
+// holding it releases it.

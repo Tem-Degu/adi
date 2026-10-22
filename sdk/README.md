@@ -476,16 +476,6 @@ board.
   so the appliance enters its safe state and aborts what the engine started,
   correctly. Measure on the hardware a product will ship. Speech over a hosted
   seam completes in seconds; `MODELS.md` has both sets of runs.
-- **The chooser is started as a second process with the same command as the
-  interpreter.** On a hosted seam this costs 20 MB, since the process holds no
-  weights. With a local model it costs about 2.1 GB of private buffers, around
-  45 percent more resident memory; the weights themselves are shared because
-  `llama.cpp` maps the file. The engine never uses the two seams at once, so
-  nothing is gained by the second process either, and nothing is lost by it on
-  the configuration speech is usable on today. The time to make the seams share
-  one process is when a local model is fast enough to ship, which is the same
-  point at which memory becomes the binding constraint. `MODELS.md` has the
-  figures and the reasoning.
 - **A local model of the recommended size does not complete a correction at
   D2.** Qwen 3 4B Q4 chose the right mechanism on every cycle measured and
   proposed the setting already in force, so the correction is refused. It also

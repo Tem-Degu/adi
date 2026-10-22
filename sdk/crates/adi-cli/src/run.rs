@@ -11,6 +11,7 @@
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use adi_core::{Cycle, SubjectiveFeedback};
 use adi_decision::{
@@ -21,7 +22,8 @@ use adi_language::context::VariableInfo;
 use adi_language::{Explainer, Language, NoSpeaker, RecordExplainer, Speaker, Transcriber};
 use adi_models::{
     ProcessSpeaker, ProcessTranscriber, SeamConfig, Surroundings,
-    Backend, ModelsConfig, ProcessChooser, ProcessInterpreter, ScriptedInterpreter, Seam,
+    Backend, ModelsConfig, ProcessBackend, ProcessChooser, ProcessInterpreter, ScriptedInterpreter,
+    Seam,
 };
 use adi_protocol::declaration::Declaration;
 use adi_protocol::ids::VariableId;
@@ -135,9 +137,23 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // bytes, so the first request of the session is served from no state at
     // all while the engine was busy starting a model. It is also the ordinary
     // courtesy of not holding a link you cannot answer on.
-    let interpreter = load_interpreter(config_path.as_deref(), domain.as_ref(), &declaration.device)?;
+    // One program for the interpreter and the chooser, where the
+    // configuration names a process backend for the interpreter seam. The two
+    // questions differ in shape and a backend tells them apart, which both
+    // shipped backends do, so starting the program twice bought nothing and
+    // cost a second set of a model's private buffers: measured at about
+    // 2.1 GB on the recommended 4B model, which maps its weights and shares
+    // those, but not the buffers beside them.
+    let shared = shared_model_process(config_path.as_deref());
+
+    let interpreter = load_interpreter(
+        config_path.as_deref(),
+        domain.as_ref(),
+        &declaration.device,
+        shared.as_ref(),
+    )?;
     let voice = Voice::load(config_path.as_deref())?;
-    let chooser = load_chooser(config_path.as_deref(), requested)?;
+    let chooser = load_chooser(config_path.as_deref(), requested, shared.as_ref())?;
 
     let transport: Box<dyn adi_session::Transport> = match &serial_path {
         Some(path) => {
@@ -960,6 +976,7 @@ fn parse_level(requested: Option<&str>) -> Result<AutonomyLevel, Box<dyn std::er
 fn load_chooser(
     config_path: Option<&Path>,
     level: AutonomyLevel,
+    shared: Option<&Arc<ProcessBackend>>,
 ) -> Result<Option<(ProcessChooser, String)>, Box<dyn std::error::Error>> {
     if level == AutonomyLevel::D0 {
         return Ok(None);
@@ -972,9 +989,10 @@ fn load_chooser(
     let config = ModelsConfig::load(path)?;
     let seam = config.seam(Seam::Interpreter);
 
-    // The chooser runs the same program as the interpreter. One model answers
-    // both questions, which is what an appliance with one model resident
-    // actually does.
+    // The chooser runs the same program as the interpreter, and now the same
+    // process: one model answers both questions, which is what an appliance
+    // with one model resident actually does. `shared` is that program, where
+    // the caller started one.
     if seam.backend != Backend::Process {
         return Ok(None);
     }
@@ -988,6 +1006,10 @@ fn load_chooser(
     // chooser and has none is told what to configure or to run at D0. The
     // bare backend error said only that a program was not found, which does
     // not say what it was for or what to do about it.
+    if let Some(backend) = shared {
+        return Ok(Some((ProcessChooser::over(Arc::clone(backend), tag), label)));
+    }
+
     match ProcessChooser::start(&command, &seam.args, tag) {
         Ok(chooser) => Ok(Some((chooser, label))),
         Err(e) => {
@@ -1006,12 +1028,32 @@ type Loaded = Option<(Box<dyn Interpreter>, String)>;
 /// same reason the speech seams are: the session still has `cycle` and
 /// `status`, which need no model, and ending it here would take those away
 /// too. The caller already prints that spoken requests are unavailable.
+/// Start the program that will serve the interpreter seam, and the chooser
+/// with it.
+///
+/// `None` where the configuration names no process backend for that seam, in
+/// which case each seam falls back to starting its own, which is what a
+/// scripted or absent backend wants. A failure here is not reported: the
+/// seams report it themselves, in their own words, when they try to start.
+fn shared_model_process(config_path: Option<&Path>) -> Option<Arc<ProcessBackend>> {
+    let config = ModelsConfig::load(config_path?).ok()?;
+    let seam = config.seam(Seam::Interpreter);
+
+    if seam.backend != Backend::Process {
+        return None;
+    }
+
+    let command = seam.command.clone()?;
+    ProcessBackend::start(&command, &seam.args).ok().map(Arc::new)
+}
+
 fn load_interpreter(
     config_path: Option<&Path>,
     domain: &dyn adi_core::domain::Domain,
     device: &adi_protocol::declaration::Device,
+    shared: Option<&Arc<ProcessBackend>>,
 ) -> Result<Loaded, Box<dyn std::error::Error>> {
-    match start_interpreter(config_path, domain, device) {
+    match start_interpreter(config_path, domain, device, shared) {
         Ok(Some((interpreter, label))) => {
             println!("  interpreter  {label}");
             Ok(Some((interpreter, label)))
@@ -1037,6 +1079,7 @@ pub(crate) fn start_interpreter(
     config_path: Option<&Path>,
     domain: &dyn adi_core::domain::Domain,
     device: &adi_protocol::declaration::Device,
+    shared: Option<&Arc<ProcessBackend>>,
 ) -> Result<Loaded, Box<dyn std::error::Error>> {
     let Some(path) = config_path else {
         return Ok(None);
@@ -1061,49 +1104,60 @@ pub(crate) fn start_interpreter(
             let label = format!("process ({command})");
 
             let knowledge = domain.knowledge();
-            let interpreter = ProcessInterpreter::start(
-                &command,
-                &seam.args,
-                Surroundings {
-                    // With what each style is, not only its identifier. A
-                    // request names a style the way a person would.
-                    styles: knowledge
-                        .styles_described()
-                        .into_iter()
-                        .map(|(name, description)| adi_language::context::StyleInfo {
-                            name: name.to_string(),
-                            description: description.map(str::to_string),
-                        })
-                        .collect(),
-                    materials: knowledge
-                        .material_ids()
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect(),
-                    // Each with its unit and meaning, so the model is not asked
-                    // to infer what a variable is from its name alone.
-                    variables: domain
-                        .variables()
-                        .iter()
-                        .map(|v| {
-                            let declared = knowledge.variable(v);
-                            VariableInfo {
-                                name: v.0.clone(),
-                                unit: declared.map(|d| d.unit.as_str().to_string()),
-                                meaning: declared.map(|d| d.description.trim().to_string()),
-                            }
-                        })
-                        .collect(),
-                    // The manufacturer's own material, so the machine can answer
-                    // a question rather than only act on a request.
-                    notes: knowledge.notes().cloned().collect(),
-                    device: Some(format!(
-                        "{} {}, firmware {}",
-                        device.vendor, device.model, device.firmware_version
-                    )),
-                },
-                Default::default(),
-            )?;
+            let surroundings = Surroundings {
+                // With what each style is, not only its identifier. A
+                // request names a style the way a person would.
+                styles: knowledge
+                    .styles_described()
+                    .into_iter()
+                    .map(|(name, description)| adi_language::context::StyleInfo {
+                        name: name.to_string(),
+                        description: description.map(str::to_string),
+                    })
+                    .collect(),
+                materials: knowledge
+                    .material_ids()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+                // Each with its unit and meaning, so the model is not asked
+                // to infer what a variable is from its name alone.
+                variables: domain
+                    .variables()
+                    .iter()
+                    .map(|v| {
+                        let declared = knowledge.variable(v);
+                        VariableInfo {
+                            name: v.0.clone(),
+                            unit: declared.map(|d| d.unit.as_str().to_string()),
+                            meaning: declared.map(|d| d.description.trim().to_string()),
+                        }
+                    })
+                    .collect(),
+                // The manufacturer's own material, so the machine can answer
+                // a question rather than only act on a request.
+                notes: knowledge.notes().cloned().collect(),
+                device: Some(format!(
+                    "{} {}, firmware {}",
+                    device.vendor, device.model, device.firmware_version
+                )),
+            };
+
+            // Over the program already running where there is one, so that
+            // this seam and the chooser are the same process.
+            let interpreter = match shared {
+                Some(backend) => ProcessInterpreter::over(
+                    Arc::clone(backend),
+                    surroundings,
+                    Default::default(),
+                ),
+                None => ProcessInterpreter::start(
+                    &command,
+                    &seam.args,
+                    surroundings,
+                    Default::default(),
+                )?,
+            };
             Ok(Some((Box::new(interpreter), label)))
         }
 

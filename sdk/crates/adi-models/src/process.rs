@@ -33,14 +33,13 @@
 //! are 16-bit signed, little endian, single channel, which is what every
 //! speech model in this space expects and what `Audio` already holds.
 
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use adi_decision::{accept_intent, DecisionError, Interpreter, SelectionContext, Understood};
 use adi_language::context::{ContextBudget, ModelContext, StyleInfo, VariableInfo};
 use serde::Serialize;
 
+use crate::backend::ProcessBackend;
 use crate::ModelError;
 
 /// What the interpreter needs to know about the machine and its domain.
@@ -154,7 +153,10 @@ struct HistoryLine {
 /// would pay model loading on every utterance, and loading is the expensive
 /// part of a language model.
 pub struct ProcessInterpreter {
-    inner: Mutex<Pipe>,
+    /// Shared, because one program can serve this seam and the chooser both,
+    /// and starting it twice costs a second set of a model's private buffers.
+    /// See `crate::backend`.
+    backend: Arc<ProcessBackend>,
     budget: ContextBudget,
     knowledge_styles: Vec<StyleInfo>,
     knowledge_materials: Vec<String>,
@@ -163,16 +165,6 @@ pub struct ProcessInterpreter {
     notes: Vec<adi_protocol::knowledge::Note>,
     /// What this machine is, where the caller supplied it.
     device: Option<String>,
-}
-
-struct Pipe {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-    /// Kept for error messages. A program that starts and immediately exits
-    /// reports only that its output closed, which says nothing about which
-    /// program. On Windows `python3` is a store shim that does exactly this.
-    command: String,
 }
 
 impl ProcessInterpreter {
@@ -187,66 +179,35 @@ impl ProcessInterpreter {
         surroundings: Surroundings,
         budget: ContextBudget,
     ) -> Result<Self, ModelError> {
-        let mut child = Command::new(command)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| ModelError::Backend(format!("could not start '{command}': {e}")))?;
+        let backend = ProcessBackend::start(command, args).map_err(ModelError::Backend)?;
+        Ok(Self::over(Arc::new(backend), surroundings, budget))
+    }
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| ModelError::Backend("the program has no standard input".into()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| ModelError::Backend("the program has no standard output".into()))?;
-
-        Ok(Self {
-            inner: Mutex::new(Pipe {
-                child,
-                stdin,
-                stdout: BufReader::new(stdout),
-                command: command.to_string(),
-            }),
+    /// The same, over a program that is already running.
+    ///
+    /// This is how one process serves this seam and the chooser together: the
+    /// caller starts the program once and hands the same `Arc` to both.
+    pub fn over(
+        backend: Arc<ProcessBackend>,
+        surroundings: Surroundings,
+        budget: ContextBudget,
+    ) -> Self {
+        Self {
+            backend,
             budget,
             knowledge_styles: surroundings.styles,
             knowledge_materials: surroundings.materials,
             variables: surroundings.variables,
             notes: surroundings.notes,
             device: surroundings.device,
-        })
+        }
     }
 
     fn exchange(&self, request: &Request<'_>) -> Result<Understood, ModelError> {
-        let mut line = serde_json::to_string(request)
+        let line = serde_json::to_string(request)
             .map_err(|e| ModelError::Backend(format!("could not encode the request: {e}")))?;
-        line.push('\n');
 
-        let mut pipe = self
-            .inner
-            .lock()
-            .map_err(|_| ModelError::Backend("the backend lock was poisoned".into()))?;
-
-        pipe.stdin
-            .write_all(line.as_bytes())
-            .and_then(|()| pipe.stdin.flush())
-            .map_err(|e| ModelError::Backend(format!("could not reach the program: {e}")))?;
-
-        let mut reply = String::new();
-        let read = pipe
-            .stdout
-            .read_line(&mut reply)
-            .map_err(|e| ModelError::Backend(format!("could not read the reply: {e}")))?;
-
-        if read == 0 {
-            return Err(ModelError::Backend(format!(
-                "'{}' produced no output and exited. Check that the command exists and                  that the script path is correct; on Windows, 'python3' is often a store                  shim that exits immediately, and 'python' is the working command.",
-                pipe.command
-            )));
-        }
+        let reply = self.backend.exchange(&line).map_err(ModelError::Backend)?;
 
         // A program that returns something outside the schema is refused
         // rather than guessed at. This is the boundary 9.3 requirement 3
@@ -428,11 +389,6 @@ impl Interpreter for ProcessInterpreter {
     }
 }
 
-impl Drop for ProcessInterpreter {
-    fn drop(&mut self) {
-        if let Ok(mut pipe) = self.inner.lock() {
-            let _ = pipe.child.kill();
-            let _ = pipe.child.wait();
-        }
-    }
-}
+// The child is reaped by `ProcessBackend`'s own `Drop`, when the last seam
+// holding it releases it. This seam used to kill its own child, which is why
+// one program serving two seams needed that lifetime to move to the pipe.

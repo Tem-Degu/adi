@@ -15,7 +15,7 @@
 use adi_language::context::VariableInfo;
 use adi_decision::{Interpreter, SelectionContext, Understood};
 use adi_language::context::ContextBudget;
-use adi_models::ProcessInterpreter;
+use adi_models::{ProcessBackend, ProcessChooser, ProcessInterpreter};
 
 fn python() -> Option<&'static str> {
     for candidate in ["python3", "python"] {
@@ -332,5 +332,85 @@ fn a_request_is_still_understood_as_an_intent() {
     match interpreter.interpret("make me an espresso", &empty()) {
         Ok(Understood::Intent(_)) => {}
         other => panic!("a request must still be an intent, got {other:?}"),
+    }
+}
+
+/// One program, started once, answering for both seams.
+///
+/// The two questions differ in shape and a backend tells them apart, which is
+/// what lets the engine hand the same child to the interpreter and the
+/// chooser. Before this the engine started the program twice, which on the
+/// recommended local model cost a second set of its private buffers, about
+/// 2.1 GB. The weights themselves were always shared, because `llama.cpp`
+/// maps the file.
+///
+/// What this checks is that both seams work over one pipe and that neither
+/// leaves the other unable to use it: a reply read by the wrong seam, or a
+/// lock held past the end of a request, would show up here as a hang or as a
+/// malformed answer on the second call.
+#[test]
+fn one_program_serves_the_interpreter_and_the_chooser() {
+    let Some(python) = python() else {
+        eprintln!("skipping: no python on PATH");
+        return;
+    };
+
+    let backend = match ProcessBackend::start(python, &[script()]) {
+        Ok(backend) => std::sync::Arc::new(backend),
+        Err(e) => panic!("the program did not start: {e}"),
+    };
+
+    let interpreter = ProcessInterpreter::over(
+        std::sync::Arc::clone(&backend),
+        adi_models::Surroundings {
+            styles: styles(),
+            materials: Vec::new(),
+            variables: variables(),
+            notes: notes(),
+            device: Some("Example Appliances EX-900, firmware 1.0.0".into()),
+        },
+        ContextBudget::default(),
+    );
+    let chooser = ProcessChooser::over(std::sync::Arc::clone(&backend), "d2");
+
+    // The interpreter first, then the chooser, then the interpreter again, so
+    // that the pipe is proved usable after the other seam has had it.
+    match interpreter.interpret("make me an espresso", &empty()) {
+        Ok(Understood::Intent(_)) => {}
+        other => panic!("the interpreter should answer over a shared program, got {other:?}"),
+    }
+
+    // The same shapes the engine builds, taken from the types rather than
+    // invented: a goal is a diagnosis, and a candidate carries the parameter's
+    // own unit beside the variable it moves.
+    let goals = vec![adi_core::Diagnosis {
+        cause: "requested_change".into(),
+        target_variable: Some(adi_protocol::ids::VariableId::from("extraction_yield")),
+        desired_delta: Some(2.0),
+        confidence: 1.0,
+        explanation: String::new(),
+    }];
+    let candidates = vec![adi_core::plan::Candidate {
+        tool: adi_protocol::SemanticId::from("adi.espresso.grind.set_setting"),
+        parameter: "setting".into(),
+        variable: adi_protocol::ids::VariableId::from("extraction_yield"),
+        per_unit: -0.5,
+        confidence: 0.8,
+        param_unit: adi_protocol::units::Unit::Step,
+        description: None,
+        also_affects: Vec::new(),
+    }];
+
+    // The chooser is exercised through the trait the engine uses, so this is
+    // the same call path a session takes.
+    let chosen = adi_decision::ActionChooser::choose(&chooser, &goals, &candidates, &empty());
+    assert!(
+        chosen.is_ok(),
+        "the chooser should answer over the same program: {chosen:?}"
+    );
+
+    match interpreter.interpret("what model are you", &empty()) {
+        Ok(Understood::Answer { .. }) | Ok(Understood::Intent(_)) | Ok(Understood::Clarify { .. }) => {}
+        other => panic!("the pipe should still serve the interpreter afterwards, got {other:?}"),
     }
 }

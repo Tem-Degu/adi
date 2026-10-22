@@ -560,42 +560,37 @@ which the engine refuses because a correction that moves nothing is not a
 correction. D0 and D1 are unaffected by the second of those, since the engine
 computes the value at both.
 
-One cost of ours, found here and not yet addressed: at D1 and D2 the engine
-starts the chooser as its own process with the same command as the
-interpreter, so two processes serve what the code's own comment describes as
-one model answering both questions.
+One cost of ours was found here and has since been removed, which is worth
+recording because the figure is a useful one.
 
-Measured on this machine, with the page cache dropped between the two runs, it
-is not the doubling it appears to be. `llama.cpp` maps the GGUF, so both
-processes read the same physical pages: `Pss_File` is 2428 MB in a single
-process and 1216 MB in each of two, which is the same weights counted twice.
-What is not shared is 2092 MB of private anonymous memory per process, the
-compute and cache buffers, including tensors repacked into the form the CPU
-backend wants. So the second seam costs about 2.1 GB more rather than another
-4.5 GB: `free` reported 2.25 GB of anonymous use with one process and 4.2 GB
-with two, over a 2.5 GB page cache either way.
+The engine used to start the chooser as its own process with the same command
+as the interpreter, so two processes served what one program answers. It now
+starts the program once and both seams work over it.
 
-Whether it is worth changing depends on where the model runs, and on this
-engine it is not urgent either way.
+Measured, with the page cache dropped between runs, the saving is 2.1 GB on
+the recommended 4B model. It is not the 4.5 GB it appears to be, because
+`llama.cpp` maps the GGUF and two processes read the same physical pages:
+`Pss_File` was 2428 MB in a single process and 1216 MB in each of two, the same
+weights counted twice. What was not shared is 2092 MB of private anonymous
+memory per process, the compute and cache buffers, including tensors repacked
+into the form the CPU backend wants. In `free`, a D2 session went from 4.2 GB
+of anonymous use to 2.2 GB, which is what a single model costs at D0 to within
+3 MB.
 
-On a hosted seam the duplicate costs 20 MB, measured, because the process holds
-no weights. On a local model it costs about 2.1 GB.
+The two seams now take turns on one pipe, and nothing is lost by that here.
+The engine's loop reads an utterance, interprets it, chooses, invokes, and only
+then reads again, so the two are never in flight at the same moment, and within
+one utterance they cannot be: choosing a mechanism requires knowing the intent.
+They could only overlap across utterances, which would need a concurrent loop
+first, and on one local model that concurrency is largely illusory, since two
+inferences on the same cores halve each other rather than running in parallel.
+On a hosted seam the work happens elsewhere, so two pipes would give real
+parallelism to an engine that wanted it, and a hosted setup saves only the
+20 MB a second Python process costs. That is the trade to revisit if the engine
+ever gains a concurrent loop.
 
-Nothing is gained by the second process today, either. The engine's loop reads
-an utterance, interprets it, chooses, invokes, and only then reads again, so
-the two seams are never in use at the same moment. Within one utterance they
-cannot be: choosing a mechanism requires knowing the intent. They could only
-overlap across utterances, which needs a concurrent engine loop first, and on
-one local model that concurrency is largely illusory, since two inferences on
-the same cores halve each other rather than running in parallel. On a hosted
-seam the work happens elsewhere, so two pipes would give real parallelism to an
-engine that wanted it.
-
-So the time to make the seams share one process is when a local model is fast
-enough to ship, which is the same point at which memory becomes the binding
-constraint, and the sharing should be conditional on both seams naming the same
-command so that two programs remain possible. The backends already read the
-contract off each request, so nothing in the protocol stands in the way.
+Nothing in the protocol was involved. Both shipped backends already told the
+two questions apart by the shape of the request, and neither needed an edit.
 
 ## Running without models
 

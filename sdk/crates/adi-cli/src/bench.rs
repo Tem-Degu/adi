@@ -109,6 +109,9 @@ pub fn bench(
             Some(&config_path),
             domain.as_ref(),
             &declaration.device,
+            // A bench builds the interpreter alone, with no chooser to share
+            // the program with, so it starts its own.
+            None,
         )?
         else {
             return Err(format!(

@@ -14,6 +14,7 @@
 //! weights and in the vocabulary handed to them, not in anything this crate
 //! does.
 
+pub mod backend;
 pub mod chooser;
 pub mod config;
 pub mod manifest;
@@ -23,6 +24,7 @@ pub mod schema;
 pub mod scripted;
 pub mod speech;
 
+pub use backend::ProcessBackend;
 pub use chooser::{ProcessChooser, CHOOSER_INSTRUCTION};
 pub use config::{Backend, ModelsConfig, SeamConfig};
 pub use manifest::{hash_file, identify, Manifest, Provenance, Published, Seam};
