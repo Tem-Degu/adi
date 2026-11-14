@@ -16,7 +16,13 @@ for line in sys.stdin:
     if "candidates" in request:
         # Far beyond any plausible range, so the test does not depend on the
         # particular limits the example declares.
-        print(json.dumps({"steps": [{"candidate": 0, "value": 999.0}]}))
+        # Negative, and the sign matters. The engine now refuses a correction
+        # that would move the outcome AWAY from the goal, so an absurd value in
+        # the wrong direction is rejected for that rather than clamped - which
+        # is not what this fixture is for. The mechanism here responds
+        # negatively, so reaching DOWN is reaching towards the goal, and the
+        # floor of the range is what clamping then has to catch.
+        print(json.dumps({"steps": [{"candidate": 0, "value": -999.0}]}))
     else:
         print(json.dumps({
             "clarify": {

@@ -121,6 +121,21 @@ impl Speaker for NoSpeaker {
 /// machine that adjusts itself and one that teaches you.
 pub trait Explainer {
     fn explain(&self, record: &DecisionRecord) -> Result<String, LanguageError>;
+
+    /// Say why something could NOT be done.
+    ///
+    /// A refusal has no record - nothing was decided, so there is nothing to
+    /// explain from. What there is instead is the appliance's own reason,
+    /// which is already accurate: this seam only makes it sound like a person
+    /// said it.
+    ///
+    /// Defaulted to the engine's own words, so an explainer that cannot
+    /// rephrase still says something true. Accuracy is not what is being
+    /// added here; warmth is.
+    fn explain_refusal(&self, asked: &str, reason: &str) -> Result<String, LanguageError> {
+        let _ = asked;
+        Ok(reason.to_string())
+    }
 }
 
 /// Explains from the record alone, with no model.

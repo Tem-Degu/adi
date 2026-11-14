@@ -166,11 +166,35 @@ pub fn resolve_with(
 /// through exactly the same candidate derivation, clamping, envelope checks and
 /// record keeping as an engine-initiated correction. A separate path for
 /// requests would be a second place for those rules to be got wrong.
+/// Where a target came from, which decides how the record reads.
+///
+/// WHY THE RECORD HAS TO SAY. Every target used to be written down as "asked
+/// for X to be Y", whoever had asked. A `Produce` request resolves a style,
+/// and the style's own figures come through here too - so a recipe saying 93 C
+/// was recorded as the PERSON saying 93 C.
+///
+/// That sentence is then read by the seams that explain and that learn, and
+/// both believed it. The learner saw "asked for brew_temperature to be 93 C",
+/// concluded a preference had been stated, and wrote it to disk - on the first
+/// interaction, having been told nothing by anybody. Narrowing again on each
+/// later drink, because each later drink said it again.
+///
+/// Nothing in the schema could have caught that. The field was simply untrue,
+/// and everything downstream was right to trust it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    /// A person named this outcome.
+    Stated,
+    /// It came from the recipe for the style being made.
+    Recipe,
+}
+
 pub fn as_diagnosis(
     variable: &VariableId,
     target: Quantity,
     current: Option<Quantity>,
     knowledge: &Knowledge,
+    asked: Asked,
 ) -> Diagnosis {
     let delta = current.map(|c| target.value - c.value);
     let preference = knowledge.is_preference(&variable.0);
@@ -184,7 +208,46 @@ pub fn as_diagnosis(
         desired_delta: delta,
         // A request is not an inference. The person said what they wanted.
         confidence: 1.0,
-        explanation: String::new(),
+
+        // What was asked for, in words, because this is the only place that
+        // still knows.
+        //
+        // It was an empty string. The profile writes an explanation when it
+        // DIAGNOSES a cycle, and a request is not a diagnosis, so every record
+        // on the request path carried no reason at all. Which showed up at the
+        // far end: asked "why that much", a model could see that 93 ml had
+        // been sent and had nothing to say about why - the target that
+        // produced it was never written down.
+        //
+        // The delta is included where there is one. "Asked for 110 g, and it
+        // was 0" is a different answer from "asked for 110 g", and the
+        // difference is whether the machine was correcting or starting.
+        explanation: match current {
+            // "before starting", not "and it was". The first wording read as
+            // the RESULT rather than the starting point, and a model
+            // explaining it said "I aimed for 110 grams but none arrived" -
+            // which described a failure that had not happened.
+            Some(now) => match asked {
+                Asked::Stated => format!(
+                    "asked for {} to be {} {:?}; before starting it was {} {:?}",
+                    variable.0, target.value, target.unit, now.value, now.unit
+                ),
+                Asked::Recipe => format!(
+                    "the recipe puts {} at {} {:?}; before starting it was {} {:?}",
+                    variable.0, target.value, target.unit, now.value, now.unit
+                ),
+            },
+            None => match asked {
+                Asked::Stated => format!(
+                    "asked for {} to be {} {:?}",
+                    variable.0, target.value, target.unit
+                ),
+                Asked::Recipe => format!(
+                    "the recipe puts {} at {} {:?}",
+                    variable.0, target.value, target.unit
+                ),
+            },
+        },
     }
 }
 

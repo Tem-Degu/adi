@@ -668,3 +668,77 @@ fn a_tool_with_no_description_takes_the_profiles() {
         }
     }
 }
+
+/// A named action with no description of its own takes the profile's too.
+///
+/// The same rule as a candidate's, and it was missed: `brew.stop` reached a
+/// model as the bare word "stop" while the espresso profile held "Ends
+/// extraction... the way to stop a shot that is not worth finishing" and
+/// nothing fetched it. A model picking between numbered actions on their names
+/// alone is guessing, and the outcome of the guess is a physical act.
+#[test]
+fn a_named_action_with_no_description_takes_the_profiles() {
+    struct Described(TestDomain);
+
+    impl Domain for Described {
+        fn profile_id(&self) -> &str {
+            self.0.profile_id()
+        }
+        fn variables(&self) -> &[VariableId] {
+            self.0.variables()
+        }
+        fn knowledge(&self) -> &adi_protocol::knowledge::Knowledge {
+            self.0.knowledge()
+        }
+        fn derive(&self, cycle: &mut adi_core::Cycle) {
+            self.0.derive(cycle)
+        }
+        fn diagnose(
+            &self,
+            cycle: &adi_core::Cycle,
+            targets: &adi_protocol::knowledge::ResolvedTargets,
+        ) -> adi_core::domain::Diagnosis {
+            self.0.diagnose(cycle, targets)
+        }
+        fn feedback_vocabulary(&self) -> &[&str] {
+            self.0.feedback_vocabulary()
+        }
+        fn tool_description(&self, _tool: &SemanticId) -> Option<&str> {
+            Some("what the profile says this is for")
+        }
+    }
+
+    let declaration = declaration();
+    let domain = Described(TestDomain::new());
+    let actions = adi_core::named_actions(&declaration, &domain);
+
+    assert!(!actions.is_empty(), "this machine declares a namable action");
+    for action in &actions {
+        let tool = declaration.tool(action.tool).expect("declared");
+        if tool.description.is_none() {
+            assert_eq!(
+                action.description,
+                Some("what the profile says this is for"),
+                "{} should have fallen back to the profile",
+                action.tool.as_str()
+            );
+        }
+    }
+}
+
+/// The numbering must survive the fallback, because an index is resolved
+/// against this list and performs whatever it lands on.
+#[test]
+fn describing_an_action_does_not_renumber_it() {
+    let declaration = declaration();
+    let domain = TestDomain::new();
+
+    let raw = declaration.operator_actions();
+    let described = adi_core::named_actions(&declaration, &domain);
+
+    assert_eq!(raw.len(), described.len());
+    for (a, b) in raw.iter().zip(&described) {
+        assert_eq!(a.index, b.index);
+        assert_eq!(a.tool, b.tool);
+    }
+}

@@ -18,7 +18,7 @@
 use std::fmt::Write as _;
 
 use adi_core::{DecisionRecord, Remembered};
-use adi_decision::SelectionContext;
+use adi_decision::{SelectionContext, Turn};
 use adi_protocol::knowledge::Knowledge;
 
 /// Limits on what is assembled.
@@ -39,6 +39,12 @@ pub struct ContextBudget {
     /// whether the last correction did anything.
     pub history: usize,
 
+    /// Exchanges offered, OLDEST first, so they read as a conversation.
+    ///
+    /// The other way round from `history`, which is most recent first because
+    /// nothing reads it as prose.
+    pub conversation: usize,
+
     /// Upper bound on the assembled prompt, in estimated tokens.
     ///
     /// Enforced by truncation of the lowest-value section first, so exceeding
@@ -51,6 +57,10 @@ impl Default for ContextBudget {
         Self {
             remembered_cycles: 3,
             history: 3,
+            // Four exchanges, which is two or three sentences each way - about
+            // sixty tokens against a default budget of 1024. Enough for "that
+            // one" to have something to point at.
+            conversation: 4,
             max_tokens: 1024,
         }
     }
@@ -61,6 +71,18 @@ impl Default for ContextBudget {
 pub struct ModelContext {
     /// What the person said.
     pub utterance: String,
+
+    /// The exchanges before this one, oldest first.
+    ///
+    /// ADI-P 9.4.1 requires THE utterance, singular, and the decision history.
+    /// The records are the governed memory and say what was done; they are not
+    /// a conversation, and a sentence that points back at one ("another one",
+    /// "the second one") cannot be resolved from a tool name and a volume.
+    ///
+    /// Carries no authority over values. A quantity still comes from a style,
+    /// a skill response or the declared envelope, and the schema a model
+    /// answers in cannot express one that is not clamped and checked.
+    pub recent: Vec<Turn>,
     /// Styles this machine's knowledge declares, each with what it is.
     ///
     /// Carried with a description for the same reason a variable is carried
@@ -97,7 +119,23 @@ pub struct ModelContext {
     /// What this machine is. Already known to the engine and, until this was
     /// sent, unreachable to the person asking.
     pub device: Option<String>,
+    /// Actions an operator may name, in the order the engine numbered them.
+    /// ADI-P 8.2.
+    ///
+    /// A position in this list is what a model returns in place of a tool
+    /// name, so the list and the schema's permitted indices are the same list.
+    /// Derived from the declaration rather than from knowledge, which is why
+    /// `assemble` leaves it empty and the caller fills it, as with `device`.
+    pub actions: Vec<ActionLine>,
     pub truncated: Vec<&'static str>,
+}
+
+/// One action as the model is told about it. Its index is its position.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ActionLine {
+    /// The word a person would say. The tool's declared name.
+    pub name: String,
+    pub description: Option<String>,
 }
 
 /// One remembered cycle, reduced to what a model can use.
@@ -117,6 +155,67 @@ pub struct DecisionSummary {
     pub cycle_id: String,
     pub cause: String,
     pub tool: Option<String>,
+
+    /// Which recipe that tool was serving, where it was serving one.
+    ///
+    /// THE FIELD THAT MAKES "ANOTHER ONE" ANSWERABLE. The tool and the
+    /// arguments say a brew ran and that 118 millilitres went through it. On a
+    /// machine whose one brewer serves a ristretto, an espresso, a doppio, a
+    /// coffee, a lungo and an americano, that does not say which was made.
+    ///
+    /// So a model asked for "another one" after a lungo had a brew and a
+    /// volume to go on, and answered with one of the machine's NAMED products
+    /// - the only past decisions whose records identify themselves. It was not
+    /// forgetting. The drink had never been written down.
+    pub style: Option<String>,
+
+    /// What was actually sent, with units.
+    ///
+    /// THE FIELD THAT MAKES A FOLLOW-UP ANSWERABLE. This summary carried the
+    /// cycle, the cause and the tool and nothing else, so a model could see
+    /// that a brew happened and not that it was 116 ml. Asked "why 38
+    /// millilitres?" it had no idea 38 had ever been sent.
+    ///
+    /// The session keeps whole records - every argument, every input, the
+    /// layer behind each value - and this threw almost all of it away on the
+    /// way to the model. A machine that can be asked why it did that, and
+    /// answers from its own record, is the thing being claimed; it cannot do
+    /// that from three strings.
+    pub arguments: Vec<ArgumentSummary>,
+
+    /// Where the envelope moved a value, what was asked for before it did.
+    /// Worth carrying: "I could not go that high" is a different answer from
+    /// "that is what I chose".
+    pub asked_for: Vec<ArgumentSummary>,
+
+    /// Every figure that fed the decision, and which layer it came from.
+    /// This is the actual answer to "why": not the number, but where the
+    /// number came from.
+    pub inputs: Vec<InputSummary>,
+
+    /// Who chose the tool: the engine, the model, or a person naming it.
+    pub chose: &'static str,
+
+    /// What the domain rules wrote when they diagnosed. Flat, and true.
+    pub note: String,
+}
+
+/// One argument, or one figure that was asked for and clamped.
+#[derive(Debug, Clone)]
+pub struct ArgumentSummary {
+    pub parameter: String,
+    pub value: f64,
+    pub unit: String,
+}
+
+/// One value that fed a decision, with its provenance.
+#[derive(Debug, Clone)]
+pub struct InputSummary {
+    pub variable: String,
+    pub value: f64,
+    pub unit: String,
+    /// base knowledge, the manufacturer, this deployment, or something learned.
+    pub layer: String,
 }
 
 /// Characters per token, for estimating prompt size without a tokeniser.
@@ -167,6 +266,20 @@ pub struct VariableInfo {
     pub meaning: Option<String>,
 }
 
+/// The last `n` exchanges, keeping their order.
+///
+/// `history` is truncated with `take`, because it arrives most recent first
+/// and the front is what matters. A conversation arrives OLDEST first, so the
+/// end is what matters and taking from the front would hand a model the start
+/// of a conversation and hide what was just said.
+fn last_of(turns: &[Turn], n: usize) -> Vec<Turn> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let from = turns.len().saturating_sub(n);
+    turns[from..].to_vec()
+}
+
 impl ModelContext {
     /// Assemble what ADI-P 9.4.1 requires, within `budget`.
     pub fn assemble(
@@ -178,6 +291,7 @@ impl ModelContext {
     ) -> Self {
         let mut built = Self {
             utterance: utterance.to_string(),
+            recent: last_of(context.recent, budget.conversation),
             styles: knowledge
                 .styles_described()
                 .into_iter()
@@ -211,6 +325,9 @@ impl ModelContext {
                 })
                 .collect(),
             device: None,
+            // Derived from the declaration, which this does not have. The
+            // caller fills both, as it does `device`.
+            actions: Vec::new(),
             truncated: Vec::new(),
         };
 
@@ -279,6 +396,22 @@ impl ModelContext {
         // History next. A model can interpret a request without knowing what
         // the engine decided last time; it cannot interpret "half of last
         // time" without knowing what last time was.
+        // Then the conversation, before the decision history. Both are
+        // memory, and of the two this is the one the engine can afford to
+        // lose: a record is attributed and is what an answer about a figure is
+        // built from, while an exchange only helps work out which thing was
+        // meant. A model that has lost the conversation asks which drink; one
+        // that has lost the history cannot say why it did anything.
+        while !self.recent.is_empty() && self.estimated_tokens() > budget.max_tokens {
+            self.recent.remove(0);
+            if !self.truncated.contains(&"conversation") {
+                self.truncated.push("conversation");
+            }
+        }
+        if self.estimated_tokens() <= budget.max_tokens {
+            return;
+        }
+
         if !self.history.is_empty() {
             self.history.clear();
             self.truncated.push("history");
@@ -307,6 +440,21 @@ impl ModelContext {
             self.styles.clear();
             self.truncated.push("styles");
         }
+
+        // Actions are not dropped at any point, and are deliberately absent
+        // from the order above.
+        //
+        // Every other section degrades safely when it goes: a request naming a
+        // style that was dropped is refused, because the style is not declared
+        // as far as the model could see. An action does not degrade that way.
+        // The permitted indices are baked into the schema from the count, so
+        // dropping the list leaves a model able to name index 1 with nothing
+        // to tell it what index 1 is - and index 1 is a physical act. Choosing
+        // blindly between stopping a drink and rinsing the group is worse than
+        // any amount of truncation.
+        //
+        // They are also the smallest section here: a name and a line each, for
+        // the handful of tools that take no arguments.
     }
 
     /// A plain rendering, used for the budget estimate and as the default a
@@ -340,6 +488,22 @@ impl ModelContext {
                     }
                     None => {
                         let _ = writeln!(out, "  {}", style.name);
+                    }
+                }
+            }
+        }
+        // Numbered, because the number is what a model returns. Rendered next
+        // to the styles so the two namable vocabularies sit together: a style
+        // is a drink to ask for, an action is a thing to ask for.
+        if !self.actions.is_empty() {
+            let _ = writeln!(out, "actions, by number:");
+            for (index, action) in self.actions.iter().enumerate() {
+                match &action.description {
+                    Some(description) => {
+                        let _ = writeln!(out, "  {index}: {} - {description}", action.name);
+                    }
+                    None => {
+                        let _ = writeln!(out, "  {index}: {}", action.name);
                     }
                 }
             }
@@ -435,10 +599,82 @@ fn summarise_remembered(entry: &Remembered) -> RememberedSummary {
     }
 }
 
-fn summarise_decision(record: &DecisionRecord) -> DecisionSummary {
+/// Summarise one decision for a model.
+///
+/// Public because `ProcessInterpreter` was building this struct by hand, which
+/// is how it came to carry three fields while the record carried ten. Two
+/// copies of the same mapping is two places to forget to widen, and one of
+/// them was forgotten.
+pub fn summarise_decision(record: &DecisionRecord) -> DecisionSummary {
+    use adi_core::record::SelectedBy;
+
     DecisionSummary {
         cycle_id: record.cycle_id.clone(),
         cause: record.cause.clone(),
         tool: record.selected_tool.as_ref().map(|t| t.0.clone()),
+        // What that tool was making. Without it a model looking back sees a
+        // brew and a number of millilitres, and "another one" has nothing to
+        // name.
+        style: record.style.clone(),
+
+        arguments: record
+            .arguments
+            .iter()
+            .map(|(parameter, quantity)| ArgumentSummary {
+                parameter: parameter.clone(),
+                value: quantity.value,
+                unit: format!("{:?}", quantity.unit).to_lowercase(),
+            })
+            .collect(),
+
+        asked_for: record
+            .clamped_from
+            .iter()
+            .map(|(parameter, wanted)| ArgumentSummary {
+                parameter: parameter.clone(),
+                value: *wanted,
+                // The unit of the argument it was clamped to, where that
+                // argument is still here to ask.
+                unit: record
+                    .arguments
+                    .get(parameter)
+                    .map(|q| format!("{:?}", q.unit).to_lowercase())
+                    .unwrap_or_default(),
+            })
+            .collect(),
+
+        inputs: record
+            .inputs
+            .iter()
+            .map(|input| InputSummary {
+                variable: input.variable.0.clone(),
+                value: input.value.value,
+                unit: format!("{:?}", input.value.unit).to_lowercase(),
+                layer: layer_name(input.layer).to_string(),
+            })
+            .collect(),
+
+        chose: match record.selected_by {
+            SelectedBy::Engine => "the engine, from the declaration",
+            SelectedBy::Model => "the model, from what the engine offered",
+            SelectedBy::Operator => "a person, by naming it",
+        },
+
+        note: record.explanation.clone(),
+    }
+}
+
+/// A layer in words rather than as a variant name.
+///
+/// `User` is "learned from you" and saying so out loud matters: a person asking
+/// why is owed the answer "because you had it that way", not a number with no
+/// history.
+fn layer_name(layer: adi_protocol::knowledge::Layer) -> &'static str {
+    use adi_protocol::knowledge::Layer;
+    match layer {
+        Layer::Base => "base knowledge",
+        Layer::Vendor => "the manufacturer",
+        Layer::Deployment => "this deployment",
+        Layer::User => "something learned from you",
     }
 }

@@ -1028,3 +1028,333 @@ fn a_silent_profile_records_no_measurement_rather_than_a_guess() {
         "the rest of the account is unaffected"
     );
 }
+
+// --------------------------------------------------------- a named action
+//
+// ADI-P 8.2: a declared tool is invocable "when the operator names it". Not
+// everything an appliance does is a quantity, and the planner can only reach
+// what a skill response describes, which requires a parameter. A tool with no
+// parameters is therefore declared, implemented, and reachable by nothing.
+//
+// This machine declares one such tool, `adi.example.container.empty`, and an
+// invariant that resets on it. Before `Session::act` existed there was no way
+// to call it, so `container_capacity` could never be cleared and a machine
+// refused to dispense for the rest of its session.
+
+/// No arguments, which is the safety of the whole path rather than an
+/// incidental detail: `Declaration::operator_actions` admits a tool only where
+/// every parameter is optional, so nothing a model said can reach the wire.
+#[test]
+fn a_named_action_is_sent_with_no_arguments() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+    let transport = agreeable(1);
+    let log = transport.log();
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    let turn = session.act(0, 0).expect("the declared action is performable");
+
+    assert_eq!(turn.performed.len(), 1);
+    let sent = log.invocations();
+    assert_eq!(sent.len(), 1, "it reached the wire");
+
+    match &sent[0] {
+        Message::Invocation { tool, args, .. } => {
+            assert_eq!(tool.as_str(), "adi.example.container.empty");
+            assert!(
+                args.is_empty(),
+                "a named action carries no value; these came from somewhere: {args:?}"
+            );
+        }
+        other => panic!("expected an invocation, got {other:?}"),
+    }
+}
+
+/// The record has to say a person asked.
+///
+/// 9.3 requirement 5 exists so that "why did the machine do that" can be
+/// answered, and "the engine worked it out" and "someone asked for it" are
+/// different answers. The empty fields are empty because no arithmetic
+/// happened, not for want of plumbing.
+#[test]
+fn the_record_of_an_action_says_a_person_asked() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+    let mut session = Session::open(
+        &d,
+        Some(&s),
+        &dom,
+        AutonomyLevel::D0,
+        Box::new(agreeable(1)),
+    )
+    .expect("opens");
+
+    let turn = session.act(0, 0).expect("performable");
+    let record = &turn.records[0];
+
+    assert_eq!(record.selected_by, adi_core::SelectedBy::Operator);
+    assert_eq!(
+        record.selected_tool.as_ref().expect("a tool was sent").as_str(),
+        "adi.example.container.empty"
+    );
+    assert_eq!(record.cause, "operator_named_action");
+    assert!(record.rule_id.is_empty(), "no profile rule fired");
+    assert!(record.inputs.is_empty(), "no value fed this decision");
+    assert!(record.arguments.is_empty());
+    assert!(
+        record.explanation.contains("empty_container"),
+        "the explanation should name what was asked for: {}",
+        record.explanation
+    );
+
+    // Honest even at D0. The values are deterministic because there are none,
+    // but a person's words are not replayable, so 9.3 requirement 4 asks for
+    // reconstructable instead and the record must not claim otherwise.
+    assert!(!record.is_reproducible());
+}
+
+/// An index outside the list means the caller is answering against a different
+/// list than the engine offered. Refused rather than clamped: the nearest
+/// valid action is a different physical act.
+#[test]
+fn an_index_naming_nothing_reaches_no_wire() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+    let transport = agreeable(1);
+    let log = transport.log();
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    let refused = session.act(7, 0).expect_err("there is no action 7");
+
+    assert!(
+        matches!(
+            refused,
+            SessionError::NoSuchAction {
+                index: 7,
+                available: 1
+            }
+        ),
+        "got {refused:?}"
+    );
+    assert!(
+        log.invocations().is_empty(),
+        "nothing should have been sent"
+    );
+}
+
+/// A named action goes through the same send-and-confirm as a correction, so
+/// an appliance that refuses one is reported rather than assumed to have
+/// complied. The reason this arm was added at all is a machine that said it
+/// had done something it had not.
+#[test]
+fn a_refused_action_is_reported_rather_than_assumed() {
+    let (d, s, dom) = (declaration(), skill(), TestDomain::new(0.0));
+    let mut transport = Recorded::new();
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Rejected,
+        reason: Some(RejectReason::PreconditionFailed),
+    });
+    let mut session = Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport))
+        .expect("opens");
+
+    let refused = session.act(0, 0).expect_err("the appliance refused it");
+
+    assert!(
+        matches!(refused, SessionError::Refused(RejectReason::PreconditionFailed)),
+        "got {refused:?}"
+    );
+}
+
+// --------------------------------------------- doing something during a drink
+//
+// `request` and `act` did not return until the appliance reported the
+// operation COMPLETE, which for a coffee is most of a minute. The caller sat
+// inside that call for the whole time, so nothing read the keyboard or the
+// microphone: during a drink the machine was not slow, it was DEAF. "Stop"
+// could not be said. "How long?" could not be answered, although the reading
+// was arriving throughout. "No, not that one" could not interrupt.
+//
+// What changed is that sending and waiting are now separate, so the waiting
+// can happen in the caller's own loop with its own business in between.
+
+/// An appliance that takes the job on and finishes it later.
+fn takes_its_time() -> Recorded {
+    let mut t = Recorded::new();
+    t.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Running,
+        reason: None,
+    });
+    t.will_fall_silent();
+    t.will_fall_silent();
+    t.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Completed,
+        reason: None,
+    });
+    t
+}
+
+fn opened(transport: Recorded) -> (Declaration, Skill, TestDomain, Recorded) {
+    (declaration(), skill(), TestDomain::new(0.0), transport)
+}
+
+/// A caller can do its own waiting, and get on with something in between.
+#[test]
+fn a_caller_can_wait_in_its_own_loop() {
+    let (d, s, dom, transport) = opened(takes_its_time());
+    let mut session =
+        Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport)).expect("opens");
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+
+    // Started, not finished. This is the part that did not exist: the call
+    // comes back while the machine is still working.
+    let turn = session
+        .begin(&asking_for("cycle_time", 25.0, Unit::S), 1_000)
+        .expect("servable");
+    assert_eq!(turn.performed.len(), 1, "it was sent");
+    assert!(session.working(), "and it is still going");
+    assert!(session.job().is_some(), "with a job to point at");
+
+    // The caller's own loop, with its own business in between.
+    let mut rounds = 0;
+    let ended = loop {
+        rounds += 1;
+        session.tick(1_000 + rounds * 100).expect("ticks");
+        if let Some(ended) = session.collect() {
+            break ended;
+        }
+        assert!(rounds < 50, "it should not take this many rounds");
+    };
+
+    assert_eq!(ended, adi_session::Ended::Completed, "it finished");
+    assert!(rounds > 1, "and the loop went round more than once, got {rounds}");
+    assert!(!session.working(), "nothing is running now");
+    assert!(session.collect().is_none(), "and an outcome is collected once");
+}
+
+/// A stop goes out as an ordinary invocation, through everything else.
+///
+/// The point of the whole exercise. An earlier attempt sent the stop from
+/// inside the waiting loop, which skipped the envelope and wrote no record -
+/// a second route to the hardware, which is exactly what this project's
+/// safety argument says does not exist. Here the caller is at the top of its
+/// own loop, so the stop is just the next thing it asks for.
+#[test]
+fn a_stop_during_an_operation_is_an_ordinary_action() {
+    let d: Declaration =
+        serde_yaml::from_str(&fixture("declarations/ex900.yaml")).expect("parses");
+    assert!(
+        d.tools.iter().any(|t| t.id.0.ends_with(".stop")),
+        "the fixture must declare a stop for this to test anything"
+    );
+    let sk: Skill =
+        serde_yaml::from_str(&fixture("declarations/ex900.skill.yaml")).expect("parses");
+    let dom = TestDomain::new(0.0);
+
+    let mut transport = Recorded::new();
+    // The drink is taken on.
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Running,
+        reason: None,
+    });
+    // Then the stop is accepted and done, and the drink reports ABORTED.
+    transport.will_reply(Message::Response {
+        id: 2,
+        outcome: Outcome::Completed,
+        reason: None,
+    });
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Aborted,
+        reason: None,
+    });
+
+    let log = transport.log();
+    let mut session =
+        Session::open(&d, Some(&sk), &dom, AutonomyLevel::D0, Box::new(transport)).expect("opens");
+
+    let actions = session.named_actions();
+    let stop = actions
+        .iter()
+        .position(|a| a.tool.0.ends_with(".stop"))
+        .expect("a stop is nameable");
+    let first = actions
+        .iter()
+        .position(|a| !a.tool.0.ends_with(".stop"))
+        .expect("something else is nameable");
+    drop(actions);
+
+    session.begin_act(first, 1_000).expect("started");
+    assert!(session.working(), "it is running");
+
+    // The caller decides to stop it. An ordinary action, by index, through the
+    // same door as everything else.
+    let stopped = session.act(stop, 2_000).expect("the stop is served");
+
+    assert_eq!(
+        stopped.records.len(),
+        1,
+        "the stop wrote a record of its own, so Bob can say why it stopped"
+    );
+
+    let tools: Vec<String> = log
+        .invocations()
+        .iter()
+        .filter_map(|m| match m {
+            Message::Invocation { tool, .. } => Some(tool.0.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tools.len(), 2, "the operation, then the stop, got {tools:?}");
+    assert!(tools[1].ends_with(".stop"), "and the second is the stop");
+}
+
+/// A reply is matched to the operation it belongs to.
+///
+/// Stopping puts two operations in flight, and the first reply to arrive
+/// belongs to the one being cut short. The loop used to discard the id and
+/// read whichever reply came first as the answer to whatever it was waiting
+/// for - so a machine that had successfully stopped a drink would report that
+/// it could not.
+#[test]
+fn a_reply_for_another_operation_is_not_this_one_s_answer() {
+    let (d, s, dom, mut transport) = opened(Recorded::new());
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Running,
+        reason: None,
+    });
+    // Someone else's business, arriving first.
+    transport.will_reply(Message::Response {
+        id: 99,
+        outcome: Outcome::Aborted,
+        reason: None,
+    });
+    transport.will_reply(Message::Response {
+        id: 1,
+        outcome: Outcome::Completed,
+        reason: None,
+    });
+
+    let mut session =
+        Session::open(&d, Some(&s), &dom, AutonomyLevel::D0, Box::new(transport)).expect("opens");
+    session
+        .observe(cycle("c1", 20.0), "adi.example.style.standard", None, 0)
+        .expect("observes");
+
+    session
+        .begin(&asking_for("cycle_time", 25.0, Unit::S), 1_000)
+        .expect("servable");
+
+    let ended = session.settle(2_000).expect("settles");
+    assert_eq!(
+        ended,
+        Some(adi_session::Ended::Completed),
+        "the operation finished; the abort belonged to job 99"
+    );
+}
+

@@ -262,7 +262,15 @@ fn run_request_case(
 
     let knowledge = domain.knowledge();
     let current = cycle.settings.get(variable).copied();
-    let diagnosis = adi_core::request::as_diagnosis(variable, *target, current, knowledge);
+    // A conformance case states its targets outright; nothing here
+    // resolves a style.
+    let diagnosis = adi_core::request::as_diagnosis(
+        variable,
+        *target,
+        current,
+        knowledge,
+        adi_core::request::Asked::Stated,
+    );
 
     if diagnosis.cause != case.expect.cause {
         problems.push(format!(
@@ -352,6 +360,7 @@ fn run_case(
             };
 
             let context = adi_decision::SelectionContext {
+                recent: &[],
                 history: &[],
                 cycle: None,
                 memory: None,
@@ -374,6 +383,25 @@ fn run_case(
                 Ok(adi_decision::Understood::Answer { text, .. }) => {
                     return Outcome::Fail(vec![format!(
                         "the interpreter answered instead of acting: {text}"
+                    )]);
+                }
+                // A corpus case states an expected correction, which names a
+                // variable and a magnitude. An operator action has neither, so
+                // this corpus cannot express one and a case that got one asked
+                // for the wrong thing.
+                Ok(adi_decision::Understood::Action(action)) => {
+                    return Outcome::Fail(vec![format!(
+                        "the interpreter named declared action {action} instead \
+                         of stating a target; a conformance case cannot express \
+                         an operator action"
+                    )]);
+                }
+                Ok(adi_decision::Understood::Actions(actions)) => {
+                    return Outcome::Fail(vec![format!(
+                        "the interpreter named {} declared actions instead of \
+                         stating a target; a conformance case cannot express \
+                         operator actions",
+                        actions.len()
                     )]);
                 }
                 Ok(adi_decision::Understood::Clarify { question, because }) => {

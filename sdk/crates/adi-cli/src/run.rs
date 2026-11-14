@@ -19,9 +19,11 @@ use adi_decision::{
     Understood,
 };
 use adi_language::context::VariableInfo;
+use adi_language::context::ContextBudget;
 use adi_language::{Explainer, Language, NoSpeaker, RecordExplainer, Speaker, Transcriber};
 use adi_models::{
-    ProcessSpeaker, ProcessTranscriber, SeamConfig, Surroundings,
+    ProcessExplainer, ProcessLearner, ProcessSpeaker, ProcessTranscriber, SeamConfig,
+    Surroundings,
     Backend, ModelsConfig, ProcessBackend, ProcessChooser, ProcessInterpreter, ScriptedInterpreter,
     Seam,
 };
@@ -111,6 +113,57 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // ADI-P 6.1's fourth layer: what this machine has learned about the person
+    // using it. Stacked on top of the manufacturer's, which is what makes a
+    // learned preference safe BY CONSTRUCTION rather than by a limit somebody
+    // remembered to set.
+    //
+    // `ResolvedTargets::apply` intersects a layer with the one below and
+    // refuses one that WIDENS a range. So a learned preference can only ever
+    // narrow what the manufacturer declared:
+    //
+    //     manufacturer: a coffee is 90 to 130 g
+    //     learned:      you take it 95 to 110    -> allowed
+    //     learned:      you take it 140 to 160   -> refused, that is not a
+    //                                               coffee any more
+    //
+    // Learning can tune a drink and cannot redefine one. Nothing had to be
+    // built for that; it falls out of the layering the protocol already
+    // specifies.
+    //
+    // Found by convention rather than by a flag, so a machine picks up its own
+    // preferences with no extra argument: beside bob.yaml, look for
+    // bob.user.yaml. Derived from the DECLARATION path because that is the one
+    // argument always present.
+    if let Some(user_path) = preferences_beside(&declaration_path) {
+        match read(&user_path).and_then(|text| {
+            serde_yaml::from_str::<adi_protocol::knowledge::KnowledgeExtension>(&text)
+                .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })
+        }) {
+            Ok(extension) => {
+                match domain.add_extension(extension, adi_protocol::knowledge::Layer::User) {
+                    Ok(()) => println!("  learned      {}", user_path.display()),
+                    // Reported and ignored, never fatal. A learned preference is
+                    // a convenience; a machine that will not make coffee because
+                    // its preferences file is malformed is worse than one that
+                    // makes the manufacturer's coffee and says why.
+                    //
+                    // This is also where a preference that tried to widen a
+                    // range lands, and the message is the useful part: it names
+                    // what it could not apply.
+                    Err(e) => eprintln!(
+                        "  learned      rejected: {e}\n\
+                         \x20              carrying on without it"
+                    ),
+                }
+            }
+            Err(e) => eprintln!(
+                "  learned      {} could not be read: {e}",
+                user_path.display()
+            ),
+        }
+    }
+
     // Checked before anything is started. An argument that cannot be honoured
     // should be refused on its own terms, not after a failure to find a
     // binary that was never going to be used.
@@ -149,10 +202,13 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let interpreter = load_interpreter(
         config_path.as_deref(),
         domain.as_ref(),
-        &declaration.device,
+        &declaration,
+        Some(&skill),
         shared.as_ref(),
     )?;
     let voice = Voice::load(config_path.as_deref())?;
+    let explainer = load_explainer(config_path.as_deref(), shared.as_ref());
+    let learner = load_learner(config_path.as_deref(), shared.as_ref());
     let chooser = load_chooser(config_path.as_deref(), requested, shared.as_ref())?;
 
     let transport: Box<dyn adi_session::Transport> = match &serial_path {
@@ -240,7 +296,6 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     println!();
     help();
 
-    let stdin = std::io::stdin();
     let mut now_ms: u64 = 0;
 
     // ADI-P 9.1 step 4 and a half: find out what the machine is set to before
@@ -249,16 +304,28 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // planned.
     session.synchronise(now_ms)?;
 
+    // One thread reads input from here on, so the loop can also glance at the
+    // keyboard while a drink is pouring instead of stopping to wait for it.
+    let keyboard = Keyboard::start();
+
     loop {
         print!("> ");
         std::io::stdout().flush()?;
 
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line)? == 0 {
+        let Some(line) = keyboard.next() else {
             break;
-        }
-        let line = line.trim();
+        };
+        let line = line.as_str();
         now_ms += 60_000;
+
+        // Every line, before anything is done with it, so what the machine
+        // says next is recorded against the thing it is answering. Commands
+        // like `status` and `do 3` are kept too: a person who typed one said
+        // it, and a model trying to read the exchange would be puzzled by
+        // replies to nothing.
+        if !line.is_empty() && line != "quit" && line != "exit" {
+            voice.heard(line);
+        }
 
         // A failed command is reported and the session continues. Propagating
         // it ended the session on the first refusal, which is wrong twice over:
@@ -274,6 +341,11 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         // about. A link that has died is reported by the command that follows.
         let _ = session.tick(now_ms);
 
+        // How many corrections the session had made before this command. The
+        // difference afterwards is whether anything moved, which is the only
+        // signal worth learning from.
+        let before = session.history().len();
+
         let outcome = match line {
             "" => continue,
             "quit" | "exit" => break,
@@ -282,7 +354,44 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                 Ok(())
             }
             "status" => status(&mut session, now_ms),
-            "cycle" => cycle(&mut session, &declaration.domain_profile, now_ms, &voice),
+            // The operator path with no model in it, which is how it is tested
+            // on a bench and how it still works when the network is gone.
+            "do" => {
+                list_named(&session);
+                Ok(())
+            }
+            // Only where what follows is a number.
+            //
+            // "do" opens an enormous number of English sentences, and treating
+            // every one of them as this command ate the request: "do we have
+            // any beans left" came back as "`do` takes a number". A command
+            // namespace sharing a word with speech has to yield to the speech,
+            // because the person did not know there was a command.
+            other if other
+                .strip_prefix("do ")
+                .is_some_and(|rest| rest.trim().parse::<usize>().is_ok()) =>
+            {
+                let index = other
+                    .strip_prefix("do ")
+                    .and_then(|rest| rest.trim().parse::<usize>().ok())
+                    .expect("the guard above parsed it");
+                perform_named(
+                    &mut session,
+                    index,
+                    now_ms,
+                    &voice,
+                    explainer.as_ref(),
+                    &declaration_path,
+                    &keyboard,
+                )
+            }
+            "cycle" => cycle(
+                &mut session,
+                &declaration.domain_profile,
+                now_ms,
+                &voice,
+                explainer.as_ref(),
+            ),
             // A recorded utterance, since capturing from a microphone needs a
             // device and a platform library this tool does not carry.
             other if other.starts_with("listen ") => listen(
@@ -291,9 +400,41 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                 &voice,
                 other.trim_start_matches("listen ").trim(),
                 now_ms,
+                explainer.as_ref(),
+                &declaration_path,
+                &keyboard,
             ),
-            _ => request(&mut session, interpreter.as_ref(), line, now_ms, &voice),
+            _ => request(
+                &mut session,
+                interpreter.as_ref(),
+                line,
+                now_ms,
+                &voice,
+                explainer.as_ref(),
+                &declaration_path,
+                &keyboard,
+            ),
         };
+
+        let corrected_since = session.history().len().saturating_sub(before);
+
+        // What has this machine learned?
+        //
+        // Asked only where something was CORRECTED. A drink nobody adjusted
+        // teaches nothing, so there is nothing to ask about and asking anyway
+        // would spend a model call on every coffee.
+        //
+        // After the outcome is known rather than before, and only on success:
+        // a refused request is not a preference, it is a refusal.
+        if outcome.is_ok() && corrected_since > 0 {
+            remember(
+                learner.as_ref(),
+                &session,
+                domain.as_ref(),
+                &declaration_path,
+                &voice,
+            );
+        }
 
         if let Err(error) = outcome {
             report(error.as_ref());
@@ -324,7 +465,29 @@ struct Voice {
     /// instead of acting. Carried here because it is read from the
     /// configuration and applied where a transcript is produced.
     min_confidence: f64,
+
+    /// The last few exchanges, oldest first, for a model to read as prose.
+    ///
+    /// WHY IT LIVES ON THE VOICE. Everything the machine says to a person goes
+    /// through `say`, whatever said it - an acknowledgement, a question, an
+    /// answer, an explanation of what it just did. That makes this the one
+    /// place that sees the machine's whole side of a conversation without
+    /// every caller having to remember to report it.
+    ///
+    /// Capped at `TURNS_KEPT`. A `RefCell` because `say` is called through a
+    /// shared reference from everywhere and threading a mutable one through
+    /// would touch every function that speaks.
+    turns: std::cell::RefCell<std::collections::VecDeque<adi_decision::Turn>>,
 }
+
+/// How many exchanges are HELD, which is not how many are sent.
+///
+/// The configured `conversation` budget decides how many reach a model, the
+/// same way `decisions` bounds the decision history: the engine keeps what it
+/// has and the budget truncates on the way out. So this is only an upper bound
+/// on memory, set well above any sensible budget, and raising the budget past
+/// it is the one way to ask for more than is here.
+const TURNS_HELD: usize = 32;
 
 /// The default rate for each speech seam, used where the configuration states
 /// none.
@@ -347,6 +510,50 @@ fn speech_rate(seam: &SeamConfig, default: u32) -> Result<u32, String> {
         None => Ok(default),
         Some(0) => Err("sample_rate is 0, which is not a rate".into()),
         Some(rate) => Ok(rate),
+    }
+}
+
+/// The context budget for one seam, as configured.
+///
+/// The third field in `SeamConfig` to be documented and read by nothing. The
+/// same fault as the two below, and worse in its effect: a rate that is wrong
+/// plays audio at the wrong pitch, which anyone notices, while a budget that
+/// is wrong silently deletes part of the prompt.
+///
+/// It is not a soft limit. `ModelContext::enforce` drops whole sections to
+/// meet it, styles among them, so a machine declaring enough tools and
+/// variables to be useful had its drinks removed and the model was then asked
+/// to name one. Nothing in the reply said why.
+///
+/// The default suits a small local model, which is what the SDK is built to
+/// run. A hosted model holds a hundred times more and should be told so.
+fn context_budget(seam: &SeamConfig) -> Result<ContextBudget, String> {
+    let default = ContextBudget::default();
+
+    // Applied first, so it survives the token branch below returning early.
+    let default = match seam.decisions {
+        None => default,
+        Some(history) => ContextBudget { history, ..default },
+    };
+
+    // Zero is allowed here, unlike `context_tokens` below. No budget at all is
+    // a contradiction; no conversation is a setting, and the one a kiosk wants.
+    let default = match seam.conversation {
+        None => default,
+        Some(conversation) => ContextBudget {
+            conversation,
+            ..default
+        },
+    };
+
+    match seam.context_tokens {
+        None => Ok(default),
+        // Refused rather than treated as "no limit", because a budget of zero
+        // reads either way and the two are opposites. Nothing can be sent
+        // within it, and `enforce` would drop every section it is allowed to
+        // and still be over.
+        Some(0) => Err("context_tokens is 0, which is not a budget".into()),
+        Some(max_tokens) => Ok(ContextBudget { max_tokens, ..default }),
     }
 }
 
@@ -379,6 +586,7 @@ impl Voice {
             return Ok(Self {
                 speaker: None,
                 transcriber: None,
+                turns: std::cell::RefCell::new(std::collections::VecDeque::new()),
                 min_confidence: adi_language::DEFAULT_MIN_TRANSCRIPT_CONFIDENCE,
             });
         };
@@ -441,6 +649,7 @@ impl Voice {
         Ok(Self {
             speaker,
             transcriber,
+            turns: std::cell::RefCell::new(std::collections::VecDeque::new()),
             min_confidence,
         })
     }
@@ -451,7 +660,37 @@ impl Voice {
     /// Playback needs an output device and a platform library, which is a
     /// packaging concern; what matters to the protocol is that the text reached
     /// the seam and came back as samples.
+    /// A person has said something: a new exchange begins.
+    fn heard(&self, said: &str) {
+        let mut turns = self.turns.borrow_mut();
+        while turns.len() >= TURNS_HELD {
+            turns.pop_front();
+        }
+        turns.push_back(adi_decision::Turn {
+            said: said.to_string(),
+            replies: Vec::new(),
+        });
+    }
+
+    /// The exchanges so far, oldest first.
+    ///
+    /// Cloned rather than borrowed, because the caller holds this across the
+    /// call to a model and `say` must stay free to record what comes back.
+    fn recent(&self) -> Vec<adi_decision::Turn> {
+        self.turns.borrow().iter().cloned().collect()
+    }
+
     fn say(&self, text: &str) {
+        // Recorded BEFORE the speaker is consulted. `say` returns early with
+        // no speaker configured, which is every build until the voice work
+        // lands - and Bob's own `speaker: backend: none` today. Recording
+        // inside the speaking would have captured nothing on exactly the
+        // machine this is for, and the conversation would have looked empty
+        // for a reason nothing in the output would have explained.
+        if let Some(turn) = self.turns.borrow_mut().back_mut() {
+            turn.replies.push(text.to_string());
+        }
+
         let Some(speaker) = &self.speaker else {
             return;
         };
@@ -618,6 +857,28 @@ fn report(error: &(dyn std::error::Error + 'static)) {
 }
 
 /// Whether the session can usefully continue.
+/// Where a machine's learned preferences live, if it has any.
+///
+/// Beside the declaration, named after it: `bob.yaml` -> `bob.user.yaml`.
+///
+/// A convention rather than a flag, because preferences are not something a
+/// person should have to remember to pass. A machine that only honours what it
+/// has learned when told to look is a machine that has not learned anything.
+///
+/// Returns None where there is no such file, which is the ordinary case and
+/// not an error: a machine that has learned nothing runs on the
+/// manufacturer's knowledge, exactly as it did before this existed.
+fn preferences_beside(declaration: &Path) -> Option<PathBuf> {
+    // `bob.yaml` -> `bob`, and `bob.knowledge.yaml` -> `bob` too, so passing
+    // either one finds the same file rather than looking for
+    // `bob.knowledge.user.yaml`.
+    let stem = declaration.file_stem()?.to_str()?;
+    let stem = stem.strip_suffix(".knowledge").unwrap_or(stem);
+
+    let candidate = declaration.with_file_name(format!("{stem}.user.yaml"));
+    candidate.exists().then_some(candidate)
+}
+
 fn is_fatal(error: &(dyn std::error::Error + 'static)) -> bool {
     let text = error.to_string();
     text.contains("the link failed") || text.contains("went quiet")
@@ -630,6 +891,8 @@ fn help() {
   listen <file.wav>
            transcribe a recorded utterance and treat it as a request
            16 bit mono. Needs a transcriber; see `adi models check`");
+    println!("  do       list the actions you can ask for by name");
+    println!("  do <n>   carry one out. Needs no model, so it works on a bench");
     println!("  quit     end the session");
     println!();
     println!("  anything else is treated as a spoken request, which needs an");
@@ -645,11 +908,200 @@ fn help() {
 /// shown to a machine that is not a coffee machine, which teaches the reader
 /// something false about what they are running. So it is offered only where it
 /// means something, and elsewhere says what it would take to have one.
+/// Typed input, readable without stopping to wait for it.
+///
+/// `read_line` blocks, and during a drink the loop has to be able to look at
+/// the keyboard and carry on if there is nothing there. So one thread does
+/// nothing but read lines and hand them over.
+///
+/// It is also where the microphone will arrive: `bob_voice.py` writes a line
+/// per utterance, and this is the queue it writes into. Nothing above here has
+/// to know which of the two it was.
+struct Keyboard {
+    lines: std::sync::mpsc::Receiver<String>,
+
+    /// One line read too early, waiting for the prompt to come round.
+    ///
+    /// Something said during a drink cannot be acted on then - a second order
+    /// would queue behind a drink nobody can see the end of - but it must not
+    /// be lost either. It is held here and taken first next time.
+    kept: std::cell::RefCell<Option<String>>,
+}
+
+impl Keyboard {
+    fn start() -> Self {
+        let (send, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let stdin = std::io::stdin();
+            loop {
+                let mut line = String::new();
+                match stdin.lock().read_line(&mut line) {
+                    // End of input, or a console that has gone away. The
+                    // channel closing is how the loop above learns of it.
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if send.send(line.trim().to_string()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        Self {
+            lines,
+            kept: std::cell::RefCell::new(None),
+        }
+    }
+
+    /// Wait for a line. None once input has ended.
+    fn next(&self) -> Option<String> {
+        if let Some(kept) = self.kept.borrow_mut().take() {
+            return Some(kept);
+        }
+        self.lines.recv().ok()
+    }
+
+    /// Put a line back, to be taken at the next prompt.
+    fn keep(&self, line: &str) {
+        *self.kept.borrow_mut() = Some(line.to_string());
+    }
+
+    /// Whatever is already there, without waiting.
+    fn ready(&self) -> Option<String> {
+        self.lines.try_recv().ok()
+    }
+}
+
+/// Wait for an operation to finish, listening while it runs.
+///
+/// WHY THIS EXISTS. `request` and `act` do not return until the appliance
+/// reports the operation COMPLETE, which for a coffee is most of a minute, and
+/// the loop was inside that call for the whole time. So nothing read the
+/// keyboard: during a drink Bob was not slow, he was deaf. "Stop" could not be
+/// said, although the tool is declared and the firmware implements it.
+///
+/// The ticking is what must not stop. It carries the heartbeat, and an
+/// appliance that hears nothing for its `control_timeout_ms` - six seconds for
+/// Bob - concludes its controller has died and abandons the drink. So nothing
+/// slow belongs in this loop: a stop is a word to match, not a question to
+/// think about.
+/// What became of the operation that was being waited on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Attended {
+    /// It ran to completion, or there was nothing running to wait for.
+    Finished,
+    /// It was cut short, so whatever was asked for did not happen.
+    ///
+    /// The caller MUST NOT then report the operation as carried out. It did
+    /// that: a stopped cappuccino was announced as "I prepared a cappuccino as
+    /// requested", because the report is written from the record - which says
+    /// what was intended - and nothing told it the outcome.
+    Stopped,
+}
+
+fn attend(
+    session: &mut Session<'_>,
+    keyboard: &Keyboard,
+    now_ms: u64,
+) -> Result<Attended, Box<dyn std::error::Error>> {
+    if !session.working() {
+        return Ok(Attended::Finished);
+    }
+
+    let mut at_ms = now_ms;
+    let mut said = false;
+
+    while session.working() {
+        session.tick(at_ms)?;
+        at_ms = at_ms.saturating_add(250);
+
+        if let Some(ended) = session.collect() {
+            return match ended {
+                adi_session::Ended::Completed => Ok(Attended::Finished),
+                adi_session::Ended::Aborted(_) => {
+                    println!("  stopped      part way through");
+                    Ok(Attended::Stopped)
+                }
+                adi_session::Ended::Refused(reason) => {
+                    println!("  refused      {reason:?} after it had started");
+                    Ok(Attended::Stopped)
+                }
+            };
+        }
+
+        match keyboard.ready().as_deref() {
+            Some("stop") | Some("cancel") => {
+                // Through the front door. The stop is an ordinary named action
+                // by index, so it goes through the envelope and writes its own
+                // record like anything else - which is the whole reason the
+                // waiting was moved out here rather than given a callback.
+                match stop_action(session) {
+                    Some(index) => {
+                        println!("  stopping     ...");
+                        match session.act(index, at_ms) {
+                            Ok(_) => {
+                                println!("  stopped      it did not finish");
+                                return Ok(Attended::Stopped);
+                            }
+                            Err(error) => {
+                                // A machine that will not stop says so. Better
+                                // than reporting a drink ended while the
+                                // mechanism runs on.
+                                println!("  could not    {error}");
+                            }
+                        }
+                    }
+                    None => println!("  no stop      this machine declares no way to stop"),
+                }
+            }
+            Some("") | None => {}
+            Some(other) => {
+                // Kept, not dropped. This said "one moment" and then threw the
+                // line away - so a person was told they had been heard and
+                // then ignored. It ate four cases of its own acceptance test
+                // before anybody noticed.
+                keyboard.keep(other);
+                // Anything else has to wait. A second order would queue behind
+                // a drink nobody can see the end of, and asking the model what
+                // this meant would pause the heartbeat.
+                if !said {
+                    println!("  busy         one moment - \"{other}\" after this finishes");
+                    said = true;
+                }
+                // NOT a break. Keeping the line is right; stopping the loop
+                // is not - this loop carries the heartbeat, and an appliance
+                // that hears nothing for its control_timeout_ms abandons what
+                // it is doing. Leaving early would drop the drink in order to
+                // be polite about a sentence.
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    Ok(Attended::Finished)
+}
+
+/// The index of this machine's stop, among the actions an operator may name.
+///
+/// By shape rather than by identifier: `adi.espresso.brew.stop` is one
+/// domain's name for it, and this is the generic runner. None where the
+/// machine declares no such thing, and a machine with no stop cannot be
+/// interrupted - which is worth saying plainly rather than inventing a tool it
+/// does not have.
+fn stop_action(session: &Session<'_>) -> Option<usize> {
+    session
+        .named_actions()
+        .iter()
+        .position(|action| action.tool.0.ends_with(".stop"))
+}
+
 fn cycle(
     session: &mut Session<'_>,
     profile: &str,
     now_ms: u64,
     voice: &Voice,
+    explainer: &dyn Explainer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if profile != adi_domain_espresso::registry::PROFILE_ID {
         println!("  no example      this command replays a worked espresso cycle, and");
@@ -724,15 +1176,9 @@ fn cycle(
             );
         }
 
-        // The explainer composes a sentence from the record. It needs no model,
-        // which is why a machine with no voice still has something to say.
-        match RecordExplainer.explain(record) {
-            Ok(text) => {
-                println!("  explains     {text}");
-                voice.say(&text);
-            }
-            Err(e) => println!("  explainer    unavailable: {e}"),
-        }
+        // The same sentence the request path says, from the same seam. Two
+        // copies of this drifted once already.
+        say_what_happened(explainer, record, voice);
     }
 
     Ok(())
@@ -773,6 +1219,10 @@ fn listen(
     voice: &Voice,
     path: &str,
     now_ms: u64,
+    explainer: &dyn Explainer,
+    declaration_path: &Path,
+    // Read while the operation runs, so it can be stopped.
+    keyboard: &Keyboard,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some(transcriber) = &voice.transcriber else {
         println!("  no transcriber is configured, so audio cannot be understood.");
@@ -818,6 +1268,7 @@ fn listen(
     // warmer than and has to ask.
     let readings = session.measurements().clone();
 
+    let recent = voice.recent();
     let context = SelectionContext {
         history: session.history(),
         cycle: None,
@@ -825,6 +1276,11 @@ fn listen(
         rejected: None,
         settings: None,
         measured: Some(&readings),
+        // The exchange opened on the command that started the listening
+        // rather than on the transcript, which is not yet known here. Harmless
+        // while the audio comes from a file; once a microphone opens an
+        // exchange of its own, this wants the transcript instead.
+        recent: &recent,
     };
 
     // What it heard, before what was made of it. Without this line a misheard
@@ -834,7 +1290,19 @@ fn listen(
         "  transcript   \"{}\"  confidence {:.2}",
         transcript.text, transcript.confidence
     );
-    act_on(session, understood, now_ms, voice)
+    // None, because `understand_heard` returns the decision alone. The spoken
+    // path gets its acknowledgement when that seam carries one too; until
+    // then it falls through to the engine's own line below.
+    act_on(
+        session,
+        understood,
+        now_ms,
+        voice,
+        None,
+        declaration_path,
+        explainer,
+        keyboard,
+    )
 }
 
 fn request(
@@ -843,6 +1311,10 @@ fn request(
     words: &str,
     now_ms: u64,
     voice: &Voice,
+    explainer: &dyn Explainer,
+    declaration_path: &Path,
+    // Read while the operation runs, so it can be stopped.
+    keyboard: &Keyboard,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some((interpreter, _)) = interpreter else {
         println!("  no interpreter is configured, so this cannot be understood.");
@@ -856,6 +1328,9 @@ fn request(
     // warmer than and has to ask.
     let readings = session.measurements().clone();
 
+    // Held in a binding: `SelectionContext` borrows it, and a temporary would
+    // be dropped at the end of the statement.
+    let recent = voice.recent();
     let context = SelectionContext {
         history: session.history(),
         cycle: None,
@@ -863,10 +1338,44 @@ fn request(
         rejected: None,
         settings: None,
         measured: Some(&readings),
+        recent: &recent,
     };
 
-    let understood = interpreter.interpret(words, &context)?;
-    act_on(session, understood, now_ms, voice)
+    let answer = interpreter.reply(words, &context)?;
+    act_on(
+        session,
+        answer.understood,
+        now_ms,
+        voice,
+        answer.say.as_deref(),
+        declaration_path,
+        explainer,
+        keyboard,
+    )
+}
+
+/// Say what the model offered to say, before anything is sent.
+///
+/// BEFORE, and that is the trade. The appliance has not accepted yet, so a
+/// refusal arrives after the words are out and becomes a correction:
+///
+///     "Cappuccino, coming right up."
+///     "- actually, there is no milk in the hose."
+///
+/// Which is what a person does, and the correction is immediate rather than
+/// twenty seconds later. Waiting for acceptance instead would buy about two
+/// hundred milliseconds of accuracy at the cost of the whole point: the
+/// request path blocks until the DRINK IS FINISHED, so anything said after it
+/// is said a minute late.
+///
+/// The model is instructed to acknowledge and nothing more - no quantities, no
+/// claim that it worked - because those are the parts that could be wrong. The
+/// engine owns every sentence that reports a result.
+fn acknowledge(say: Option<&str>, voice: &Voice) {
+    if let Some(text) = say.map(str::trim).filter(|t| !t.is_empty()) {
+        println!("  says         {text}");
+        voice.say(text);
+    }
 }
 
 /// What to do with whatever the model made of an utterance.
@@ -879,6 +1388,17 @@ fn act_on(
     understood: Understood,
     now_ms: u64,
     voice: &Voice,
+    // What the model offered to say while this is carried out, where it
+    // offered anything. Spoken on the acting arms only: `Clarify` and `Answer`
+    // are already sentences, and saying something before one of those would be
+    // talking over the actual reply.
+    say: Option<&str>,
+    declaration_path: &Path,
+    // Says what happened, once it has. `RecordExplainer` where no model backs
+    // the seam, which is flat but true.
+    explainer: &dyn Explainer,
+    // Read while the operation runs, so it can be stopped.
+    keyboard: &Keyboard,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match understood {
         // ADI-P 9.4.3. Asking is an outcome, not a failure.
@@ -895,7 +1415,51 @@ fn act_on(
             }
             voice.say(&text);
         }
+        // A declared tool the person named. ADI-P 8.2.
+        //
+        // The arm this whole mechanism exists for: before it, "stop making the
+        // coffee" and "this is a new cup" had no shape to come back in, so the
+        // model answered instead and the machine reported having done
+        // something it had not.
+        // Several of the machine's own products, in the order given.
+        //
+        // One at a time through the same path a single one takes, so each gets
+        // its envelope check, its confirmation where the declaration flags a
+        // hazard, and its own record. A failure stops the rest: somebody who
+        // asked for a rinse and then a cappuccino did not ask for the
+        // cappuccino into an unrinsed pipe.
+        Understood::Actions(actions) => {
+            acknowledge(say, voice);
+            for (nth, action) in actions.iter().enumerate() {
+                if nth > 0 {
+                    println!("  then");
+                }
+                perform_named(
+                    session,
+                    *action,
+                    now_ms,
+                    voice,
+                    explainer,
+                    declaration_path,
+                    keyboard,
+                )?;
+            }
+        }
+
+        Understood::Action(action) => {
+            acknowledge(say, voice);
+            perform_named(
+                session,
+                action,
+                now_ms,
+                voice,
+                explainer,
+                declaration_path,
+                keyboard,
+            )?;
+        }
         Understood::Intent(intent) => {
+            acknowledge(say, voice);
             println!("  understood   {:?}", intent.kind);
             if let Some(style) = &intent.style {
                 println!("  style        {style}");
@@ -910,7 +1474,13 @@ fn act_on(
                 }
             }
 
-            let turn = session.request(&intent, now_ms)?;
+            // Started, not waited out. The waiting happens in `attend`,
+            // which reads the keyboard while it waits so the drink can be
+            // stopped.
+            let turn = session.begin(&intent, now_ms)?;
+            if attend(session, keyboard, now_ms)? == Attended::Stopped {
+                return Ok(());
+            }
             if turn.performed.is_empty() {
                 println!("  result       nothing needed doing");
             }
@@ -929,11 +1499,306 @@ fn act_on(
                         "  at limit     {parameter} could not reach {wanted}; this correction is partial"
                     );
                 }
+
+                // The drink is in the cup by now: `request` does not return
+                // until the appliance reports the operation complete. So this
+                // is the moment a person is waiting to hear about, and the
+                // only one where a sentence can be written from what actually
+                // happened rather than from what was meant.
+                say_what_happened(explainer, record, voice);
             }
         }
     }
 
     Ok(())
+}
+
+/// Say what happened, from the record.
+///
+/// After the fact, so nothing here can promise something that did not occur.
+/// That is the division of labour: the acknowledgement is short and says
+/// nothing factual, and every factual sentence is written from a record.
+///
+/// A failure to explain is reported and nothing more. The machine has already
+/// done the right thing; being unable to describe it is a worse outcome than
+/// silence only if it stops the work, and it must not.
+fn say_what_happened(
+    explainer: &dyn Explainer,
+    record: &adi_core::record::DecisionRecord,
+    voice: &Voice,
+) {
+    match explainer.explain(record) {
+        Ok(text) => {
+            println!("  explains     {text}");
+            voice.say(&text);
+        }
+        Err(e) => println!("  explainer    unavailable: {e}"),
+    }
+}
+
+/// Say why something could not be done.
+///
+/// The reason comes from the appliance and is already accurate; this only
+/// makes it sound like a person said it. Which matters more than it sounds:
+/// "a condition that tool requires does not hold" is true and tells nobody
+/// what to do about it, where "there is no milk in the hose" does.
+fn report_refusal(
+    explainer: &dyn Explainer,
+    asked: &str,
+    error: &(dyn std::error::Error + 'static),
+    voice: &Voice,
+) {
+    let reason = error.to_string();
+    let text = explainer
+        .explain_refusal(asked, &reason)
+        .unwrap_or_else(|_| reason.clone());
+
+    println!("  could not    {text}");
+    voice.say(&text);
+}
+
+/// Carry out one named action, having asked first where that is warranted.
+///
+/// Shared by the spoken path and the typed `do` command, so a request that
+/// arrived as speech is performed identically to one typed by hand. It also
+/// means the mechanism is exercisable with no model and no network, which is
+/// the only way to test it on a bench.
+fn perform_named(
+    session: &mut Session<'_>,
+    index: usize,
+    now_ms: u64,
+    voice: &Voice,
+    explainer: &dyn Explainer,
+    // For the engine's own actions, which act on files beside it rather than
+    // on the appliance.
+    declaration_path: &Path,
+    // Read while the operation runs, so it can be stopped.
+    keyboard: &Keyboard,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Past the appliance's own actions is one of the engine's. Checked first,
+    // because `named_actions().get(index)` would return None for one of those
+    // and report it as an index this machine does not have - which is the
+    // wrong message for an action it does have and performs itself.
+    let appliance_actions = session.named_actions().len();
+    if index >= appliance_actions {
+        return perform_engine_action(index - appliance_actions, declaration_path, voice);
+    }
+
+    // Copied out before acting, because the list borrows the session and the
+    // next line needs it mutably.
+    let Some((name, tool, hazard, delivers)) = session
+        .named_actions()
+        .get(index)
+        .map(|a| {
+            (
+                a.name.to_string(),
+                a.tool.0.clone(),
+                a.hazard.to_vec(),
+                !a.effects.is_empty(),
+            )
+        })
+    else {
+        // Said plainly rather than clamped to the nearest action: the nearest
+        // one is a different physical act.
+        println!("  cannot       there is no action {index} on this machine");
+        println!("  try          `do` on its own lists them");
+        return Ok(());
+    };
+
+    println!("  named        {name}  ({tool})");
+
+    // ADI-P 4.2: a hazard informs confirmation policy. Nothing used it until
+    // now. A word misheard in a noisy room should not start hot water, and the
+    // declaration already says which actions deserve the question.
+    //
+    // But not where the action DELIVERS something. Every drink this machine
+    // makes involves hot liquid, so asking before a cappuccino is asking
+    // whether someone wants the coffee they just ordered - and a question
+    // asked every time is a question that stops being read.
+    //
+    // What is worth asking about is a routine: it delivers nothing, takes the
+    // machine away for minutes, and may consume a tablet. The asymmetry is the
+    // argument - a drink nobody wanted costs a cup, a descale nobody wanted
+    // costs twenty minutes and a consumable and cannot be interrupted.
+    if !hazard.is_empty() && !delivers {
+        let question = format!(
+            "That involves {}. Shall I go ahead?",
+            hazard.join(" and ").replace('_', " ")
+        );
+        println!("  asks         {question}");
+        voice.say(&question);
+
+        if !confirmed(keyboard) {
+            println!("  left it      nothing was done");
+            return Ok(());
+        }
+    }
+
+    // Not `?`. A refused action is an outcome a person is owed in words, and
+    // propagating it here would end the session over a cup of milk that was
+    // not there - the one thing the `do` command exists to be robust against.
+    let turn = match session.begin_act(index, now_ms) {
+        Ok(turn) => turn,
+        Err(error) => {
+            if is_fatal(&error) {
+                return Err(error.into());
+            }
+            report_refusal(explainer, &name, &error, voice);
+            return Ok(());
+        }
+    };
+
+    // Nothing below may claim the action was carried out if it was cut
+    // short. The lines that follow are written from the record, which says
+    // what was INTENDED, so they read as a success whatever happened.
+    if attend(session, keyboard, now_ms)? == Attended::Stopped {
+        return Ok(());
+    }
+
+    for invocation in &turn.performed {
+        println!("  did          {}", invocation.tool.as_str());
+        println!("  accepted     by the appliance");
+    }
+
+    // The action is finished by now - `act` does not return until the
+    // appliance reports it complete - so this is the "it is ready" moment,
+    // and the first time anything can be said that is grounded in what
+    // actually happened.
+    for record in &turn.records {
+        say_what_happened(explainer, record, voice);
+    }
+
+    Ok(())
+}
+
+/// Read a yes.
+///
+/// Anything else is a no, including end of input. A confirmation that defaults
+/// to yes when it cannot hear an answer is not a confirmation.
+fn confirmed(keyboard: &Keyboard) -> bool {
+    // Through the keyboard, not straight from stdin.
+    //
+    // A second reader on the same stdin is a race: one thread now reads lines
+    // continuously into a queue, and a direct `read_line` here would take
+    // whichever line the two of them happened to compete for. The symptom is
+    // input vanishing - an answer to this question swallowed by the queue, or
+    // the next command eaten as the answer.
+    match keyboard.next() {
+        Some(answer) => matches!(
+            answer.trim().to_lowercase().as_str(),
+            "y" | "yes" | "go ahead"
+        ),
+        // Input ended rather than an answer given, which is not consent.
+        None => false,
+    }
+}
+
+/// List what an operator may ask for by name, numbered as the engine numbers
+/// them.
+/// Actions the ENGINE carries out, not the appliance.
+///
+/// WHY THESE EXIST AND WHY THEY ARE NOT DECLARED.
+///
+/// Every tool in a declaration is the appliance's: the engine sends it over
+/// the link and the appliance performs it. "Forget what you have learned" is
+/// not one of those. What the machine has learned lives in a file on the host,
+/// and the coffee machine knows nothing about it - sending it a tool would be
+/// asking it to do something it has never heard of.
+///
+/// But a person asks the MACHINE to forget, not the host, and they ask out
+/// loud. So it has to be nameable the way a rinse is nameable, which means it
+/// has to be in the list the model is offered.
+///
+/// So the list the model sees is the appliance's actions followed by these.
+/// The index space is shared and the boundary is `named_actions().len()`:
+/// below it, the engine sends an invocation; at or above it, the engine acts
+/// itself and nothing goes over the link.
+///
+/// This is a gap in ADI-P rather than a trick. The protocol assumes every
+/// operator-nameable action belongs to the appliance, and some things a person
+/// asks a machine to do belong to whatever is holding its memory. Recorded in
+/// BOB-TODO rather than quietly worked around.
+///
+/// Deliberately tiny. Anything that moves a physical quantity belongs in the
+/// declaration, where the envelope, the interlocks and the hazards apply to
+/// it. Nothing here touches the appliance at all.
+const ENGINE_ACTIONS: &[(&str, &str)] = &[(
+    "forget what you have learned",
+    concat!(
+        "Delete this machine's learned preferences, so it goes back to ",
+        "the manufacturer's own settings. Nothing about the drinks it ",
+        "can make changes."
+    ),
+)];
+
+/// Carry out one of the engine's own actions.
+///
+/// `which` is an index into `ENGINE_ACTIONS`, already offset by the caller.
+fn perform_engine_action(
+    which: usize,
+    declaration_path: &Path,
+    voice: &Voice,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match which {
+        // Forget what has been learned.
+        0 => {
+            let Some(path) = preferences_beside(declaration_path) else {
+                // Nothing to delete is not a failure. A machine asked to
+                // forget something it never knew should say so, not error.
+                let said = "There is nothing I have learned yet, so there is nothing to forget.";
+                println!("  nothing      no learned preferences are stored");
+                voice.say(said);
+                return Ok(());
+            };
+
+            std::fs::remove_file(&path)?;
+
+            println!("  forgot       {}", path.display());
+            let said = concat!(
+                "I have forgotten what I had learned. I am back to the ",
+                "manufacturer's settings from your next drink."
+            );
+            voice.say(said);
+            Ok(())
+        }
+        // Unreachable while the list has one entry, and a wrong index here
+        // would act on something nobody asked for.
+        other => Err(format!("the engine has no action {other}").into()),
+    }
+}
+
+fn list_named(session: &Session<'_>) {
+    let actions = session.named_actions();
+    if actions.is_empty() {
+        println!("  this machine declares nothing an operator can name.");
+        println!("  every tool it has takes a value, so the engine chooses them.");
+        return;
+    }
+
+    println!("  actions you can ask for by name:");
+    for action in &actions {
+        let hazard = if action.hazard.is_empty() {
+            String::new()
+        } else {
+            "   (asks first)".to_string()
+        };
+        println!("    do {}   {}{}", action.index, action.name, hazard);
+        if let Some(description) = action.description {
+            println!("            {}", description.split_whitespace().collect::<Vec<_>>().join(" "));
+        }
+    }
+
+    // The engine's own, after the appliance's and numbered on from them, which
+    // is the order `perform_named` resolves an index against. `do` has to be
+    // the whole truth about what can be asked for, or a person reads this list
+    // and concludes something is impossible when it is not.
+    for (offset, (name, description)) in ENGINE_ACTIONS.iter().enumerate() {
+        println!("    do {}   {}", actions.len() + offset, name);
+        println!(
+            "            {}",
+            description.split_whitespace().collect::<Vec<_>>().join(" ")
+        );
+    }
 }
 
 fn describe(target: &adi_protocol::intent::TargetSpec) -> String {
@@ -973,6 +1838,297 @@ fn parse_level(requested: Option<&str>) -> Result<AutonomyLevel, Box<dyn std::er
 ///
 /// D0 needs none, so this returns nothing for it rather than starting a
 /// program that would never be asked anything.
+/// Whatever will say what happened.
+///
+/// `RecordExplainer` unless a configuration names a program for the explain
+/// seam. That fallback is not a placeholder: the domain rules already write an
+/// explanation when they diagnose, so a machine with no model still says
+/// something true. What a model adds is a sentence a person wants to hear
+/// rather than one they have to parse.
+///
+/// Infallible on purpose. Every other seam refuses loudly when it is
+/// misconfigured, because without it the machine cannot act. This one only
+/// changes how the machine TALKS, so a broken explainer must not stop a drink
+/// being made - it falls back and says so.
+fn load_explainer(
+    config_path: Option<&Path>,
+    shared: Option<&Arc<ProcessBackend>>,
+) -> Box<dyn Explainer> {
+    let Some(path) = config_path else {
+        return Box::new(RecordExplainer);
+    };
+    let Ok(config) = ModelsConfig::load(path) else {
+        return Box::new(RecordExplainer);
+    };
+
+    let seam = config.seam(Seam::Explainer);
+    if seam.backend != Backend::Process {
+        return Box::new(RecordExplainer);
+    }
+
+    // Over the program already running where there is one, so the four seams
+    // are one process rather than four.
+    if let Some(backend) = shared {
+        return Box::new(ProcessExplainer::over(Arc::clone(backend)));
+    }
+
+    let Some(command) = seam.command.clone() else {
+        return Box::new(RecordExplainer);
+    };
+    match ProcessExplainer::start(&command, &seam.args) {
+        Ok(explainer) => Box::new(explainer),
+        Err(e) => {
+            println!("  explainer    unavailable: {e}; falling back to the record");
+            Box::new(RecordExplainer)
+        }
+    }
+}
+
+/// Whatever works out what the machine has learned, if anything does.
+///
+/// Served by the explain seam's program rather than a seam of its own: both
+/// jobs look at records after the fact, and the message shape tells them
+/// apart. Only over a program already running - there is no reason to start a
+/// second copy for a job that happens occasionally.
+///
+/// None where no model serves that seam, and that is a complete answer. A
+/// machine with no model learns nothing, which is better than a machine that
+/// learns by a rule somebody guessed.
+fn load_learner(
+    config_path: Option<&Path>,
+    shared: Option<&Arc<ProcessBackend>>,
+) -> Option<ProcessLearner> {
+    let backend = shared?;
+    let config = ModelsConfig::load(config_path?).ok()?;
+    (config.seam(Seam::Explainer).backend == Backend::Process)
+        .then(|| ProcessLearner::over(Arc::clone(backend)))
+}
+
+/// Ask what has been learned, and write it down if anything was.
+///
+/// WHEN THIS RUNS. After a request that corrected something. A drink nobody
+/// adjusted teaches nothing, so there is nothing to ask about, and asking
+/// anyway would spend a model call on every coffee.
+///
+/// WHAT IT CANNOT DO. Apply the result to the session it is running in. The
+/// session borrows the domain immutably for its whole life, so a layer cannot
+/// be added underneath it. A learned preference therefore takes effect on the
+/// NEXT run, and this says so rather than implying otherwise.
+///
+/// That is a limitation of the plumbing and not of the idea. It is also
+/// arguably the better behaviour: a preference that changed the drink being
+/// poured would be learning applied before anybody could object to it.
+fn remember(
+    learner: Option<&ProcessLearner>,
+    session: &Session<'_>,
+    domain: &dyn adi_core::domain::Domain,
+    declaration_path: &Path,
+    voice: &Voice,
+) {
+    let Some(learner) = learner else {
+        return;
+    };
+
+    // Only where this person has stated the same preference more than once.
+    //
+    // WHY THE ENGINE DECIDES THIS AND NOT THE MODEL. The learner used to be
+    // asked after any turn that corrected anything, and a `Produce` request
+    // corrects whatever the recipe says - so the first drink of a machine's
+    // life produced a "learned preference" for the recipe's own brew
+    // temperature, written to disk, having been told nothing by anybody. It
+    // narrowed again on each later drink, because each later drink said the
+    // same thing again, and once the band had crept past a recipe's lower
+    // bound the machine could no longer make that drink at all.
+    //
+    // The prompt did say to look for a preference asked for more than once.
+    // Prompts are not where this belongs: whether a person stated a figure is
+    // a fact the engine holds, and the record now says which. So the gate is
+    // deterministic and the model is only consulted once there is something
+    // real to generalise from.
+    // Counted off the record's own wording, which `Asked` writes in one place:
+    // "asked for ..." where a person named the figure, "the recipe puts ..."
+    // where the style did. The record carries no target variable of its own,
+    // so this counts stated moments rather than stated moments per variable -
+    // enough to decide whether there is anything to generalise from, and the
+    // learner is still the one that has to find a pattern among them.
+    const ENOUGH: usize = 2;
+    let stated = session
+        .history()
+        .iter()
+        .filter(|record| record.explanation.starts_with("asked for"))
+        .count();
+    if stated < ENOUGH {
+        return;
+    }
+
+    // The ranges a proposal may narrow, sent so the model works inside them
+    // rather than being refused afterwards for not knowing them.
+    let current: Vec<(String, f64, f64, String)> = domain
+        .knowledge()
+        .constrained_variables()
+        .into_iter()
+        .filter_map(|name| {
+            let bounds = domain.knowledge().constraint(name)?;
+            Some((
+                name.to_string(),
+                bounds.value.min,
+                bounds.value.max,
+                format!("{:?}", bounds.value.unit).to_lowercase(),
+            ))
+        })
+        .collect();
+
+    if current.is_empty() {
+        return;
+    }
+
+    let learned = match learner.consider(session.history(), &current) {
+        Ok(learned) => learned,
+        // Reported and dropped. Learning is a convenience; a machine that
+        // stops working because it could not decide what it had learned is
+        // worse than one that learns nothing.
+        Err(e) => {
+            eprintln!("  learning     unavailable: {e}");
+            return;
+        }
+    };
+
+    if learned.is_empty() {
+        return;
+    }
+
+    // Every proposal checked against what is in force. The layering would
+    // refuse a widening one at load time anyway, but a proposal that could
+    // never be applied should not be written to a file, and the reason is
+    // more useful here than next time the machine starts.
+    let mut keeping = Vec::new();
+    for proposal in &learned.constraints {
+        match current
+            .iter()
+            .find(|(name, _, _, _)| name == &proposal.variable)
+        {
+            Some((_, min, max, unit)) if adi_models::learner::narrows(proposal, *min, *max, unit) => {
+                keeping.push(proposal.clone());
+            }
+            Some((name, min, max, unit)) => {
+                println!(
+                    "  learning     ignored {name} {} to {} {}: outside the {} to {} {} in force",
+                    proposal.min, proposal.max, proposal.unit, min, max, unit
+                );
+            }
+            None => println!(
+                "  learning     ignored {}: nothing constrains it",
+                proposal.variable
+            ),
+        }
+    }
+
+    if keeping.is_empty() {
+        return;
+    }
+
+    match write_preferences(declaration_path, &keeping, &learned.because) {
+        Ok(path) => {
+            println!("  learned      {}", path.display());
+            for proposal in &keeping {
+                println!(
+                    "               {} {} to {} {}",
+                    proposal.variable, proposal.min, proposal.max, proposal.unit
+                );
+            }
+            println!("  because      {}", learned.because);
+
+            // Said out loud, because a machine that changes how it works
+            // without mentioning it is the thing this whole project is
+            // arguing against. The person can delete the file.
+            let said = format!(
+                "I have noted that {}. It will apply from your next drink, and you can tell me to forget it.",
+                learned.because.trim_end_matches('.')
+            );
+            voice.say(&said);
+        }
+        Err(e) => eprintln!("  learning     could not be written: {e}"),
+    }
+}
+
+/// Write the user layer, replacing whatever was there.
+///
+/// In the CLI and not the engine. The library does no file I/O anywhere else
+/// and should not start here: an engine embedded in an appliance may have no
+/// filesystem at all, so the host decides where knowledge is kept and the
+/// engine only decides what it is.
+fn write_preferences(
+    declaration_path: &Path,
+    constraints: &[adi_models::LearnedConstraint],
+    because: &str,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let stem = declaration_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("the declaration has no file name to derive from")?;
+    let stem = stem.strip_suffix(".knowledge").unwrap_or(stem);
+    let path = declaration_path.with_file_name(format!("{stem}.user.yaml"));
+
+    let mut out = String::new();
+    out.push_str("# What this machine has learned about the person using it.\n");
+    out.push_str("#\n");
+    out.push_str("# WRITTEN BY THE MACHINE. Delete this file to forget everything in it.\n");
+    out.push_str("#\n");
+    // One push per line. A backslash continuation inside a Rust string
+    // keeps the next line's indentation, which put source-code whitespace
+    // into these YAML comments the first time this ran.
+    out.push_str("# This is ADI-P 6.1's topmost knowledge layer, so everything
+");
+    out.push_str("# here can only NARROW what the manufacturer declared. A
+");
+    out.push_str("# range that widened one is refused when this file is read,
+");
+    out.push_str("# so learning can tune this machine and cannot redefine what
+");
+    out.push_str("# it does.
+");
+    out.push_str("#\n");
+    out.push_str("# Why:\n");
+    for line in because.lines() {
+        out.push_str("#   ");
+        out.push_str(line.trim());
+        out.push('\n');
+    }
+    out.push('\n');
+    out.push_str("namespace: \"x.bob.user\"\n");
+    out.push_str("extension_version: \"1.0\"\n");
+    out.push_str("extends:\n");
+    out.push_str("  domain_profile: \"espresso/v1\"\n");
+    out.push_str("  base_min_version: \"1.0\"\n\n");
+    out.push_str("constraints:\n");
+    for c in constraints {
+        out.push_str(&format!(
+            "  {}: {{ min: {}, max: {}, unit: {} }}\n",
+            c.variable, c.min, c.max, c.unit
+        ));
+    }
+
+    // The reason, where the model can read it back and answer "why" with it.
+    out.push_str("\nnotes:\n");
+    out.push_str("  - id: \"x.bob.user.note.learned\"\n");
+    out.push_str("    text: >\n");
+    for line in because.lines() {
+        out.push_str("      ");
+        out.push_str(line.trim());
+        out.push('\n');
+    }
+    out.push_str("
+      The manufacturer's own limits are unchanged and still
+");
+    out.push_str("      apply; this only sits inside them, and it can be
+");
+    out.push_str("      forgotten on request.
+");
+
+    std::fs::write(&path, out)?;
+    Ok(path)
+}
+
 fn load_chooser(
     config_path: Option<&Path>,
     level: AutonomyLevel,
@@ -1050,10 +2206,11 @@ fn shared_model_process(config_path: Option<&Path>) -> Option<Arc<ProcessBackend
 fn load_interpreter(
     config_path: Option<&Path>,
     domain: &dyn adi_core::domain::Domain,
-    device: &adi_protocol::declaration::Device,
+    declaration: &adi_protocol::declaration::Declaration,
+    skill: Option<&adi_protocol::skill::Skill>,
     shared: Option<&Arc<ProcessBackend>>,
 ) -> Result<Loaded, Box<dyn std::error::Error>> {
-    match start_interpreter(config_path, domain, device, shared) {
+    match start_interpreter(config_path, domain, declaration, skill, shared) {
         Ok(Some((interpreter, label))) => {
             println!("  interpreter  {label}");
             Ok(Some((interpreter, label)))
@@ -1078,7 +2235,12 @@ fn load_interpreter(
 pub(crate) fn start_interpreter(
     config_path: Option<&Path>,
     domain: &dyn adi_core::domain::Domain,
-    device: &adi_protocol::declaration::Device,
+    declaration: &adi_protocol::declaration::Declaration,
+    // Needed to work out which styles this machine can actually produce: a
+    // candidate for an outcome may come from a skill response rather than from
+    // a tool's declared effects, and a planner without the skill would judge
+    // some styles unproducible that are not.
+    skill: Option<&adi_protocol::skill::Skill>,
     shared: Option<&Arc<ProcessBackend>>,
 ) -> Result<Loaded, Box<dyn std::error::Error>> {
     let Some(path) = config_path else {
@@ -1101,15 +2263,86 @@ pub(crate) fn start_interpreter(
 
         Backend::Process => {
             let command = seam.command.clone().ok_or("the process backend names no command")?;
-            let label = format!("process ({command})");
+
+            // Read before the program is started, so a budget that makes no
+            // sense is refused rather than discovered after a child process is
+            // running.
+            let budget = context_budget(&seam)?;
+
+            // Reported, because the whole fault this fixes was a number that
+            // looked set and was not. A budget visible in the banner is one a
+            // person can see is wrong.
+            let label = format!(
+                "process ({command}), {} tokens, {} decisions",
+                budget.max_tokens, budget.history
+            );
 
             let knowledge = domain.knowledge();
+            let planner = adi_core::Planner::new(declaration, skill, domain);
             let surroundings = Surroundings {
                 // With what each style is, not only its identifier. A
                 // request names a style the way a person would.
+                //
+                // AND ONLY STYLES THIS MACHINE CAN PRODUCE. A base domain
+                // profile describes a CLASS of machine: the espresso profile
+                // writes its styles in `ratio` and `shot_time`, which is how a
+                // machine with a paddle and a scale is dialled in. A
+                // superautomatic can do neither - you give it a volume and it
+                // decides the rest - so offering those styles was a trap.
+                // Asked for a lungo, a model picked `adi.espresso.style.lungo`,
+                // a reasonable answer from the list it was handed, and the only
+                // target Bob could serve was the brew temperature. It set the
+                // temperature and announced a lungo that was never brewed,
+                // while the vendor's own `x.bob.style.lungo` sat in the same
+                // list unused.
+                //
+                // THE TEST: every outcome the recipe specifies must be one
+                // this machine can move, preferences aside.
+                //
+                // A recipe is a specification, not a wish list. The base lungo
+                // asks for a ratio of 3 to 4, a shot of 28 to 40 seconds and a
+                // temperature; Bob can serve the temperature and neither of
+                // the others, so what it would produce is not a lungo - it is
+                // a temperature change with a lungo's name on it. Its own
+                // `x.bob.style.lungo` asks for a yield mass, which is exactly
+                // what this machine delivers.
+                //
+                // Preferences are excluded from the test because a person can
+                // decline one: a recipe that mentions syrup is still that
+                // recipe on a machine with no syrup pump.
+                //
+                // Requiring only SOME target to be servable was the first
+                // attempt and let the base styles straight back through -
+                // `brew_temperature` is servable and, being a process variable
+                // rather than a preference, counted. One of three targets
+                // honoured is not the drink.
+                //
+                // Not an exclusion of base styles as such: a base style this
+                // machine can serve in full stays on offer, which is the whole
+                // point of having one.
                 styles: knowledge
                     .styles_described()
                     .into_iter()
+                    .filter(|(name, _)| {
+                        let Ok(resolved) = knowledge.resolve(name, None) else {
+                            return false;
+                        };
+                        // The STYLE's own bands, not the fully resolved set.
+                        // `targets` starts from the machine's constraints and
+                        // so names every constrained variable - ratio and shot
+                        // time among them - which failed every style on Bob
+                        // including its own. `style_targets` is what the recipe
+                        // actually specifies.
+                        let producible = resolved.style_targets.iter().all(|(variable, _)| {
+                            knowledge.is_preference(variable)
+                                || !planner
+                                    .candidates(&adi_protocol::ids::VariableId(
+                                        variable.clone(),
+                                    ))
+                                    .is_empty()
+                        });
+                        producible
+                    })
                     .map(|(name, description)| adi_language::context::StyleInfo {
                         name: name.to_string(),
                         description: description.map(str::to_string),
@@ -1139,8 +2372,35 @@ pub(crate) fn start_interpreter(
                 notes: knowledge.notes().cloned().collect(),
                 device: Some(format!(
                     "{} {}, firmware {}",
-                    device.vendor, device.model, device.firmware_version
+                    declaration.device.vendor,
+                    declaration.device.model,
+                    declaration.device.firmware_version
                 )),
+                // The things this machine does that are not quantities.
+                //
+                // Derived here, from the declaration, so that the list the
+                // model is shown and the list `Session::act` resolves against
+                // are the same list in the same order. Two derivations would
+                // be two orders eventually, and an index resolved against the
+                // wrong one performs the wrong physical act.
+                // The appliance's, then the engine's own. Same order the
+                // index is resolved against in `perform_named`, which is the
+                // only thing keeping an index pointing at what it names.
+                actions: adi_core::named_actions(declaration, domain)
+                    .into_iter()
+                    .map(|a| adi_language::context::ActionLine {
+                        name: a.name.to_string(),
+                        description: a.description.map(str::to_string),
+                    })
+                    .chain(
+                        ENGINE_ACTIONS
+                            .iter()
+                            .map(|(name, description)| adi_language::context::ActionLine {
+                                name: name.to_string(),
+                                description: Some(description.to_string()),
+                            }),
+                    )
+                    .collect(),
             };
 
             // Over the program already running where there is one, so that
@@ -1149,13 +2409,13 @@ pub(crate) fn start_interpreter(
                 Some(backend) => ProcessInterpreter::over(
                     Arc::clone(backend),
                     surroundings,
-                    Default::default(),
+                    budget,
                 ),
                 None => ProcessInterpreter::start(
                     &command,
                     &seam.args,
                     surroundings,
-                    Default::default(),
+                    budget,
                 )?,
             };
             Ok(Some((Box::new(interpreter), label)))
@@ -1206,7 +2466,10 @@ mod voice_config {
     //! library default, which happens to equal the value in the examples, so
     //! the field appeared to work.
 
-    use super::{speech_rate, transcript_threshold, DEFAULT_SPEAKER_RATE, DEFAULT_TRANSCRIBER_RATE};
+    use super::{
+        context_budget, speech_rate, transcript_threshold, ContextBudget, DEFAULT_SPEAKER_RATE,
+        DEFAULT_TRANSCRIBER_RATE,
+    };
     use adi_models::{Backend, SeamConfig};
 
     fn seam(sample_rate: Option<u32>, min_confidence: Option<f64>) -> SeamConfig {
@@ -1216,6 +2479,54 @@ mod voice_config {
             min_confidence,
             ..SeamConfig::none()
         }
+    }
+
+    fn budgeted(context_tokens: Option<usize>) -> SeamConfig {
+        SeamConfig {
+            backend: Backend::Process,
+            context_tokens,
+            ..SeamConfig::none()
+        }
+    }
+
+    /// The third field in this family to be written down and read by nothing.
+    ///
+    /// Its effect was the worst of the three: a wrong sample rate plays audio
+    /// at the wrong pitch, which anyone notices, while a budget stuck at the
+    /// default silently deleted part of every prompt.
+    #[test]
+    fn a_configured_budget_is_what_is_used() {
+        assert_eq!(
+            context_budget(&budgeted(Some(12_000))).map(|b| b.max_tokens),
+            Ok(12_000)
+        );
+    }
+
+    /// A configuration that says nothing behaves as it always did.
+    #[test]
+    fn an_unset_budget_is_the_default() {
+        assert_eq!(
+            context_budget(&budgeted(None)).map(|b| b.max_tokens),
+            Ok(ContextBudget::default().max_tokens)
+        );
+    }
+
+    /// Refused rather than read as "no limit", because zero reads either way
+    /// and the two are opposites.
+    #[test]
+    fn a_budget_of_zero_is_refused() {
+        assert!(context_budget(&budgeted(Some(0))).is_err());
+    }
+
+    /// The other two fields keep their defaults, so configuring the size of
+    /// the prompt does not quietly change how much history is in it.
+    #[test]
+    fn setting_the_budget_leaves_the_other_limits_alone() {
+        let configured = context_budget(&budgeted(Some(9_000))).expect("valid");
+        let default = ContextBudget::default();
+
+        assert_eq!(configured.remembered_cycles, default.remembered_cycles);
+        assert_eq!(configured.history, default.history);
     }
 
     #[test]

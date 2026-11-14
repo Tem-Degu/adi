@@ -62,6 +62,21 @@ pub struct Surroundings {
     pub notes: Vec<adi_protocol::knowledge::Note>,
     /// What this machine is, where the caller knows.
     pub device: Option<String>,
+    /// Actions an operator may name, numbered by position. ADI-P 8.2.
+    ///
+    /// Supplied by the caller because they come from the declaration rather
+    /// than from knowledge, and because the engine and the model must number
+    /// them identically: the reply is a position in this list.
+    pub actions: Vec<adi_language::context::ActionLine>,
+}
+
+/// An action as the backend is told about it. Its index is its position.
+#[derive(Debug, Serialize)]
+struct ActionLineOut<'a> {
+    index: usize,
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
 }
 
 /// A style as the backend is told about it.
@@ -115,6 +130,11 @@ struct Request<'a> {
     /// What this machine is, where the engine was told.
     #[serde(skip_serializing_if = "Option::is_none")]
     machine: Option<&'a str>,
+    /// The actions an operator may name, numbered. A reply naming one returns
+    /// its `index` and nothing else. Absent where the machine declares none,
+    /// in which case the schema offers no arm for one either.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    actions: &'a [ActionLineOut<'a>],
     /// What the appliance is reading now. A request may be stated entirely
     /// against it, and "a bit warmer" has nothing to be warmer than without
     /// it.
@@ -122,9 +142,24 @@ struct Request<'a> {
     measured: Vec<ReadingOut>,
     remembered: Vec<RememberedLine>,
     history: Vec<HistoryLine>,
+    /// The exchanges before this one, oldest first. Omitted when there are
+    /// none, so a program serving a path with no conversation sees no field
+    /// rather than an empty list it has to interpret.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    conversation: Vec<TurnLine>,
 }
 
 /// One current reading as the backend is told about it.
+/// One exchange on the wire.
+#[derive(Debug, Serialize)]
+struct TurnLine {
+    /// What the person said.
+    said: String,
+    /// Everything the machine said back, in order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    replies: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct ReadingOut {
     variable: String,
@@ -141,10 +176,43 @@ struct RememberedLine {
 }
 
 #[derive(Debug, Serialize)]
+struct ArgumentOut {
+    parameter: String,
+    value: f64,
+    unit: String,
+}
+
+#[derive(Debug, Serialize)]
+struct InputOut {
+    variable: String,
+    value: f64,
+    unit: String,
+    layer: String,
+}
+
+/// What the engine decided earlier, in enough detail to be asked about.
+///
+/// Three fields until this grew: the cycle, the cause and the tool. Which is
+/// enough to resolve "half of last time" and nowhere near enough to answer
+/// "why 38 millilitres?", because the 38 was not in it.
+#[derive(Debug, Serialize)]
 struct HistoryLine {
     cycle_id: String,
     cause: String,
     tool: Option<String>,
+    /// Which recipe that tool was serving. Omitted where there was none, so a
+    /// named action and an adjustment do not carry an empty field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    style: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    arguments: Vec<ArgumentOut>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    asked_for: Vec<ArgumentOut>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    inputs: Vec<InputOut>,
+    chose: &'static str,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    note: String,
 }
 
 /// An interpreter that is an external program.
@@ -165,6 +233,7 @@ pub struct ProcessInterpreter {
     notes: Vec<adi_protocol::knowledge::Note>,
     /// What this machine is, where the caller supplied it.
     device: Option<String>,
+    actions: Vec<adi_language::context::ActionLine>,
 }
 
 impl ProcessInterpreter {
@@ -200,10 +269,11 @@ impl ProcessInterpreter {
             variables: surroundings.variables,
             notes: surroundings.notes,
             device: surroundings.device,
+            actions: surroundings.actions,
         }
     }
 
-    fn exchange(&self, request: &Request<'_>) -> Result<Understood, ModelError> {
+    fn exchange(&self, request: &Request<'_>) -> Result<adi_decision::Reply, ModelError> {
         let line = serde_json::to_string(request)
             .map_err(|e| ModelError::Backend(format!("could not encode the request: {e}")))?;
 
@@ -217,18 +287,47 @@ impl ProcessInterpreter {
         // Parsed tolerantly as to where the JSON begins and ends, because a
         // program wrapping a model will often return it fenced or prefaced,
         // and strictly as to what it contains. See crate::parse.
-        crate::parse::understood(&reply)
+        crate::parse::reply(&reply)
     }
 }
 
 impl Interpreter for ProcessInterpreter {
+    /// The decision alone, for the callers that want only that.
     fn interpret(
         &self,
         utterance: &str,
         context: &SelectionContext<'_>,
     ) -> Result<Understood, DecisionError> {
+        Ok(self.reply(utterance, context)?.understood)
+    }
+
+    fn reply(
+        &self,
+        utterance: &str,
+        context: &SelectionContext<'_>,
+    ) -> Result<adi_decision::Reply, DecisionError> {
         let mut assembled = ModelContext {
             utterance: utterance.to_string(),
+            // Explicit, because the literal below ends in `..Default::default()`
+            // and a field left out of it is filled with an empty default rather
+            // than refused. Adding `recent` to `ModelContext::assemble` was not
+            // enough: this interpreter builds its context by hand and never
+            // calls that function, so the conversation compiled, shipped, and
+            // arrived at the program as `null`.
+            recent: {
+                // Truncated HERE as well as in `assemble`, because this
+                // interpreter never calls that function. The budget's
+                // `conversation` is the number sent; the engine holds more.
+                // Oldest first, so the END is what matters and `take` from the
+                // front would hide what was just said.
+                let n = self.budget.conversation;
+                let from = context.recent.len().saturating_sub(n);
+                if n == 0 {
+                    Vec::new()
+                } else {
+                    context.recent[from..].to_vec()
+                }
+            },
             styles: self.knowledge_styles.clone(),
             materials: self.knowledge_materials.clone(),
             variables: self.variables.clone(),
@@ -243,6 +342,7 @@ impl Interpreter for ProcessInterpreter {
                 })
                 .collect(),
             device: self.device.clone(),
+            actions: self.actions.clone(),
             measured: context
                 .measured
                 .map(|measured| {
@@ -280,11 +380,10 @@ impl Interpreter for ProcessInterpreter {
             .history
             .iter()
             .take(self.budget.history)
-            .map(|record| adi_language::context::DecisionSummary {
-                cycle_id: record.cycle_id.clone(),
-                cause: record.cause.clone(),
-                tool: record.selected_tool.as_ref().map(|t| t.0.clone()),
-            })
+            // The shared summariser, not a second copy of it. This was a
+            // hand-written DecisionSummary and it carried three of the
+            // record's fields while the type had grown to ten.
+            .map(adi_language::context::summarise_decision)
             .collect();
 
         // The budget applies here as it does to an assembled context. Without
@@ -292,10 +391,33 @@ impl Interpreter for ProcessInterpreter {
         // context overflowed it with nothing saying so.
         assembled.enforce(self.budget);
 
-        if assembled.truncated.contains(&"notes") {
+        // Everything that was dropped, not the first thing.
+        //
+        // This reported notes alone. `enforce` records every section it
+        // removes, in the order it removes them, and the later ones matter
+        // more: notes degrade an answer, while styles leave a model unable to
+        // name a drink at all. With a budget too small for a full declaration
+        // the engine deleted the entire drink list, said "the notes were
+        // truncated", and the model then asked what was meant - which reads as
+        // the model being slow rather than as the prompt being gutted.
+        if !assembled.truncated.is_empty() {
             eprintln!(
-                "adi: the notes exceed the configured context budget and were truncated. Reduce them to what the smallest model you target can hold."
+                "adi: the prompt did not fit the context budget of {} tokens, so these were dropped: {}.",
+                self.budget.max_tokens,
+                assembled.truncated.join(", ")
             );
+
+            // Named separately because it is the one that stops the machine
+            // working rather than making it less informed.
+            if assembled.truncated.contains(&"styles") {
+                eprintln!(
+                    "     Without styles the model is shown no drinks and cannot name one. Raise `context_tokens` for this seam."
+                );
+            } else if assembled.truncated.contains(&"notes") {
+                eprintln!(
+                    "     Notes are what answers a question, so questions will be answered worse. Raise `context_tokens`, or shorten them."
+                );
+            }
         }
 
         let style_lines: Vec<StyleLine<'_>> = assembled
@@ -314,6 +436,17 @@ impl Interpreter for ProcessInterpreter {
                 name: &v.name,
                 unit: v.unit.as_deref(),
                 meaning: v.meaning.as_deref(),
+            })
+            .collect();
+
+        let action_lines: Vec<ActionLineOut<'_>> = assembled
+            .actions
+            .iter()
+            .enumerate()
+            .map(|(index, a)| ActionLineOut {
+                index,
+                name: &a.name,
+                description: a.description.as_deref(),
             })
             .collect();
 
@@ -338,11 +471,17 @@ impl Interpreter for ProcessInterpreter {
         // prompt and is not something a model may emit.
         let style_names: Vec<String> = assembled.styles.iter().map(|s| s.name.clone()).collect();
         let schema =
-            crate::narrowed_schema(&style_names, &assembled.materials, &schema_variables);
+            crate::narrowed_schema(
+            &style_names,
+            &assembled.materials,
+            &schema_variables,
+            assembled.actions.len(),
+        );
 
         let request = Request {
             utterance: &assembled.utterance,
             instruction: crate::OUTPUT_INSTRUCTION,
+            actions: &action_lines,
             schema: &schema,
             styles: &style_lines,
             materials: &assembled.materials,
@@ -368,6 +507,14 @@ impl Interpreter for ProcessInterpreter {
                     feedback: r.feedback.clone(),
                 })
                 .collect(),
+            conversation: assembled
+                .recent
+                .iter()
+                .map(|t| TurnLine {
+                    said: t.said.clone(),
+                    replies: t.replies.clone(),
+                })
+                .collect(),
             history: assembled
                 .history
                 .iter()
@@ -375,17 +522,56 @@ impl Interpreter for ProcessInterpreter {
                     cycle_id: h.cycle_id.clone(),
                     cause: h.cause.clone(),
                     tool: h.tool.clone(),
+                    style: h.style.clone(),
+                    arguments: h
+                        .arguments
+                        .iter()
+                        .map(|a| ArgumentOut {
+                            parameter: a.parameter.clone(),
+                            value: a.value,
+                            unit: a.unit.clone(),
+                        })
+                        .collect(),
+                    asked_for: h
+                        .asked_for
+                        .iter()
+                        .map(|a| ArgumentOut {
+                            parameter: a.parameter.clone(),
+                            value: a.value,
+                            unit: a.unit.clone(),
+                        })
+                        .collect(),
+                    inputs: h
+                        .inputs
+                        .iter()
+                        .map(|i| InputOut {
+                            variable: i.variable.clone(),
+                            value: i.value,
+                            unit: i.unit.clone(),
+                            layer: i.layer.clone(),
+                        })
+                        .collect(),
+                    chose: h.chose,
+                    note: h.note.clone(),
                 })
                 .collect(),
         };
 
-        let understood = self
+        let answer = self
             .exchange(&request)
             .map_err(|e| DecisionError::Backend(e.to_string()))?;
 
         // The same validation every interpreter's output passes through. A
         // program is not trusted more than a model linked into this binary.
-        accept_intent(understood)
+        //
+        // The decision is validated; the sentence is not, because there is
+        // nothing to validate it against and it reaches no actuator. What
+        // protects it is when the engine chooses to speak it: only once the
+        // appliance has accepted.
+        Ok(adi_decision::Reply {
+            understood: accept_intent(answer.understood)?,
+            say: answer.say,
+        })
     }
 }
 

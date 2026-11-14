@@ -145,6 +145,7 @@ mod tests {
 
     fn context() -> SelectionContext<'static> {
         SelectionContext {
+                recent: &[],
             history: &[],
             cycle: None,
             memory: None,

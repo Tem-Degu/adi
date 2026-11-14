@@ -219,9 +219,27 @@ static size_t make_call(uint8_t *out, size_t out_len, const char *tool,
 static uint8_t rx[ADIP_RX_MIN];
 static adip_ctx_t ctx;
 
+/* The abort hook, recorded rather than acted on. `abort_succeeds` is the
+ * interesting knob: a firmware that cannot stop its mechanism must be able to
+ * say so, and the caller must then be refused. */
+static int  abort_calls;
+static uint16_t abort_last_tool;
+static bool abort_succeeds = true;
+
+static bool fake_abort(uint16_t tool, void *user)
+{
+    (void)user;
+    abort_calls++;
+    abort_last_tool = tool;
+    return abort_succeeds;
+}
+
 static void reset_all(void)
 {
     sent_count = 0;
+    abort_calls = 0;
+    abort_last_tool = 0xFFFFu;
+    abort_succeeds = true;
     handler_calls = 0;
     handler_last_id = 0;
     safe_state_calls = 0;
@@ -298,6 +316,174 @@ static void test_synchronous(void)
     CHECK(sent[0].id == 41u && sent[1].id == 41u, "both carry the id");
     CHECK(!adip_busy(&ctx), "not busy after a synchronous call");
     CHECK(ctx.stat_accepted == 1u, "counted as accepted");
+}
+
+/*
+ * ADIP_TOOL_F_ABORTABLE, which was generated into every table and read by
+ * nothing until now.
+ *
+ * Before this, an invocation arriving while the appliance was busy was refused
+ * with BUSY before validation, with no exception. So a declared stop could
+ * never be reached: by the time there was something to stop, nothing could be
+ * sent. These four cases are the whole of the new behaviour.
+ */
+static void test_preemption(void)
+{
+    uint8_t frame[128];
+    uint8_t second[128];
+    size_t n, m;
+
+    printf("preempting an abortable operation\n");
+
+    /* ---- 1. No handler: exactly as before. ------------------------------
+     *
+     * The default, and it matters more than the rest. Every appliance written
+     * before this keeps refusing while busy, so nothing that was safe becomes
+     * unsafe by upgrading the library.
+     */
+    reset_all();
+    next_action = ADIP_ACTION_RUNNING;
+    n = make_call(frame, sizeof(frame), "adi.example.process.start", 7u, "stop_at_volume", 50, 0);
+    run(frame, n);
+    CHECK(adip_busy(&ctx), "running");
+
+    m = make_call(second, sizeof(second), "adi.example.input.by_mass", 8u,
+                  "mass", 90, -1);
+    run(second, m);
+    CHECK(sent[sent_count - 1].outcome == ADIP_OUTCOME_REJECTED,
+          "with no abort handler a second call is still refused");
+    CHECK(sent[sent_count - 1].reason == ADIP_REASON_BUSY, "and the reason is BUSY");
+    CHECK(abort_calls == 0, "and nothing was asked to stop");
+
+    /* ---- 2. A handler, and the operation is abortable. ------------------ */
+    reset_all();
+    (void)adip_set_abort(&ctx, fake_abort);
+    next_action = ADIP_ACTION_RUNNING;
+    n = make_call(frame, sizeof(frame), "adi.example.process.start", 7u, "stop_at_volume", 50, 0);
+    run(frame, n);
+    CHECK(adip_busy(&ctx), "running");
+
+    /* Captured before the second call. `ctx.active_tool` is the NEW operation
+     * once the abort has been done, so comparing against it afterwards tests
+     * nothing - it was equal to itself. */
+    {
+        uint16_t was_running = ctx.active_tool;
+
+        m = make_call(second, sizeof(second), "adi.example.input.by_mass", 8u,
+                      "mass", 90, -1);
+        run(second, m);
+
+        CHECK(abort_calls == 1, "the firmware was asked to stop");
+        CHECK(abort_last_tool == was_running,
+              "and told which operation was cut short, not which asked");
+        CHECK(ctx.active_tool != was_running,
+              "and the new operation is the one running now");
+    }
+
+    /*
+     * The old invocation is answered ABORTED and the new one accepted. Both
+     * ids appear, because an engine waiting on the first is owed an outcome
+     * for it - silence would leave it waiting out the whole duration.
+     */
+    CHECK(sent[1].outcome == ADIP_OUTCOME_ABORTED, "the first was aborted");
+    CHECK(sent[1].id == 7u, "answering the first call");
+    CHECK(sent[2].outcome == ADIP_OUTCOME_ACCEPTED, "the second was accepted");
+    CHECK(sent[2].id == 8u, "answering the second call");
+    CHECK(ctx.stat_preempted == 1u, "counted as preempted");
+    CHECK(ctx.stat_duration_aborts == 0u,
+          "and not as a duration abort, which is a fault rather than a change of mind");
+
+    /*
+     * Found by getting this wrong: two `process.start` calls back to back came
+     * back RATE_LIMITED rather than BUSY. The abort clears the way; it does
+     * not excuse the new invocation from validation. Rate limits, interlocks,
+     * preconditions and the envelope all still apply to it, which is the
+     * behaviour worth having - "stop that and do this instead" must not be a
+     * way around a declared limit.
+     */
+    reset_all();
+    (void)adip_set_abort(&ctx, fake_abort);
+    next_action = ADIP_ACTION_RUNNING;
+    n = make_call(frame, sizeof(frame), "adi.example.process.start", 7u,
+                  "stop_at_volume", 50, 0);
+    run(frame, n);
+    CHECK(adip_busy(&ctx), "an abortable operation is running");
+
+    /* The same tool again, immediately, which its own rate limit forbids. */
+    m = make_call(second, sizeof(second), "adi.example.process.start", 8u,
+                  "stop_at_volume", 50, 0);
+    run(second, m);
+
+    CHECK(abort_calls == 1, "the running operation was cut short");
+    CHECK(sent[sent_count - 1].outcome == ADIP_OUTCOME_REJECTED,
+          "and the new call was still judged on its own merits");
+    CHECK(sent[sent_count - 1].reason == ADIP_REASON_RATE_LIMITED,
+          "refused by its rate limit, not waved through by the abort");
+    CHECK(!adip_busy(&ctx),
+          "and nothing is running, because what was running was stopped");
+
+    /* ---- 3. The firmware cannot stop. ----------------------------------
+     *
+     * The case that decides whether this is safe to ship. Whether a given
+     * machine accepts a cancel mid-operation is not known until it is tried,
+     * and a firmware that says no must leave the engine refused rather than
+     * have it believe an operation ended while the mechanism runs on.
+     */
+    reset_all();
+    (void)adip_set_abort(&ctx, fake_abort);
+    abort_succeeds = false;
+    next_action = ADIP_ACTION_RUNNING;
+    n = make_call(frame, sizeof(frame), "adi.example.process.start", 7u, "stop_at_volume", 50, 0);
+    run(frame, n);
+
+    m = make_call(second, sizeof(second), "adi.example.input.by_mass", 8u,
+                  "mass", 90, -1);
+    run(second, m);
+
+    CHECK(abort_calls == 1, "it was asked");
+    CHECK(sent[sent_count - 1].outcome == ADIP_OUTCOME_REJECTED,
+          "and having failed, the new call is refused");
+    CHECK(sent[sent_count - 1].reason == ADIP_REASON_BUSY, "with BUSY");
+    CHECK(adip_busy(&ctx), "still busy, because nothing stopped");
+    CHECK(ctx.stat_preempted == 0u, "and nothing was counted as preempted");
+
+    /* ---- 4. What is RUNNING decides, not what is asked for. ------------
+     *
+     * Learned from a wrong assertion here: once an abortable operation has
+     * been preempted by a non-abortable one, nothing can preempt THAT. The
+     * flag is a property of the thing being cut short.
+     */
+    reset_all();
+    (void)adip_set_abort(&ctx, fake_abort);
+    next_action = ADIP_ACTION_RUNNING;
+    n = make_call(frame, sizeof(frame), "adi.example.input.by_mass", 7u,
+                  "mass", 90, -1);
+    run(frame, n);
+
+    if (adip_busy(&ctx)) {
+        m = make_call(second, sizeof(second), "adi.example.process.start", 8u,
+                      "stop_at_volume", 50, 0);
+        run(second, m);
+        CHECK(abort_calls == 0,
+              "a running operation the declaration does not mark abortable is left alone");
+        CHECK(sent[sent_count - 1].reason == ADIP_REASON_BUSY, "and BUSY stands");
+    }
+
+    /* ---- 5. A tool the declaration does not mark abortable. ------------ */
+    reset_all();
+    (void)adip_set_abort(&ctx, fake_abort);
+    next_action = ADIP_ACTION_RUNNING;
+    n = make_call(frame, sizeof(frame), "adi.example.input.by_mass", 7u, "mass", 90, -1);
+    run(frame, n);
+
+    if (adip_busy(&ctx)) {
+        m = make_call(second, sizeof(second), "adi.example.input.by_mass", 8u,
+                      "mass", 90, -1);
+        run(second, m);
+        CHECK(abort_calls == 0,
+              "a tool the declaration does not mark abortable is never offered up");
+        CHECK(sent[sent_count - 1].reason == ADIP_REASON_BUSY, "and BUSY stands");
+    }
 }
 
 static void test_asynchronous(void)
@@ -546,6 +732,7 @@ int main(void)
     test_init();
     test_synchronous();
     test_asynchronous();
+    test_preemption();
     test_abort();
     test_firmware_refusal();
     test_rejections_reach_the_wire();

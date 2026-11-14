@@ -79,6 +79,34 @@ pub struct SeamConfig {
     /// Upper bound on the prompt this model is given, in tokens.
     #[serde(default)]
     pub context_tokens: Option<usize>,
+    /// How many earlier decisions to show the model.
+    ///
+    /// Three by default, which is enough to resolve "half of last time" and
+    /// not enough to see a habit. Someone who has ordered the same drink five
+    /// times has told the machine something, and at three the fourth and fifth
+    /// are not there to be told.
+    ///
+    /// Settable because the right number depends entirely on the model: a
+    /// small local one cannot afford many, a hosted one will not notice.
+    pub decisions: Option<usize>,
+
+    /// How many of the last exchanges to show the model.
+    ///
+    /// An exchange is one thing a person said and everything the machine said
+    /// back. Four by default: enough to resolve a sentence pointing at the one
+    /// before it, and short enough that the prompt stays small.
+    ///
+    /// Settable for the same reason `decisions` is, and the right number is
+    /// not the same number. Decisions are structured and cheap to read; an
+    /// exchange is prose and carries the machine's own explanations, so it
+    /// costs several times as much per entry. A small local model may want one
+    /// or none at all.
+    ///
+    /// Zero means send none, which is the behaviour before this existed and a
+    /// legitimate choice: an engine serving a kiosk where each person says one
+    /// thing and leaves has no conversation to carry.
+    #[serde(default)]
+    pub conversation: Option<usize>,
 
     /// The sample rate a speech backend requires. ADI-P 9.4.2 refuses audio at
     /// any other rate rather than resampling it silently.
@@ -102,6 +130,8 @@ impl SeamConfig {
             command: None,
             args: Vec::new(),
             context_tokens: None,
+            decisions: None,
+            conversation: None,
             sample_rate: None,
             min_confidence: None,
             options: BTreeMap::new(),

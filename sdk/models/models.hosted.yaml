@@ -1,0 +1,97 @@
+# Seams served by a hosted model, over the process backend.
+#
+# The reason to use one is latency, and only latency. sdk/README.md measures
+# the local interpreter at 18 s median on a processor of this class, which is
+# an order of magnitude outside what someone waiting at a machine tolerates.
+# A hosted call is a second or two. Nothing else about ADI needs a network:
+# D0 uses no model at all, so a machine with this configuration removed still
+# measures, diagnoses and corrects. It loses speech, not intelligence.
+#
+# The chooser is not listed here and does not need to be. The engine starts it
+# from the interpreter's seam configuration, as a second copy of the same
+# program, and tells it which seam it is by the shape of each message. See
+# load_chooser in sdk/crates/adi-cli/src/run.rs.
+#
+# The key lives in the environment and never in this file:
+#
+#     export OPENAI_API_KEY=sk-...        # bash
+#     $env:OPENAI_API_KEY = "sk-..."      # PowerShell
+#
+# .gitignore blocks .env and *.key, and this repository is public.
+
+root: .
+
+seams:
+  interpreter:
+    backend: process
+    command: python
+    args: ["examples/interpreters/hosted.py"]
+
+    # Three by default, which is enough to resolve "half of last time" and not
+    # enough to see a habit. Somebody who has ordered the same drink five times
+    # has told the machine something, and at three the fourth and fifth are not
+    # there to be told. Nothing is saved: "the usual" is read off this list
+    # every time it is asked for, so it is always what has actually been
+    # happening rather than a note made once and left to go stale.
+    decisions: 12
+
+    # How many of the last exchanges to show the model. An exchange is one
+    # thing a person said and everything the machine said back, including its
+    # explanation of what it did.
+    #
+    # Four by default. Enough for a sentence that points at the one before it
+    # ("another one", "the second one") to have something to point at, and
+    # short enough that the prompt stays small - four exchanges is perhaps
+    # sixty tokens.
+    #
+    # Not the same number as `decisions` and should not be. A decision is
+    # structured and cheap to read; an exchange is prose and costs several
+    # times as much per entry.
+    #
+    # 0 sends none, which is a legitimate setting rather than a mistake: a
+    # kiosk where each person says one thing and walks away has no
+    # conversation to carry. The engine still holds them, so raising this
+    # later costs nothing.
+    conversation: 4
+
+    # The default is 1024 tokens, which is sized for a small local model and
+    # throttles a hosted one to a fraction of what it can hold. It is not a
+    # soft limit: the engine drops sections to meet it, and with a declaration
+    # this size it was dropping the drink styles, so the model was asked to
+    # name a drink having been shown none.
+    #
+    # 12000 is comfortable for gpt-4o and still bounded, because an unbounded
+    # prompt is a cost nobody notices until the bill.
+    context_tokens: 12000
+
+  # The explainer, which is the seam this whole machine is an argument for.
+  #
+  # A machine that adjusts itself is a curiosity. One that can be asked WHY it
+  # did that, and answers from its own record rather than from a template, is
+  # the thing being claimed. RecordExplainer is accurate by construction and
+  # reads like a log line; a model here says the same facts the way a person
+  # would.
+  #
+  # It cannot improve the facts and must not try. It is handed what happened -
+  # the cause, the tool, the arguments actually sent, every input and the layer
+  # behind it - and instructed never to state a number the record does not
+  # contain. The acknowledgement before a drink is the model's own words and
+  # says nothing factual; everything factual is written from a record, here.
+  #
+  # Latency does not matter at this seam, which is why a model is affordable
+  # here and marginal elsewhere: by the time it is asked, the drink is poured.
+  explainer:
+    backend: process
+    command: python
+    args: ["examples/interpreters/hosted.py"]
+
+  # Speech is not wired up yet. The SDK handles sound once it is samples and
+  # once it has produced samples; capture and playback belong to a product and
+  # are the integrator's, which for Bob means a wrapper around the Pi's own
+  # audio tools. Until that exists these stay unserved, and the engine refuses
+  # the operations they provide by name rather than failing.
+  transcriber:
+    backend: none
+
+  speaker:
+    backend: none

@@ -21,7 +21,7 @@ pub mod request;
 
 pub use cycle::{Cycle, ObservedEvent, SubjectiveFeedback, Trace};
 pub use domain::{Diagnosis, Domain, ExtensionRejected};
-pub use plan::{Correction, Planner};
+pub use plan::{named_actions, Correction, NamedAction, Planner};
 pub use record::{DecisionRecord, SelectedBy, ValueProvenance, ValueSource};
 pub use memory::{Memory, NoMemory, RecentCycles, Remembered};
 pub use request::{RequestError, ResolvedRequest};

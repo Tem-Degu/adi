@@ -97,6 +97,9 @@ fn start() -> Option<ProcessInterpreter> {
             variables: variables(),
             notes: notes(),
             device: Some("Example Appliances EX-900, firmware 1.0.0".into()),
+            // These tests exercise the goal path, so no action is offered and
+            // the schema carries no arm for one.
+            actions: Vec::new(),
         },
         ContextBudget::default(),
     )
@@ -117,6 +120,8 @@ macro_rules! interpreter {
 
 fn empty() -> SelectionContext<'static> {
     SelectionContext {
+        // One utterance per case; nothing was said before it.
+        recent: &[],
         history: &[],
         cycle: None,
         memory: None,
@@ -187,6 +192,8 @@ fn a_relative_request_crosses_as_a_relation() {
     assert_eq!(memory.len(), 1);
 
     let context = SelectionContext {
+        // One utterance per case; nothing was said before it.
+        recent: &[],
         history: &[],
         cycle: None,
         memory: Some(&memory),
@@ -368,6 +375,9 @@ fn one_program_serves_the_interpreter_and_the_chooser() {
             variables: variables(),
             notes: notes(),
             device: Some("Example Appliances EX-900, firmware 1.0.0".into()),
+            // These tests exercise the goal path, so no action is offered and
+            // the schema carries no arm for one.
+            actions: Vec::new(),
         },
         ContextBudget::default(),
     );

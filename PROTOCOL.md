@@ -378,16 +378,29 @@ engine SHOULD cache declarations keyed on this value.
 A `description` is free text saying what the mechanism is and when to prefer it
 over another tool serving the same variable. Two rules govern it.
 
-A vendor tool (§8) for which the skill declares a response **MUST** carry one,
-and an engine MUST refuse a declaration that omits it. A vendor identifier means
-nothing outside the vendor, so a model offered one with a magnitude and a
-confidence has no way to tell what it does.
+A vendor tool (§8) a model may be offered **MUST** carry one, and an engine MUST
+refuse a declaration that omits it. A vendor identifier means nothing outside
+the vendor, so a model offered one with a magnitude and a confidence has no way
+to tell what it does.
+
+A model is offered a vendor tool in two circumstances, and the requirement
+covers both. As a candidate, where the skill declares a response for it. And as
+an action an operator may name (§9.4.7), where it has no parameters, since that
+is what makes a response impossible and the planner unable to reach it. The
+second was once exempt on the reasoning that a tool the engine could call but
+never choose was the manufacturer's own business, which stopped being true when
+a person could name one.
 
 A tool in the registry (§7.1) **MAY** carry one and need not, because a registry
 identifier means the same on every machine that declares it. A profile MUST
 supply a description for every tool in its registry, and an engine MUST prefer a
 description written on the tool over the profile's, since what is true of one
 manufacturer's mechanism is theirs to state.
+
+An engine MUST apply that fallback wherever it offers a tool to a model, not
+only to candidates. An engine that applied it to candidates alone presented
+`adi.espresso.brew.stop` as the bare word "stop" while its own profile held a
+sentence describing it.
 
 An engine MUST supply, with each candidate, the variables that candidate's tool
 changes besides the one it was offered for. Two tools serving one variable are
@@ -1356,6 +1369,13 @@ model may emit on the request path.
 Intent describes a **goal**, never an action. There is no field for a tool name
 and no way to add one. A model that wants a particular tool used cannot say so.
 
+That holds for every mechanism a magnitude can be chosen for, which is every
+mechanism with a parameter. A tool declaring none is a different case: no skill
+response can describe it, so the engine can never select it in pursuit of a
+goal, and §8.2 nonetheless makes it invocable when an operator names it. §9.4.7
+is how, and it names by index and carries no value, so nothing above is
+weakened.
+
 ```yaml
 kind: adjust                     # adjust | produce
 style: "adi.espresso.style.for_milk"
@@ -1415,6 +1435,22 @@ assume, and is never true of a variable a manufacturer introduced (§6.3).
 An engine SHOULD also supply what bears on a question rather than a request: the
 device identity from the declaration, the declared tools with their descriptions
 (§4.2), and the notes the knowledge layers carry (§6.7).
+
+An engine MAY also supply the recent exchanges between the person and the
+machine — what was said each way, most recently last. The requirement above
+names one utterance because one utterance is what a request is made of; it is
+not a prohibition on the rest of a conversation. A sentence pointing back at
+one, such as a request for another of the same, is not resolvable from the
+decision history alone: a record names the mechanism and the value, and on a
+machine where one mechanism serves many styles that does not identify what was
+produced.
+
+Supplied exchanges carry no authority over values. A target is validated
+exactly as without them, against §9.3: a closed schema, targets only on
+declared variables, every value clamped and checked against the envelope. They
+may therefore establish **which** declared thing a person means and never
+**what** it is to be set to, and where a remembered sentence and a decision
+record disagree the record is what happened.
 
 Both sides see that store, and they use it for different things. The model reads
 it to work out which earlier cycle a person means and whether that one was any
@@ -1529,6 +1565,72 @@ that is broken rather than mistaken has to surface as a failure rather than a
 loop. An engine MUST NOT retry a refusal that cannot change on a second attempt,
 which includes no candidate serving the goal, contradictory goals, and a
 declaration carrying no stateful envelope.
+
+#### 9.4.7 An operator MAY name a declared action
+
+Normative. The other half of what a machine does, and the counterpart to §8.2.
+
+Everything above concerns outcomes, which suits every mechanism that moves a
+quantity and no mechanism that does not. Stopping what is pouring, declaring a
+fresh container and running a rinse are not quantities. They are tools with no
+parameters, and a skill response names a parameter (§5.2), so no response can exist,
+so the engine can never select them while pursuing a goal. §3.1 requires
+`adi.espresso.brew.stop` from Level 1 upward, which an engine offering only the
+goal path cannot reach at all.
+
+An engine MUST derive, from the declaration, the actions an operator may name.
+A tool belongs in that list where both hold:
+
+1. it declares `authority` including `operator`; and
+2. **it can be invoked with no arguments**, meaning every parameter it declares
+   is `optional`.
+
+Requirement 2 is what keeps §9.3 intact. Every argument the appliance receives
+is one the manufacturer declared as a default, so a model choosing from this
+list contributes no magnitude, and the reply has no field in which to put one.
+
+A tool needing a value is therefore excluded, and correctly so. A magnitude
+reaches an actuator only along the path §9.3 governs: produced by the engine at
+D0 and D1, or proposed by a model at D2 as a candidate index and a number that
+is then clamped to the declared range, snapped to the declared resolution, and
+refused where its unit is wrong. This path applies none of those checks because
+it carries nothing to check, and admitting a tool that needed a value would be
+a second route to an actuator with none of them.
+
+`optional` specifically, and not merely defaulted. An appliance refuses an
+invocation missing a required argument whether or not that parameter declares a
+default, so a list built from `default` is a list of actions the appliance
+rejects.
+
+An engine MUST supply the list with each request, numbered, each entry carrying
+the tool's name and its description, resolved as §4.2 requires. A model shown
+bare identifiers is choosing between "stop" and "rinse" on the words alone, and
+the outcome of that guess is a physical act.
+
+A model MUST answer with a position in that list and MUST NOT name a tool by
+string, as §9.3 requirement 3 requires of selection. An engine MUST resolve the
+position against the list it supplied, MUST refuse one outside it rather than
+clamping into range - the nearest valid action is a different physical act - and
+MUST NOT store the position, since an index means nothing except against the
+list it came from and tool order changes when a declaration does.
+
+A named action is performed through the same path as a correction: the envelope
+is checked, the appliance validates independently, and a record is written. The
+record MUST attribute the decision to the operator rather than to the engine or
+to the model. "The engine worked it out" and "a person asked for it" are
+different answers to why the machine did that, and §9.3 requirement 5 exists so
+the difference can be told. Such a record carries no inputs and no rule, because
+no value was computed and no profile rule fired; what produced it is the
+attribution.
+
+Where the tool declares a `hazard`, the engine SHOULD confirm with the person
+before performing it (§4.2). A word misheard in a noisy room should not start
+hot water, and the declaration already says which actions deserve the question.
+
+This path is available at every autonomy level. The decision is neither the
+engine's nor a model's: D0 forbids a model producing an actuation parameter and
+this produces none, and an engine with no model at all MUST still offer the list
+to whatever is talking to the person.
 
 ### 9.5 One variable at a time, not one action at a time
 

@@ -49,6 +49,7 @@ fn record(selected_by: SelectedBy) -> DecisionRecord {
         ],
         arguments: BTreeMap::from([("position".to_string(), Quantity::new(28.0, Unit::Step))]),
         clamped_from: BTreeMap::new(),
+        style: None,
         explanation: "ran short of the target".into(),
     }
 }

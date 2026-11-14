@@ -17,6 +17,8 @@
 pub mod backend;
 pub mod chooser;
 pub mod config;
+pub mod explainer;
+pub mod learner;
 pub mod manifest;
 pub mod parse;
 pub mod process;
@@ -29,6 +31,8 @@ pub use chooser::{ProcessChooser, CHOOSER_INSTRUCTION};
 pub use config::{Backend, ModelsConfig, SeamConfig};
 pub use manifest::{hash_file, identify, Manifest, Provenance, Published, Seam};
 pub use parse::understood;
+pub use explainer::ProcessExplainer;
+pub use learner::{Learned, LearnedConstraint, ProcessLearner};
 pub use process::{ProcessInterpreter, Surroundings};
 pub use schema::{
     narrowed_schema, selection_schema, SchemaVariable, OUTPUT_INSTRUCTION, UNDERSTOOD_SCHEMA,

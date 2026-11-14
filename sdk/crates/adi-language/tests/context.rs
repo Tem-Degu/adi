@@ -57,6 +57,7 @@ fn decisions(n: usize) -> Vec<DecisionRecord> {
             inputs: Vec::new(),
             arguments: BTreeMap::new(),
             clamped_from: BTreeMap::new(),
+            style: None,
             explanation: String::new(),
         })
         .collect()
@@ -87,6 +88,8 @@ fn what_the_machine_reads_now_reaches_the_model() {
     );
 
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &[],
         cycle: None,
         memory: Some(&memory),
@@ -116,6 +119,8 @@ fn the_model_is_given_what_the_protocol_requires() {
     let memory = remembered(2);
     let history = decisions(1);
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &history,
         cycle: None,
         memory: Some(&memory),
@@ -148,6 +153,8 @@ fn only_the_most_recent_cycles_are_offered() {
     let k = knowledge();
     let memory = remembered(20);
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &[],
         cycle: None,
         memory: Some(&memory),
@@ -157,6 +164,9 @@ fn only_the_most_recent_cycles_are_offered() {
     };
 
     let budget = ContextBudget {
+        // These tests predate the conversation budget and assert on the
+        // other fields; four is the default and nothing here supplies turns.
+        conversation: 4,
         remembered_cycles: 3,
         ..ContextBudget::default()
     };
@@ -175,6 +185,8 @@ fn the_budget_is_enforced_however_much_is_remembered() {
     let memory = remembered(500);
     let history = decisions(500);
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &history,
         cycle: None,
         memory: Some(&memory),
@@ -184,6 +196,9 @@ fn the_budget_is_enforced_however_much_is_remembered() {
     };
 
     let budget = ContextBudget {
+        // These tests predate the conversation budget and assert on the
+        // other fields; four is the default and nothing here supplies turns.
+        conversation: 4,
         remembered_cycles: 3,
         history: 3,
         max_tokens: 256,
@@ -206,6 +221,8 @@ fn truncation_drops_history_before_it_drops_memory() {
     let memory = remembered(3);
     let history = decisions(3);
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &history,
         cycle: None,
         memory: Some(&memory),
@@ -216,6 +233,9 @@ fn truncation_drops_history_before_it_drops_memory() {
 
     // Tight enough to force a drop, loose enough that not everything goes.
     let budget = ContextBudget {
+        // These tests predate the conversation budget and assert on the
+        // other fields; four is the default and nothing here supplies turns.
+        conversation: 4,
         remembered_cycles: 3,
         history: 3,
         max_tokens: 90,
@@ -242,6 +262,8 @@ fn what_was_dropped_is_reported() {
     let memory = remembered(10);
     let history = decisions(10);
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &history,
         cycle: None,
         memory: Some(&memory),
@@ -251,6 +273,9 @@ fn what_was_dropped_is_reported() {
     };
 
     let tight = ContextBudget {
+        // These tests predate the conversation budget and assert on the
+        // other fields; four is the default and nothing here supplies turns.
+        conversation: 4,
         remembered_cycles: 5,
         history: 5,
         max_tokens: 60,
@@ -267,6 +292,8 @@ fn what_was_dropped_is_reported() {
 fn an_empty_memory_is_not_an_error() {
     let k = knowledge();
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &[],
         cycle: None,
         memory: None,
@@ -320,6 +347,8 @@ fn notes_are_the_first_thing_a_tight_budget_drops() {
         &knowledge,
         &[],
         &SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
             history: &[],
             cycle: None,
             memory: None,
@@ -340,6 +369,9 @@ fn notes_are_the_first_thing_a_tight_budget_drops() {
     }];
 
     context.enforce(ContextBudget {
+        // These tests predate the conversation budget and assert on the
+        // other fields; four is the default and nothing here supplies turns.
+        conversation: 4,
         remembered_cycles: 3,
         history: 2,
         max_tokens: 200,
@@ -354,4 +386,61 @@ fn notes_are_the_first_thing_a_tight_budget_drops() {
         !context.styles.is_empty(),
         "and styles, which an intent needs, should survive"
     );
+}
+
+/// Every section the budget removes is recorded, not only the first.
+///
+/// What the report is built from. Reporting notes alone meant a budget too
+/// small for a full declaration deleted the drink list, announced that the
+/// notes had been truncated, and left the model to be asked for a drink it
+/// had been shown none of.
+#[test]
+fn enforce_records_every_section_it_drops() {
+    let mut context = ModelContext {
+        utterance: "make me a coffee".into(),
+        styles: vec![
+            adi_language::context::StyleInfo {
+                name: "x.test.style.one".into(),
+                description: Some("a".repeat(400)),
+            },
+            adi_language::context::StyleInfo {
+                name: "x.test.style.two".into(),
+                description: Some("b".repeat(400)),
+            },
+        ],
+        materials: vec!["x.test.material.one".into()],
+        notes: vec![adi_language::context::NoteLine {
+            id: "x.test.note".into(),
+            text: "c".repeat(400),
+        }],
+        ..Default::default()
+    };
+
+    // Small enough that nothing optional survives.
+    context.enforce(adi_language::context::ContextBudget {
+        // These tests predate the conversation budget and assert on the
+        // other fields; four is the default and nothing here supplies turns.
+        conversation: 4,
+        remembered_cycles: 0,
+        history: 0,
+        max_tokens: 8,
+    });
+
+    assert!(context.truncated.contains(&"notes"), "{:?}", context.truncated);
+    assert!(
+        context.truncated.contains(&"materials"),
+        "{:?}",
+        context.truncated
+    );
+    assert!(
+        context.truncated.contains(&"styles"),
+        "styles going is the one that stops a machine working, and it must be \
+         recorded: {:?}",
+        context.truncated
+    );
+    assert!(context.styles.is_empty());
+
+    // Never dropped, whatever the budget. A request with no request is not a
+    // smaller request.
+    assert_eq!(context.utterance, "make me a coffee");
 }

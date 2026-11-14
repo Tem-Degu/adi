@@ -360,6 +360,26 @@ fn validate(
         }
     }
 
+    // The same rule for the other way a model reaches a tool. Checked without
+    // a skill, because a namable action has no response by definition and so
+    // can never be covered by the check above.
+    let undescribed_actions = declaration.undescribed_named_actions();
+    if !undescribed_actions.is_empty() {
+        eprintln!(
+            "declaration: FAILED  these vendor tools can be named by an operator              and carry no description:"
+        );
+        for id in &undescribed_actions {
+            eprintln!("    {id}");
+        }
+        eprintln!();
+        eprintln!("  A tool with no parameters cannot be selected by the planner,");
+        eprintln!("  so it is offered to the model as something an operator may");
+        eprintln!("  name. A registry tool takes its description from the profile;");
+        eprintln!("  a vendor one has none, and a bare identifier in a numbered");
+        eprintln!("  list is a guess whose outcome is a physical action.");
+        std::process::exit(1);
+    }
+
     if !declaration.has_stateful_envelope() {
         println!(
             "note: no invariants or rate limits declared. \
@@ -456,6 +476,31 @@ named by the skill and not modelled, so ignored:");
         for tool in declaration.tools.iter().filter(|t| t.id.is_vendor()) {
             if skill.responses_for(&tool.id).next().is_none() {
                 println!("  {}", tool.id.as_str());
+            }
+        }
+
+        // What an operator may ask for by name. ADI-P 8.2.
+        //
+        // Worth printing beside the selectable tools because the two lists
+        // answer different questions. Above is what the engine can reach while
+        // chasing a number; this is what a person can ask for outright. A tool
+        // in neither list is declared and unreachable, which is worth seeing.
+        let actions = declaration.operator_actions();
+        if !actions.is_empty() {
+            println!("\nactions an operator may name (no value is sent):");
+            for action in &actions {
+                let hazard = if action.hazard.is_empty() {
+                    String::new()
+                } else {
+                    format!("   [confirm: {}]", action.hazard.join(", "))
+                };
+                println!(
+                    "  {}  {:<12} {}{}",
+                    action.index,
+                    action.name,
+                    action.tool.as_str(),
+                    hazard
+                );
             }
         }
     }

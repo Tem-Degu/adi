@@ -152,7 +152,7 @@ fn utterance(said: &str) -> String {
             "tool": "adi.espresso.grind.set_setting"
         }],
         "instruction": OUTPUT_INSTRUCTION,
-        "schema": narrowed_schema(&styles, &[], &variables),
+        "schema": narrowed_schema(&styles, &[], &variables, 0),
     })
     .to_string()
 }

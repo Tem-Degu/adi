@@ -16,6 +16,8 @@ fn the_documented_wiring_compiles() {
     let samples: Vec<i16> = vec![0; 16];
     let audio = Audio::new(samples, 16_000);
     let context = SelectionContext {
+        // Nothing said before this; these tests assemble one utterance.
+        recent: &[],
         history: &[],
         cycle: None,
         memory: None,
@@ -45,6 +47,7 @@ fn the_documented_wiring_compiles() {
         inputs: Vec::new(),
         arguments: std::collections::BTreeMap::new(),
         clamped_from: std::collections::BTreeMap::new(),
+        style: None,
         explanation: "Set the feed rate to 20.".into(),
     };
 

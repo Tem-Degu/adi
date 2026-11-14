@@ -211,8 +211,14 @@ impl Skill {
     /// numbers.
     ///
     /// The rule applies only where a response exists, because that is what
-    /// makes a tool selectable. A vendor tool the engine can call but never
-    /// choose is the manufacturer's own business.
+    /// makes a tool *selectable*.
+    ///
+    /// This once added that a vendor tool the engine could call but never
+    /// choose was the manufacturer's own business. That stopped being true
+    /// when an operator could name one: a tool with no response is exactly
+    /// what appears in `Declaration::operator_actions`, so it is handed to a
+    /// model to pick from after all. `Declaration::undescribed_named_actions`
+    /// covers that case, because this one structurally cannot.
     ///
     /// Lives here rather than in the command line tool because a rule only the
     /// tool enforces is a rule no test can see. This one went unnoticed in a

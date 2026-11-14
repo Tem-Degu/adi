@@ -108,7 +108,12 @@ pub fn bench(
         let Some((interpreter, label)) = crate::run::start_interpreter(
             Some(&config_path),
             domain.as_ref(),
-            &declaration.device,
+            &declaration,
+            // No skill. A bench measures how long the interpreter takes to
+            // answer, and the only thing the skill affects here is which
+            // styles are judged producible - which changes the prompt's size a
+            // little and nothing about the timing.
+            None,
             // A bench builds the interpreter alone, with no chooser to share
             // the program with, so it starts its own.
             None,
@@ -164,6 +169,7 @@ fn run(
     let mut problems: Vec<(String, String)> = Vec::new();
 
     let context = SelectionContext {
+                recent: &[],
         history: &[],
         cycle: None,
         memory: None,

@@ -66,6 +66,56 @@ static void send_heartbeat(adip_ctx_t *ctx)
     (void)adip_port_write(ctx->tx, (size_t)framed);
 }
 
+/*
+ * Cut short what is running, if that is allowed and the firmware manages it.
+ *
+ * False means "still busy, and the caller should refuse". Four ways to get
+ * there, and all four are the honest answer rather than a failure:
+ *
+ *   - nothing is running
+ *   - this appliance never opted in, so it cannot be interrupted at all
+ *   - the running operation is not declared abortable
+ *   - the firmware tried and the hardware would not stop
+ *
+ * That last one is the one worth having. Whether a Jura accepts a cancel
+ * mid-brew is not known until it is tried on real hardware, and this degrades
+ * to "cannot stop" by itself rather than by anybody having guessed right.
+ */
+static bool try_abort(adip_ctx_t *ctx)
+{
+    const adip_tool_t *running;
+    uint32_t id;
+    uint16_t which;
+
+    if (!ctx->busy || ctx->abort_fn == NULL) {
+        return false;
+    }
+    if (ctx->active_tool >= ctx->dev->tool_count) {
+        return false;
+    }
+
+    running = &ctx->dev->tools[ctx->active_tool];
+    if ((running->flags & ADIP_TOOL_F_ABORTABLE) == 0u) {
+        return false;
+    }
+
+    /* Copied before the handler runs. It is given the index and nothing else,
+     * and must not be able to change what is answered. */
+    id = ctx->active_id;
+    which = ctx->active_tool;
+
+    if (!ctx->abort_fn(which, ctx->user)) {
+        return false;
+    }
+
+    /* Only now. An operation reported aborted while its mechanism still moves
+     * is the one outcome this must never produce. */
+    ctx->busy = false;
+    ctx->stat_preempted++;
+    send_response(ctx, id, ADIP_OUTCOME_ABORTED, ADIP_REASON_NONE);
+    return true;
+}
+
 static void reject(adip_ctx_t *ctx, uint32_t id, adip_reason_t reason)
 {
     ctx->stat_rejected++;
@@ -641,10 +691,20 @@ static void dispatch(adip_ctx_t *ctx, const uint8_t *payload, size_t len)
 
     /*
      * 3. Busy, before validation. If something is already moving, the answer
-     *    is the same whatever the arguments say, and checking cheaply first
-     *    avoids doing work whose result cannot matter.
+     *    is usually the same whatever the arguments say, and checking cheaply
+     *    first avoids doing work whose result cannot matter.
+     *
+     *    UNLESS what is running may be cut short. `brew.start` is declared
+     *    `abortable` and a syrup dose is not, which is the manufacturer
+     *    saying that a coffee may be interrupted and a measured dose may not.
+     *    Honouring that is what makes a declared stop reachable: before this,
+     *    by the time there was something to stop, nothing could be sent.
+     *
+     *    The order matters. The mechanism is stopped and the old invocation
+     *    answered BEFORE the new one is validated, because the new one may
+     *    drive the same mechanism and must not start while the old is moving.
      */
-    if (ctx->busy) {
+    if (ctx->busy && !try_abort(ctx)) {
         reject(ctx, inv.invocation_id, ADIP_REASON_BUSY);
         return;
     }
@@ -789,6 +849,15 @@ adip_status_t adip_poll(adip_ctx_t *ctx)
         return ADIP_PENDING;
     }
 
+    return ADIP_OK;
+}
+
+adip_status_t adip_set_abort(adip_ctx_t *ctx, adip_abort_fn fn)
+{
+    if (ctx == NULL) {
+        return ADIP_ERR_ARG;
+    }
+    ctx->abort_fn = fn;
     return ADIP_OK;
 }
 

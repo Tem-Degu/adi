@@ -25,6 +25,7 @@ fn record(explanation: &str) -> DecisionRecord {
         inputs: Vec::new(),
         arguments: BTreeMap::new(),
         clamped_from: BTreeMap::new(),
+        style: None,
         explanation: explanation.into(),
     }
 }

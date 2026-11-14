@@ -213,7 +213,123 @@ pub enum Parameter {
     },
 }
 
+/// One action an operator may ask for by name. ADI-P 8.2.
+///
+/// Not everything an appliance does is a quantity. `brew.start` moves a number
+/// and a skill response can describe it, so the planner reaches it. Stopping,
+/// declaring a fresh cup and running a rinse move nothing: they have no
+/// parameters, a skill response requires one, so no response can exist and the
+/// planner can never select them. 8.2 nonetheless says a declared tool is
+/// invocable "when the operator names it", and this is the list of the ones
+/// that applies to.
+#[derive(Debug, Clone)]
+pub struct OperatorAction<'a> {
+    /// Position in this list. What a model is permitted to return, in place of
+    /// a tool name it is not: ADI-P 9.3 requirement 3.
+    pub index: usize,
+    pub tool: &'a SemanticId,
+    /// For the person and for the model. The tool's `name` where it declares
+    /// one, otherwise the last segment of its identifier.
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    /// Non-empty where the declaration flags a hazard, which 4.2 says informs
+    /// confirmation policy. A caller SHOULD confirm before performing one.
+    pub hazard: &'a [String],
+    /// The outcomes this action changes, which is how a caller tells a drink
+    /// from a procedure.
+    ///
+    /// Both can be hazardous and the hazard alone cannot separate them: every
+    /// drink this machine makes involves hot liquid. What separates them is
+    /// whether anything arrives. An action that delivers something is the thing
+    /// that was asked for; one that delivers nothing and carries a hazard is a
+    /// routine, and a routine is worth a question.
+    pub effects: &'a [VariableId],
+}
+
+impl Declaration {
+    /// The actions an operator may name, in declaration order.
+    ///
+    /// Two conditions, and the second is the safety of the whole mechanism.
+    ///
+    /// The tool must be declared for operator authority. And it must be
+    /// invocable **with no arguments at all**, meaning every parameter it
+    /// declares is optional.
+    ///
+    /// That second condition is what makes this path incapable of carrying a
+    /// value. Every argument sent is one the manufacturer declared as a
+    /// default, so a model choosing from this list cannot contribute a number
+    /// even if it tried: there is nowhere in the arm to put one, and nothing
+    /// here that would read it. A tool needing a magnitude is excluded, which
+    /// is correct, because deciding a magnitude is the deterministic engine's
+    /// job and 9.3 keeps it there.
+    ///
+    /// Optional, specifically, rather than merely defaulted. A parameter with a
+    /// default that is not marked optional is still required: `adip_validate.c`
+    /// tests only `ADIP_PARAM_F_OPTIONAL`, and an invocation missing such an
+    /// argument is refused - reported, confusingly, as a precondition failure.
+    /// Reading `default` here instead would build a list of actions the
+    /// appliance rejects.
+    pub fn operator_actions(&self) -> Vec<OperatorAction<'_>> {
+        self.tools
+            .iter()
+            .filter(|tool| {
+                tool.authority.contains(&Authority::Operator)
+                    && tool.parameters.values().all(Parameter::is_optional)
+            })
+            .enumerate()
+            .map(|(index, tool)| OperatorAction {
+                index,
+                tool: &tool.id,
+                name: tool.name.as_deref().unwrap_or_else(|| {
+                    tool.id.as_str().rsplit('.').next().unwrap_or(tool.id.as_str())
+                }),
+                description: tool.description.as_deref(),
+                hazard: &tool.hazard,
+                effects: &tool.effects,
+            })
+            .collect()
+    }
+
+    /// Vendor tools an operator may name that say nothing about what they do.
+    ///
+    /// The same rule as `Skill::undescribed_vendor_tools`, for the same stated
+    /// reason, applied to the other way a model reaches a tool.
+    ///
+    /// That rule is scoped to tools a skill makes selectable, because a
+    /// response is what lets the planner choose one. A namable action can
+    /// never have a response - having no parameter is the whole reason it is
+    /// namable - so the existing check structurally never covers it, and a
+    /// vendor action with no description was legal while being handed to a
+    /// model to pick from.
+    ///
+    /// A registry identifier is exempt because it means the same on every
+    /// machine and the profile supplies its text (4.2). A vendor identifier
+    /// means nothing to anyone: `x.acme.purge_3` as a bare word, in a numbered
+    /// list beside "stop", is a coin toss whose outcome is a physical act.
+    pub fn undescribed_named_actions(&self) -> Vec<String> {
+        let mut found: Vec<String> = self
+            .operator_actions()
+            .iter()
+            .filter(|action| action.tool.is_vendor() && action.description.is_none())
+            .map(|action| action.tool.0.clone())
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+}
+
 impl Parameter {
+    /// Whether an invocation may leave this parameter out.
+    pub fn is_optional(&self) -> bool {
+        match self {
+            Parameter::Number { optional, .. }
+            | Parameter::Integer { optional, .. }
+            | Parameter::Enum { optional, .. }
+            | Parameter::Object { optional, .. } => *optional,
+        }
+    }
+
     pub fn range(&self) -> Option<Range> {
         match self {
             Parameter::Number {

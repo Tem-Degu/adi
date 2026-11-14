@@ -320,23 +320,63 @@ fn present() -> BTreeMap<String, Quantity> {
 }
 
 /// The whole point of letting a model choose the number: it is still clamped.
-/// Position runs 0 to 60, so a model asking for 500 gets 60, and the record
-/// shows what was actually applied.
+/// Position runs 0 to 60, so a model asking for minus 500 gets 0, and the
+/// record shows what was actually applied.
+///
+/// The absurd value points DOWN rather than up, which it did not used to. The
+/// goal wants `cycle_time` four higher and the mechanism responds at -1.4, so
+/// position has to come down to serve it - and a model asking for 500 was
+/// asking for the opposite, which `moves_the_right_way` now refuses. Clamping
+/// is what this test is about, and 500 exercised it only by accident of
+/// pointing the wrong way; minus 500 exercises it against the floor instead,
+/// with the model and the goal wanting the same direction.
 #[test]
 fn a_model_supplied_value_is_still_clamped() {
     let d = declaration();
     let s = skill();
     let domain = TestDomain::new();
     let planner = Planner::new(&d, Some(&s), &domain);
-    let selector = ModelActionSelector::new(one(0, 500.0), &d).unwrap();
+    let selector = ModelActionSelector::new(one(0, -500.0), &d).unwrap();
 
     let corrections = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present())
         .expect("the plan should be accepted after clamping");
 
     assert_eq!(corrections.len(), 1);
-    assert_eq!(corrections[0].absolute.value, 60.0);
+    assert_eq!(corrections[0].absolute.value, 0.0);
     assert_eq!(corrections[0].absolute.unit, Unit::Step);
-    assert_eq!(corrections[0].delta.value, 30.0);
+    assert_eq!(corrections[0].delta.value, -30.0);
+}
+
+/// A correction that would move the outcome AWAY from the goal never leaves.
+///
+/// The goal wants `cycle_time` four higher; the mechanism responds at -1.4, so
+/// position must come DOWN from 30. A model asking for 500 is asking for the
+/// opposite, and clamping to the ceiling of 60 does not rescue it - 60 is
+/// further the wrong way than 30 was.
+///
+/// On Bob this was a cup holding 168 g after a cappuccino. Asked for a coffee,
+/// which the recipe puts at 110, the engine sized the brew at minus 61 ml,
+/// clamping lifted it to the brewer's floor of 15, and the machine brewed
+/// fifteen more millilitres into a cup that already held too much - then said
+/// it had been "asked for more than I could deliver".
+#[test]
+fn a_correction_pointing_away_from_the_goal_is_refused() {
+    let d = declaration();
+    let s = skill();
+    let domain = TestDomain::new();
+    let planner = Planner::new(&d, Some(&s), &domain);
+    let selector = ModelActionSelector::new(one(0, 500.0), &d).unwrap();
+
+    let err = adi_decision::decide(&planner, &selector, &goals(), &ctx(), &present())
+        .expect_err("raising position lowers cycle_time, and the goal wants it raised");
+
+    assert!(
+        matches!(
+            err,
+            DecisionError::CannotMoveThatWay { ref parameter, .. } if parameter == "position"
+        ),
+        "it should name the parameter that cannot get there: {err:?}"
+    );
 }
 
 /// A step mechanism cannot accept a fraction, whoever chose the number.

@@ -87,10 +87,46 @@ impl AutonomyLevel {
 /// needs it to turn "half of that one" into a number that can be checked later.
 /// A model given the request but not the history would be asked to interpret
 /// "last time" without being told what last time was.
+/// One exchange: what a person said, and everything the machine said back.
+///
+/// WHY THE MACHINE NEEDS THIS AT ALL. An engine supplies a model with one
+/// utterance and its own decision records, and the records are the governed
+/// memory - what was done, with every figure attributed. What they are not is
+/// a conversation. "Another one", "the second one", "a bit stronger than
+/// that" and "no, not that" all point backwards at something said, and a
+/// record of a brew and a number of millilitres is a poor substitute for it.
+///
+/// Both of the machine's own sides are kept, including the explanations it
+/// gave. A person's next sentence answers what the machine actually said to
+/// them, so leaving half the exchange out would make the half that remains
+/// harder to read rather than safer.
+///
+/// WHAT THIS IS NOT. It is not a source of values. A quantity comes from a
+/// style, a skill response or the declared envelope, every one of them
+/// validated, and nothing a model reads here can change that: the schema it
+/// answers in carries targets only on declared variables, each clamped. Where
+/// a remembered sentence and a decision record disagree, the record is what
+/// happened. These lines help work out WHICH declared thing is meant, and
+/// never WHAT it should be set to.
+#[derive(Debug, Clone, Default)]
+pub struct Turn {
+    /// What the person said.
+    pub said: String,
+    /// Everything the machine said back, in the order it said it.
+    pub replies: Vec<String>,
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct SelectionContext<'a> {
     /// Earlier decisions on this machine, most recent first.
     pub history: &'a [DecisionRecord],
+
+    /// The last few exchanges, OLDEST FIRST, so they read as a conversation.
+    ///
+    /// The opposite order from `history`, which is most recent first because
+    /// nothing reads it as prose. Empty where an engine keeps none, which is
+    /// every path that is not a person talking to the machine.
+    pub recent: &'a [Turn],
     /// The cycle just observed, where there was one. A request that arrives
     /// before anything has run has none.
     pub cycle: Option<&'a Cycle>,
@@ -151,7 +187,16 @@ impl<'a> SelectionContext<'a> {
             settings: None,
             measured: None,
             rejected: None,
+            // None by default. A caller holding a conversation sets the field
+            // directly; this constructor serves the paths that hold none.
+            recent: &[],
         }
+    }
+
+    /// The same context, carrying the exchanges before this one.
+    pub fn with_conversation(mut self, recent: &'a [Turn]) -> Self {
+        self.recent = recent;
+        self
     }
 
     /// The same context, carrying why the previous answer was refused.
@@ -225,6 +270,15 @@ pub enum DecisionError {
     EmptyPlan,
     #[error("no goal was given, so there is nothing to plan")]
     NoGoals,
+    /// Not one of the outcomes asked for can be reached on this machine.
+    ///
+    /// Distinct from having no candidate for SOME goal, which is ordinary: a
+    /// base domain profile describes a class of machine and names outcomes a
+    /// given one may not control. That case plans what it can. This is the
+    /// case where nothing is left to plan.
+    #[error("nothing this machine declares can move '{0}'")]
+    NothingCanServe(String),
+
     #[error("two goals both name '{0}'; a plan cannot pursue one variable twice")]
     DuplicateGoal(String),
     #[error("steps '{first}' and '{second}' both move '{variable}' in one iteration")]
@@ -562,6 +616,51 @@ pub enum Understood {
         #[serde(default)]
         drew_on: Vec<String>,
     },
+    /// The person named one of the machine's own declared actions.
+    ///
+    /// The arm that exists because not everything a machine does is a quantity.
+    /// An intent moves an outcome towards a number, which is the right shape
+    /// for a dial and no shape at all for a switch: stopping, declaring a fresh
+    /// cup, running a rinse. Those are declared tools with no parameters, so
+    /// no skill response can describe them, so the planner can never select
+    /// one. Before this arm they were invocable in principle under ADI-P 8.2
+    /// and reachable by nothing, and a request for one came back as an
+    /// `Answer` - the machine saying it had done something it had not.
+    ///
+    /// **An index, never a name.** ADI-P 9.3 requirement 3 forbids a model
+    /// naming a tool by string, and this obeys it the same way selection at D2
+    /// does: the engine derives a numbered list from the declaration, offers
+    /// it with the request, and the model returns a position in it. The engine
+    /// resolves the position immediately and nothing stores it, because an
+    /// index is only meaningful against the list it came from and tool order
+    /// changes when a declaration does.
+    ///
+    /// Safe by construction in one further respect: a tool reaches that list
+    /// only if it can be invoked with no arguments at all. Every value sent is
+    /// therefore the manufacturer's own declared default, and this path has
+    /// nowhere to put a number even if a model tried to supply one.
+    ///
+    /// The payload is the position in that list, so the wire form is
+    /// `{"action": 1}` and carries nothing else. A model has one number to
+    /// return and no field to put anything else in.
+    Action(usize),
+
+    /// Several named actions, in the order they should happen.
+    ///
+    /// `Action` can only say one thing, so "rinse the milk and then make a
+    /// cappuccino" could not be said at all: two of the machine's own products
+    /// in one breath, and one slot to put them in.
+    ///
+    /// Indices, for the same reason as `Action`: ADI-P 9.3 requirement 3
+    /// forbids a model naming a tool by string, and these are positions in the
+    /// list the engine derived from the declaration. Nothing opens up by
+    /// allowing several - each is carried out on its own, through the envelope
+    /// and with its own record, exactly as a single one is.
+    ///
+    /// THE ORDER IS THE SEQUENCE. That is the whole point of the variant; a set
+    /// would be no more use than one index at a time. The wire form is
+    /// `{"actions": [7, 0]}`.
+    Actions(Vec<usize>),
 }
 
 /// Work out what a person wants. **This is the model.**
@@ -596,6 +695,52 @@ pub trait Interpreter {
         utterance: &str,
         context: &SelectionContext<'_>,
     ) -> Result<Understood, DecisionError>;
+
+    /// The decision, together with whatever the model offered to say while it
+    /// is carried out.
+    ///
+    /// Defaulted, so an interpreter that has nothing to say needs to know
+    /// nothing about this. A backend that can speak overrides it, and
+    /// implements `interpret` by discarding the words.
+    fn reply(
+        &self,
+        utterance: &str,
+        context: &SelectionContext<'_>,
+    ) -> Result<Reply, DecisionError> {
+        Ok(Reply {
+            understood: self.interpret(utterance, context)?,
+            say: None,
+        })
+    }
+}
+
+/// What a model returned: a decision, and optionally a sentence to say while
+/// it happens.
+///
+/// WHY THE WORDS SIT BESIDE THE DECISION AND NOT INSIDE IT.
+///
+/// `Intent` lives in `adi-protocol`, which holds the governed types - the ones
+/// a value reaching an actuator has to pass through. Free text has no business
+/// there. And `Understood::Action` is deliberately a bare index on the wire,
+/// so that a model naming an action has nowhere to put a magnitude: ADI-P 9.3
+/// requirement 3, and there is a test holding it to that shape.
+///
+/// So `say` is a sibling of the decision rather than part of it. On the wire
+/// that is `{"action": 2, "say": "Cappuccino, coming right up."}` - the
+/// decision unchanged, with one optional string beside it.
+///
+/// WHY IT IS SAFE. Nothing parses it. It is spoken and discarded, so it cannot
+/// carry a tool name, a quantity, or anything else into the actuation path.
+/// The asymmetry ADI-P 9.4.3 already states for `Answer` applies here too:
+/// text going to a person is checked by nobody, which is why the engine speaks
+/// it only once the appliance has accepted, and says refusals in its own
+/// words.
+#[derive(Debug, Clone)]
+pub struct Reply {
+    pub understood: Understood,
+    /// Absent where the model offered nothing, which every interpreter without
+    /// a voice does.
+    pub say: Option<String>,
 }
 
 /// The interpreter on a build with no model. Refuses, and says why.
@@ -620,6 +765,14 @@ impl<P: Interpreter + ?Sized> Interpreter for &P {
     ) -> Result<Understood, DecisionError> {
         (**self).interpret(utterance, context)
     }
+
+    fn reply(
+        &self,
+        utterance: &str,
+        context: &SelectionContext<'_>,
+    ) -> Result<Reply, DecisionError> {
+        (**self).reply(utterance, context)
+    }
 }
 
 impl<P: Interpreter + ?Sized> Interpreter for Box<P> {
@@ -629,6 +782,15 @@ impl<P: Interpreter + ?Sized> Interpreter for Box<P> {
         context: &SelectionContext<'_>,
     ) -> Result<Understood, DecisionError> {
         (**self).interpret(utterance, context)
+    }
+
+    /// Forwarded, or a boxed interpreter loses its voice without saying so.
+    fn reply(
+        &self,
+        utterance: &str,
+        context: &SelectionContext<'_>,
+    ) -> Result<Reply, DecisionError> {
+        (**self).reply(utterance, context)
     }
 }
 
@@ -737,6 +899,46 @@ fn attempt(
     current: &std::collections::BTreeMap<String, Quantity>,
 ) -> Result<Vec<Correction>, DecisionError> {
     check_goals(goals)?;
+
+    // Goals this machine can do nothing about are set aside before planning.
+    //
+    // WHY. A base domain profile describes a CLASS of machine, not one
+    // machine. The espresso profile asks for a shot time, because a machine
+    // with a paddle can be told to brew for twenty seven seconds. A
+    // superautomatic cannot: you give it a volume and it decides the time, and
+    // such a declaration honestly claims no tool that moves `shot_time`.
+    //
+    // Leaving the goal in made every request resolving to that style
+    // unservable. The selector is asked for one choice per goal, so with
+    // nothing able to serve one a model must either pick a tool that does not
+    // fit - two steps then move the same variable and the whole plan is
+    // refused - or return nothing, which abandons the servable goals too. A
+    // person asking for an espresso got neither an espresso nor a reason.
+    //
+    // So the engine decides this rather than the model: a goal with no
+    // candidate is not a choice to be made, it is a fact about the
+    // declaration. What can be done is done; a request that can do nothing at
+    // all says so.
+    let mut servable: Vec<Goal> = Vec::with_capacity(goals.len());
+    let mut unservable: Vec<String> = Vec::new();
+    for goal in goals {
+        match goal.target_variable.as_ref() {
+            Some(variable) if !planner.candidates(variable).is_empty() => {
+                servable.push(goal.clone());
+            }
+            Some(variable) => unservable.push(variable.0.clone()),
+            // No target variable at all is not an unservable goal; it is a
+            // diagnosis with nothing to aim at, and check_goals has already
+            // had its say about those.
+            None => servable.push(goal.clone()),
+        }
+    }
+
+    if servable.is_empty() {
+        return Err(DecisionError::NothingCanServe(unservable.join(", ")));
+    }
+
+    let goals = servable.as_slice();
     let variables: Vec<VariableId> = goals
         .iter()
         .filter_map(|g| g.target_variable.clone())

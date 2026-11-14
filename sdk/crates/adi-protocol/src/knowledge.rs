@@ -309,6 +309,15 @@ impl ResolvedTargets {
         Self::default()
     }
 
+    /// Every variable a constraint applies to.
+    ///
+    /// The map stays private; a caller that needs to offer the set rather than
+    /// look one up gets the names. A learned preference may only narrow a
+    /// range that exists, so the ranges that exist are what it works inside.
+    pub fn variables(&self) -> Vec<&str> {
+        self.entries.keys().map(String::as_str).collect()
+    }
+
     /// Apply one layer's contribution. Returns an error if the layer widens an
     /// existing range or changes its unit.
     pub fn apply(
@@ -375,6 +384,70 @@ impl ResolvedTargets {
     ///
     /// Disjoint is still an error: there is no value that satisfies both, and
     /// silently picking one would make the machine claim a target nobody set.
+    /// Narrow a target band by a limit, without asking which is wider.
+    ///
+    /// The sibling of [`ResolvedTargets::apply`], and the difference is the
+    /// whole point. `apply` enforces ADI-P 6.4: a higher LAYER may only narrow
+    /// a lower one, and one that widens is rejected rather than corrected.
+    /// That is how a learned preference is prevented from loosening what a
+    /// manufacturer declared.
+    ///
+    /// A constraint meeting a style's target band is not that situation. The
+    /// band says what the drink should be; the constraint says what this
+    /// machine or this person allows. Neither is a layer above the other, and
+    /// asking whether a recipe "widens" a preference has no answer. They are
+    /// simply intersected: a recipe wanting 90-96 C and someone who likes it
+    /// at 93 or above agree on 93-96.
+    ///
+    /// A limit on something the style never mentions is recorded as it stands,
+    /// so a constraint can still introduce a variable the recipe is silent
+    /// about.
+    ///
+    /// The one real failure is a limit and a band that do not overlap at all -
+    /// someone who will only drink it above 99 C on a machine whose recipe
+    /// tops out at 96. That is `Incompatible`, and it is reported rather than
+    /// resolved, because there is no value that satisfies both.
+    pub fn clip(
+        &mut self,
+        key: &str,
+        range: Range,
+        layer: Layer,
+    ) -> Result<(), MonotonicityError> {
+        let Some(existing) = self.entries.get(key) else {
+            self.entries
+                .insert(key.to_string(), Attributed::new(range, layer));
+            return Ok(());
+        };
+
+        if existing.value.unit != range.unit {
+            return Err(MonotonicityError::UnitMismatch {
+                key: key.to_string(),
+                layer,
+                expected: existing.value.unit,
+                found: range.unit,
+            });
+        }
+
+        let narrowed = existing.value.intersect(&range).ok_or_else(|| {
+            MonotonicityError::Incompatible {
+                key: key.to_string(),
+                layer,
+            }
+        })?;
+
+        // Attribution follows whichever actually decided the effective band,
+        // because ADI-P 9.3 asks which layer produced the value in force, not
+        // which one was consulted last. A limit that changed nothing leaves
+        // the recipe's own attribution alone.
+        let unchanged =
+            narrowed.min == existing.value.min && narrowed.max == existing.value.max;
+        let attributed_to = if unchanged { existing.layer } else { layer };
+
+        self.entries
+            .insert(key.to_string(), Attributed::new(narrowed, attributed_to));
+        Ok(())
+    }
+
     pub fn narrow_to(
         &mut self,
         key: &str,
@@ -626,6 +699,16 @@ pub struct Resolution {
     pub style: String,
     pub material: Option<String>,
     pub targets: ResolvedTargets,
+    /// Only what the style itself declares, before the profile's quality
+    /// constraints are folded into `targets`.
+    ///
+    /// The two are different kinds of thing and only look alike. A constraint
+    /// says "never outside this"; a style target says "aim for this". Judging
+    /// a finished cycle wants both, which is what `targets` is for. Deciding
+    /// what to make wants only the second: seeding a goal from a constraint
+    /// has the engine trying to drive a variable to the middle of a band it
+    /// was only ever meant to stay inside.
+    pub style_targets: BTreeMap<String, Attributed<Range>>,
     /// Additive corrections from the material prior, for example a starting
     /// offset that puts a new batch near the mark instead of at the last one.
     pub offsets: BTreeMap<String, Attributed<f64>>,
@@ -800,10 +883,70 @@ impl Knowledge {
             }
         }
 
-        // Layering: intersection, broad to narrow.
-        let mut targets = self.constraints.clone();
+        let style_targets = inherited
+            .iter()
+            .map(|(key, (range, layer))| {
+                (key.clone(), Attributed::new(range.clone(), *layer))
+            })
+            .collect();
+
+        // Layering: the style's bands first, then constraints CLIP them.
+        //
+        // WHY THE ORDER MATTERS, AND WHY IT IS NOT THE MONOTONIC RULE.
+        //
+        // This used to start from `self.constraints` and apply the style's
+        // targets on top, through `apply`, which rejects any incoming range
+        // wider than what is already in force. That is right for ADI-P 6.4,
+        // where a higher LAYER may only narrow a lower one. A style's target
+        // band is not a layer: it is what the drink should be, and a
+        // constraint is a limit on what this machine or this person will
+        // allow. Putting them through the same test asks whether a recipe
+        // "widens" a preference, which is not a meaningful question.
+        //
+        // What it cost. A learned preference of 93-98 C, applied first, made
+        // the base espresso style's 90-96 C look like a widening, so resolving
+        // that style failed outright and the machine could not make an
+        // espresso at all. Every drink whose recipe reached below 93 broke the
+        // moment a preference for hot coffee was recorded - the machine got
+        // worse the more it learned, and the error named the Base layer, which
+        // is the one layer that cannot widen anything.
+        //
+        // The fix is narrower than "stop testing monotonicity", which was the
+        // first attempt and broke a test that was right: a style reaching
+        // outside the MACHINE'S limits is a declaration fault and must still
+        // be reported, because the envelope is what the hardware can actually
+        // hold. What changed is only the USER layer. A manufacturer's limit
+        // bounds what a recipe may ask for; a person's preference chooses
+        // within what the recipe asks. The two are not the same kind of thing
+        // and only one of them can invalidate a recipe.
+        //
+        // The learning limit is untouched: composing the layers still runs
+        // constraint against constraint through `apply`, so a user layer may
+        // not widen what the manufacturer declared. Only the
+        // recipe-against-preference comparison changed.
+        // The machine's own limits first, so a recipe reaching outside what the
+        // hardware can hold is still rejected: that is a declaration fault and
+        // `a_style_reaching_outside_its_constraint_is_reported` holds it to it.
+        let mut targets = ResolvedTargets::default();
+        for (key, existing) in self.constraints.iter() {
+            if existing.layer != Layer::User {
+                targets.apply(key, existing.value.clone(), existing.layer)?;
+            }
+        }
         for (key, (range, layer)) in inherited {
             targets.apply(&key, range, layer)?;
+        }
+
+        // Then what this PERSON prefers, which clips rather than contradicts.
+        //
+        // A preference is not an envelope. Someone who likes their coffee at
+        // 93 C or above has not declared the machine incapable of 90, and a
+        // recipe asking for 90-96 is not in conflict with them - they agree on
+        // 93-96, which is the band to aim at.
+        for (key, existing) in self.constraints.iter() {
+            if existing.layer == Layer::User {
+                targets.clip(key, existing.value.clone(), existing.layer)?;
+            }
         }
 
         let mut offsets = BTreeMap::new();
@@ -825,6 +968,7 @@ impl Knowledge {
             style: style_id.to_string(),
             material: material_id.map(str::to_string),
             targets,
+            style_targets,
             offsets,
         })
     }
@@ -888,6 +1032,15 @@ impl Knowledge {
     /// The effective hard constraint, already intersected across every layer.
     pub fn constraint(&self, variable: &str) -> Option<&Attributed<Range>> {
         self.constraints.get(variable)
+    }
+
+    /// Every variable a hard constraint applies to.
+    ///
+    /// For a caller that needs to offer them rather than look one up - a
+    /// learned preference may only narrow a range that exists, so the set of
+    /// ranges that exist is what it has to work inside.
+    pub fn constrained_variables(&self) -> Vec<&str> {
+        self.constraints.variables()
     }
 
     /// Whether a variable expresses taste rather than process. The engine must

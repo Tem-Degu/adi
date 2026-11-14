@@ -357,6 +357,7 @@ fn a_request_becomes_a_diagnosis_the_planner_understands() {
         Quantity::new(4.0, Unit::Ml),
         Some(Quantity::new(8.0, Unit::Ml)),
         k,
+        request::Asked::Stated,
     );
     assert_eq!(taste.cause, "preference_adjustment");
     assert_eq!(taste.desired_delta, Some(-4.0));
@@ -370,6 +371,7 @@ fn a_request_becomes_a_diagnosis_the_planner_understands() {
         Quantity::new(30.0, Unit::S),
         Some(Quantity::new(25.0, Unit::S)),
         k,
+        request::Asked::Stated,
     );
     assert_eq!(process.cause, "requested_change");
 }
@@ -391,4 +393,47 @@ fn memory_keeps_the_most_recent_first_and_is_bounded() {
     assert_eq!(m.last().unwrap().cycle_id, "c");
     assert!(m.get("a").is_none());
     assert_eq!(m.recent(5).len(), 2);
+}
+
+/// The record says who asked, because the seams that read it believe it.
+///
+/// A `Produce` request resolves a style, and the style's own figures used to be
+/// written down as "asked for X to be Y" - indistinguishable from a person
+/// saying it. The learner read that, concluded a preference had been stated,
+/// and wrote one to disk on the first interaction.
+#[test]
+fn a_recipe_figure_is_not_recorded_as_something_a_person_asked_for() {
+    let domain = TestDomain::new();
+    let k = domain.knowledge();
+
+    let stated = request::as_diagnosis(
+        &VariableId::from("cycle_time"),
+        Quantity::new(30.0, Unit::S),
+        Some(Quantity::new(25.0, Unit::S)),
+        k,
+        request::Asked::Stated,
+    );
+    assert!(
+        stated.explanation.starts_with("asked for"),
+        "a stated target reads as a request: {}",
+        stated.explanation
+    );
+
+    let from_recipe = request::as_diagnosis(
+        &VariableId::from("cycle_time"),
+        Quantity::new(30.0, Unit::S),
+        Some(Quantity::new(25.0, Unit::S)),
+        k,
+        request::Asked::Recipe,
+    );
+    assert!(
+        from_recipe.explanation.starts_with("the recipe"),
+        "a recipe figure says so: {}",
+        from_recipe.explanation
+    );
+    assert!(
+        !from_recipe.explanation.contains("asked for"),
+        "and never claims anybody asked: {}",
+        from_recipe.explanation
+    );
 }

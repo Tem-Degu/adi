@@ -20,6 +20,8 @@
 *~
 .DS_Store
 .claude/settings.local.json
+BOB-ASSEMBLY.md
+BOB-TODO.md
 BUILD-GUIDE.md
 CONTEXT.md
 DEMO-BUILD.md
@@ -41,3 +43,19 @@ uae-investor-targets.txt
 
 # Written by `say` in an interactive session, not source.
 sdk/spoken.wav
+
+# ---------------------------------------------------------------- secrets
+# API keys for hosted model backends. The engine reads these from the
+# environment; nothing in this repository should ever contain one.
+.env
+.env.*
+*.key
+secrets/
+
+# Throwaway stubs and configs used while testing against a real machine.
+.scratch/
+
+# CMake build trees for the firmware, including the picotool clone it fetches.
+sdk/machines/*/firmware/build/
+# Host-built test binaries that sit beside their source.
+*.exe

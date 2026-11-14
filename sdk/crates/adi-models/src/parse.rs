@@ -43,6 +43,63 @@ pub fn understood(raw: &str) -> Result<Understood, ModelError> {
     })
 }
 
+/// The same reply, with the sentence the model offered beside the decision.
+///
+/// Parsed by flattening, so `say` is a sibling of the arm rather than a field
+/// inside it: `{"action": 2, "say": "..."}`. That keeps `Understood` exactly
+/// the shape ADI-P 9.3 requirement 3 constrains it to, and keeps free text out
+/// of the governed types.
+pub fn reply(raw: &str) -> Result<adi_decision::Reply, ModelError> {
+    #[derive(serde::Deserialize)]
+    struct Wire {
+        #[serde(flatten)]
+        understood: Understood,
+        #[serde(default)]
+        say: Option<String>,
+    }
+
+    let candidate = extract(raw).ok_or_else(|| {
+        ModelError::Backend(format!(
+            "no JSON object in the reply: {}",
+            truncate(raw.trim(), 200)
+        ))
+    })?;
+
+    let wire: Wire = serde_json::from_str(candidate).map_err(|e| {
+        ModelError::Backend(format!(
+            "the reply is not a valid answer: {e}; got {}",
+            truncate(candidate, 200)
+        ))
+    })?;
+
+    Ok(adi_decision::Reply {
+        understood: wire.understood,
+        // Blank is nothing. A model that returns "" has not offered a
+        // sentence, and speaking an empty string is a pause for no reason.
+        say: wire.say.filter(|s| !s.trim().is_empty()),
+    })
+}
+
+/// Any JSON object a program returned, decoded into a caller's type.
+///
+/// Same tolerance as the others about where the object begins and ends,
+/// because a program wrapping a model will often return it fenced or prefaced.
+pub fn json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, ModelError> {
+    let candidate = extract(raw).ok_or_else(|| {
+        ModelError::Backend(format!(
+            "no JSON object in the reply: {}",
+            truncate(raw.trim(), 200)
+        ))
+    })?;
+
+    serde_json::from_str(candidate).map_err(|e| {
+        ModelError::Backend(format!(
+            "the reply is not the expected shape: {e}; got {}",
+            truncate(candidate, 200)
+        ))
+    })
+}
+
 /// Find the outermost JSON object in a string.
 ///
 /// Brace counting rather than a regular expression, because the object nests

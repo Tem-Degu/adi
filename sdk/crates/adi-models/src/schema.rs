@@ -170,7 +170,27 @@ If the person asked a question rather than requesting anything, answer it:
 Answer only from what is given above. Where it does not cover the question, say
 so instead of supplying something plausible. List in drew_on the notes you used.
 
-Name only the styles, materials and variables given above.";
+Where the person asked for one of the machine's own listed actions rather than
+for an outcome, name it by its number:
+  {\"action\": <number from the actions listed above>}
+
+Those are the things the machine does that are not quantities: stopping what is
+pouring, declaring a fresh container, running a rinse. They take no value, so
+give none; there is no field for one. Use this only where an action listed above
+is what was asked for, and prefer an intent wherever the request is about how
+much of something.
+
+Name only the styles, materials and variables given above.
+
+Where you return an intent or an action, you MAY add a short sentence to say
+out loud while it is carried out:
+
+  {\"action\": 3, \"say\": \"Cappuccino, coming right up.\"}
+
+Acknowledge what was asked for, in one short friendly sentence. Do NOT state
+any quantity, setting or result: you do not know what the machine will choose,
+and this is spoken before anything has happened. Do not promise that it
+worked. Leave it out entirely if nothing needs saying.";
 
 /// A variable as a narrowed schema needs it: its name, and its unit if it has
 /// one.
@@ -201,6 +221,7 @@ pub fn narrowed_schema(
     styles: &[String],
     materials: &[String],
     variables: &[SchemaVariable<'_>],
+    actions: usize,
 ) -> serde_json::Value {
     use serde_json::json;
 
@@ -270,13 +291,16 @@ pub fn narrowed_schema(
         );
     }
 
-    json!({
+    let mut schema = json!({
         "oneOf": [
             {
                 "type": "object",
                 "required": ["intent"],
                 "additionalProperties": false,
                 "properties": {
+                    // Beside the intent, never inside it. `Intent` is a
+                    // governed type and free text has no business in one.
+                    "say": { "type": "string" },
                     "intent": {
                         "type": "object",
                         "required": ["kind"],
@@ -318,7 +342,68 @@ pub fn narrowed_schema(
                 },
             },
         ]
-    })
+    });
+
+    // The fourth arm, for a declared action an operator named. ADI-P 8.2.
+    //
+    // An index into the list the engine supplied, and nothing else: 9.3
+    // requirement 3 forbids a model naming a tool by string, and this obeys it
+    // exactly as `selection_schema` does. There is no sibling field, so there
+    // is nowhere to put a magnitude even by accident.
+    //
+    // Appended rather than inserted, so the position of every existing arm is
+    // unchanged for anything reading the schema by index.
+    //
+    // Omitted entirely where the machine declares no namable action. An empty
+    // enum is satisfiable by no value at all, which no grammar can encode, and
+    // an arm a model can never legally fill is worse than no arm.
+    if actions > 0 {
+        schema["oneOf"]
+            .as_array_mut()
+            .expect("the schema is built here with oneOf as an array")
+            .push(json!({
+                "type": "object",
+                "required": ["action"],
+                "additionalProperties": false,
+                "properties": {
+                    "action": { "enum": (0..actions).collect::<Vec<_>>() },
+                    // Beside the index, never inside it. The index stays the
+                    // only thing that decides anything; this is what the
+                    // machine says while it does it.
+                    "say": { "type": "string" }
+                },
+            }));
+
+        // And a sequence of them, in the order they should happen.
+        //
+        // "Rinse the milk and then make a cappuccino" is two of the machine's
+        // own products in one breath, and the arm above has one slot. Each
+        // entry is still a position in the list the engine derived, so nothing
+        // opens up: ADI-P 9.3 requirement 3 is about a model not naming a tool
+        // by string, and an array of indices names none.
+        schema
+            .get_mut("oneOf")
+            .and_then(|one_of| one_of.as_array_mut())
+            .expect("the schema is built here with oneOf as an array")
+            .push(json!({
+                "type": "object",
+                "required": ["actions"],
+                "additionalProperties": false,
+                "properties": {
+                    "actions": {
+                        "type": "array",
+                        // Two, because one is the arm above. Offering an array
+                        // of one as well would give a model two ways to say
+                        // the same thing and no reason to prefer either.
+                        "minItems": 2,
+                        "items": { "enum": (0..actions).collect::<Vec<_>>() }
+                    },
+                    "say": { "type": "string" }
+                },
+            }));
+    }
+
+    schema
 }
 
 /// The shape of a selection, narrowed to the candidates offered and the level.
@@ -381,6 +466,181 @@ mod tests {
         serde_json::from_str(&json).expect("and comes back")
     }
 
+    /// One number on the wire, and no room for anything else.
+    #[test]
+    fn a_sequence_of_actions_is_a_list_of_indices() {
+        let json = serde_json::to_string(&Understood::Actions(vec![7, 0]))
+            .expect("serialises");
+        assert_eq!(json, r#"{"actions":[7,0]}"#);
+        assert!(matches!(
+            round_trip(&Understood::Actions(vec![7, 0])),
+            Understood::Actions(ref a) if a == &[7, 0]
+        ));
+    }
+
+    #[test]
+    fn the_sequence_arm_takes_two_or_more_offered_indices() {
+        let schema = narrowed_schema(&[], &[], &[], 3);
+        let arm = schema["oneOf"]
+            .as_array()
+            .expect("oneOf")
+            .iter()
+            .find(|arm| arm["required"] == serde_json::json!(["actions"]))
+            .expect("a sequence arm is offered");
+
+        // Two, because one index is the single-action arm. An array of one
+        // would be a second way to say the same thing.
+        assert_eq!(arm["properties"]["actions"]["minItems"], 2);
+
+        // Still indices into the engine's own list, which is what ADI-P 9.3
+        // requirement 3 is about: a model names no tool by string here.
+        assert_eq!(
+            arm["properties"]["actions"]["items"]["enum"],
+            serde_json::json!([0, 1, 2])
+        );
+
+        let mut fields: Vec<&str> = arm["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        fields.sort_unstable();
+        assert_eq!(
+            fields,
+            ["actions", "say"],
+            "a sequence and a sentence, and nothing else to put a value in"
+        );
+    }
+
+    #[test]
+    fn a_named_action_is_a_bare_index_on_the_wire() {
+        let json = serde_json::to_string(&Understood::Action(2)).expect("serialises");
+        assert_eq!(json, r#"{"action":2}"#);
+        assert!(matches!(round_trip(&Understood::Action(2)), Understood::Action(2)));
+    }
+
+    /// ADI-P 9.3 requirement 3. The arm carries an index, and words that are
+    /// only ever spoken - so a model has nowhere to put a magnitude even if it
+    /// produced one, and cannot name a tool the engine did not offer.
+    ///
+    /// This asserted ONE property until `say` was added. The number was never
+    /// the point: what requirement 3 asks is that nothing in the arm can reach
+    /// an actuator, and a string that is spoken and discarded cannot. So the
+    /// test now names both fields exactly, which is a tighter check than
+    /// counting them - a count of two would pass if someone added `volume`.
+    #[test]
+    fn the_action_arm_permits_an_offered_index_and_a_sentence() {
+        let schema = narrowed_schema(&[], &[], &[], 3);
+        // Found by what it requires, not by where it sits. This read `.last()`
+        // and broke the moment a second action arm was appended after it -
+        // a test of the arm order rather than of the arm.
+        let arm = schema["oneOf"]
+            .as_array()
+            .expect("arms")
+            .iter()
+            .find(|arm| arm["required"] == serde_json::json!(["action"]))
+            .expect("the single-action arm is offered");
+
+        assert_eq!(arm["properties"]["action"]["enum"], serde_json::json!([0, 1, 2]));
+        assert_eq!(arm["additionalProperties"], serde_json::json!(false));
+
+        // By name, not by count. These two and nothing else, ever.
+        let mut permitted: Vec<&String> = arm["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .collect();
+        permitted.sort();
+        assert_eq!(
+            permitted,
+            vec!["action", "say"],
+            "the arm carries an index and a sentence; anything else could reach an actuator"
+        );
+
+        // And the sentence is a string, so it cannot be a number wearing a
+        // different name.
+        assert_eq!(arm["properties"]["say"]["type"], serde_json::json!("string"));
+    }
+
+    /// The sentence is a sibling of the decision, never inside it.
+    ///
+    /// `Understood` is what the engine acts on, and `say` is not part of it.
+    /// Keeping them apart is what makes the string safe: it is parsed by a
+    /// wrapper, spoken, and dropped, and the governed types never see it.
+    #[test]
+    fn what_is_spoken_is_not_part_of_the_decision() {
+        let json = serde_json::to_string(&Understood::Action(2)).expect("serialises");
+        assert_eq!(
+            json, r#"{"action":2}"#,
+            "the decision serialises without a trace of the words"
+        );
+
+        // A reply carrying both parses into a decision that is still just an
+        // index, with the sentence beside it.
+        let reply = crate::parse::reply(r#"{"action": 2, "say": "Coming right up."}"#)
+            .expect("a decision with a sentence beside it is valid");
+        assert!(matches!(reply.understood, Understood::Action(2)));
+        assert_eq!(reply.say.as_deref(), Some("Coming right up."));
+
+        // And a blank sentence is no sentence, rather than a pause.
+        let quiet = crate::parse::reply(r#"{"action": 1, "say": "   "}"#).expect("valid");
+        assert_eq!(quiet.say, None);
+    }
+
+    /// Appended, so nothing reading an earlier arm by position moves.
+    #[test]
+    fn adding_the_action_arm_does_not_move_the_others() {
+        let with = narrowed_schema(&[], &[], &[], 2);
+        let without = narrowed_schema(&[], &[], &[], 0);
+        let with = with["oneOf"].as_array().expect("arms");
+        let without = without["oneOf"].as_array().expect("arms");
+
+        // Two arms are added for a machine with namable actions: one index,
+        // and a sequence of them.
+        assert_eq!(without.len(), 3);
+        assert_eq!(with.len(), 5);
+        assert_eq!(
+            &with[..3],
+            &without[..],
+            "the arms that were there are untouched and in the same places"
+        );
+    }
+
+    /// A machine declaring no namable action gets no arm for one.
+    ///
+    /// An empty enum is satisfiable by nothing at all, which no grammar can
+    /// encode, and an arm a model may never legally fill is worse than its
+    /// absence. `selection_schema` has the same problem and falls back to a
+    /// plain integer; here the honest answer is that the arm does not apply.
+    #[test]
+    fn a_machine_with_no_named_actions_is_offered_no_arm() {
+        let schema = narrowed_schema(&[], &[], &[], 0);
+        let arms = schema["oneOf"].as_array().expect("arms");
+
+        assert_eq!(arms.len(), 3);
+        for arm in arms {
+            assert!(
+                arm["properties"].get("action").is_none(),
+                "no arm should offer an action here"
+            );
+        }
+    }
+
+    /// The instruction has to describe the arm, or a model constrained to a
+    /// schema it was never told about answers with a clarification instead.
+    #[test]
+    fn the_instruction_describes_a_named_action() {
+        assert!(
+            OUTPUT_INSTRUCTION.contains(r#"{"action": <number from the actions listed above>}"#),
+            "the instruction must show the shape of a named action"
+        );
+        assert!(
+            OUTPUT_INSTRUCTION.to_lowercase().contains("take no value"),
+            "and must say it carries no value"
+        );
+    }
+
     /// ADI-P 9.4 is normative: a relative target MUST be resolved by the
     /// engine and not by the model, because a model required to emit a number
     /// would have to be trusted to remember correctly and to divide correctly,
@@ -408,7 +668,7 @@ mod tests {
     /// runs, because the decoder forbids the characters.
     #[test]
     fn a_narrowed_schema_still_permits_an_answer() {
-        let schema = narrowed_schema(&[], &[], &[]);
+        let schema = narrowed_schema(&[], &[], &[], 0);
         let arms = schema["oneOf"].as_array().expect("arms");
 
         for arm in ["intent", "clarify", "answer"] {
@@ -424,7 +684,7 @@ mod tests {
     #[test]
     fn a_declared_style_becomes_the_only_one_namable() {
         let styles = ["adi.example.style.standard".to_string()];
-        let schema = narrowed_schema(&styles, &[], &[]);
+        let schema = narrowed_schema(&styles, &[], &[], 0);
         let intent = &schema["oneOf"][0]["properties"]["intent"]["properties"];
 
         assert_eq!(
@@ -438,7 +698,7 @@ mod tests {
     /// no styles must not be given an empty list of them to choose from.
     #[test]
     fn a_machine_with_no_styles_is_not_asked_for_one() {
-        let schema = narrowed_schema(&[], &[], &[]);
+        let schema = narrowed_schema(&[], &[], &[], 0);
         let intent = &schema["oneOf"][0]["properties"]["intent"]["properties"];
 
         assert!(intent.get("style").is_none(), "got {intent}");
@@ -460,7 +720,7 @@ mod tests {
                 unit: Some("s"),
             },
         ];
-        let schema = narrowed_schema(&[], &[], &variables);
+        let schema = narrowed_schema(&[], &[], &variables, 0);
         let targets = &schema["oneOf"][0]["properties"]["intent"]["properties"]["targets"];
 
         assert_eq!(targets["additionalProperties"], serde_json::json!(false));

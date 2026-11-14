@@ -12,6 +12,58 @@ use adi_protocol::Declaration;
 use crate::domain::{Diagnosis, Domain};
 use crate::CoreError;
 
+/// One tool an operator may name, with its description resolved.
+///
+/// The same shape as `adi_protocol::OperatorAction` and the same order, which
+/// it is built from, with one thing added: the description a model needs to
+/// tell these apart.
+pub struct NamedAction<'a> {
+    pub index: usize,
+    pub tool: &'a SemanticId,
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    pub hazard: &'a [String],
+    /// What arrives when this is performed. Empty for a routine, which is how
+    /// a caller tells a drink from a cleaning cycle: both can be hazardous,
+    /// and only one of them is the thing that was asked for.
+    pub effects: &'a [adi_protocol::VariableId],
+}
+
+/// The tools an operator may name, described.
+///
+/// Lives here rather than on `Declaration` because resolving a description
+/// needs the profile, and `adi-protocol` does not know what a profile is. It
+/// is the same fallback `Planner::candidates` applies: the manufacturer's text
+/// where they wrote any, otherwise the profile's for a registry tool, which
+/// ADI-P 4.2 requires an engine to supply.
+///
+/// Without it, `adi.espresso.brew.stop` reached a model as the bare word
+/// "stop" while the profile held "Ends extraction... the way to stop a shot
+/// that is not worth finishing" and nothing fetched it.
+///
+/// Built from `Declaration::operator_actions` rather than filtered again, so
+/// the numbering a model is shown and the numbering an index resolves against
+/// cannot drift apart.
+pub fn named_actions<'a>(
+    declaration: &'a adi_protocol::Declaration,
+    domain: &'a dyn crate::Domain,
+) -> Vec<NamedAction<'a>> {
+    declaration
+        .operator_actions()
+        .into_iter()
+        .map(|action| NamedAction {
+            index: action.index,
+            tool: action.tool,
+            name: action.name,
+            description: action
+                .description
+                .or_else(|| domain.tool_description(action.tool)),
+            hazard: action.hazard,
+            effects: action.effects,
+        })
+        .collect()
+}
+
 /// A planned adjustment to one tool parameter.
 #[derive(Debug, Clone)]
 pub struct Correction {

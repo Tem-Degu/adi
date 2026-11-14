@@ -77,8 +77,14 @@ styles:
   - id: "adi.espresso.style.espresso"
     description: >
       The standard shot. Around twice the weight of the dry coffee, in the
-      mid twenties to low thirties of seconds. The default where someone
-      asks for coffee without saying which kind.
+      mid twenties to low thirties of seconds.
+      # It used to end "the default where someone asks for coffee without
+      # saying which kind". A base profile describes a CLASS of machine and
+      # cannot know what any one of them offers: on a machine declaring eight
+      # coffee styles that sentence told the model to pick this one rather
+      # than ask, and steered it away from the vendor's own `coffee` style -
+      # whose figures are the ones that machine can actually deliver.
+      # Which style is the default, if any, is a vendor's business.
     targets:
       ratio:            { min: 1.8,  max: 2.4,  unit: none }
       shot_time:        { min: 25.0, max: 32.0, unit: s }

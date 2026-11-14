@@ -111,6 +111,37 @@ adip_action_t adip_on_invoke(const adip_invocation_t *inv,
                              adip_reason_t *reason,
                              void *user);
 
+/* --------------------------------------------------- interrupting an operation */
+
+/*
+ * Stop what is running, because something else has been asked for.
+ *
+ * WHY THIS EXISTS. Every invocation arriving while the appliance is busy was
+ * refused with BUSY, before validation and with no exception. Which meant a
+ * declared `adi.espresso.brew.stop` could never be reached: by the time there
+ * was something to stop, nothing could be sent. The protocol has no cancel
+ * message either, so there was no other route. A tool reachable by nothing.
+ *
+ * `ADIP_TOOL_F_ABORTABLE` had been generated into the tables all along and
+ * read by nothing. This is what reads it.
+ *
+ * WHAT IT MUST DO. Stop the mechanism, now, and return true. It MUST NOT
+ * block - the same rule as `adip_on_invoke`, for the same reason. Where the
+ * hardware will not stop, return false: the invocation that prompted it is
+ * then refused with BUSY, which is the truth. A machine that reports an
+ * operation aborted while the mechanism keeps running is worse than one that
+ * admits it cannot stop.
+ *
+ * It is NOT called for an operation the declaration does not mark
+ * `abortable`. A syrup dose and a descale run to completion, and that is the
+ * manufacturer's decision expressed in the declaration rather than a rule in
+ * here.
+ *
+ * `tool` is an index into the device's tool table - the operation being cut
+ * short, not the one that asked for it.
+ */
+typedef bool (*adip_abort_fn)(uint16_t tool, void *user);
+
 /* ------------------------------------------------------------------ context */
 
 typedef struct {
@@ -145,6 +176,10 @@ typedef struct {
      * wider than the control timeout means the engine on the other end is not
      * the one that was there before, or believes nothing yet. */
     uint32_t last_heartbeat_ms;
+
+    /* Set by adip_set_abort. NULL means this appliance cannot be interrupted,
+     * which is the default and the behaviour everything had before. */
+    adip_abort_fn abort_fn;
 
     /*
      * Set when the failsafe has fired. New invocations are refused with FAULT
@@ -207,6 +242,13 @@ typedef struct {
     uint32_t stat_link_timeouts;
     uint32_t stat_duration_aborts;
 
+    /* Operations cut short because something else was asked for. Counted
+     * apart from stat_duration_aborts: that one is a mechanism that overran
+     * its declared time, which is a fault, and this one is a person changing
+     * their mind, which is not. A fleet where the two are summed together
+     * cannot tell a broken machine from a busy counter. */
+    uint32_t stat_preempted;
+
     /*
      * Worst observed time from a frame arriving to its response going out.
      * PROTOCOL.md 9.2 requires that to stay under 200 ms, and this is the
@@ -218,6 +260,17 @@ typedef struct {
 
     uint8_t  tx[ADIP_TX_SIZE];
 } adip_ctx_t;
+
+/*
+ * Opt in to being interruptible.
+ *
+ * Optional, and absent means an appliance behaves exactly as it did before
+ * this existed: busy refuses everything. So declaring a tool `abortable` and
+ * forgetting this is safe - it is simply never honoured - and no appliance
+ * written before this has to change.
+ */
+adip_status_t adip_set_abort(adip_ctx_t *ctx, adip_abort_fn fn);
+
 
 /*
  * Set up. `rx` must be at least ADIP_RX_MIN bytes and must outlive the
