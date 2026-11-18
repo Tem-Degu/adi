@@ -383,6 +383,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                     explainer.as_ref(),
                     &declaration_path,
                     &keyboard,
+                    interpreter.as_ref(),
                 )
             }
             "cycle" => cycle(
@@ -459,8 +460,16 @@ pub fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 /// one and not the other is not a useful configuration: a machine that hears and
 /// cannot reply is worse than one that does neither.
 struct Voice {
-    speaker: Option<Box<dyn Speaker>>,
-    transcriber: Option<Box<dyn Transcriber>>,
+    /// Shareable for the same reason as `Loaded`: synthesis is the LONGEST leg
+    /// of a spoken turn at about three and a half seconds, so it has to run off
+    /// the keepalive loop too. Moving only the interpreting would have left
+    /// more than half the appliance's tolerance still being spent on the loop.
+    speaker: Option<std::sync::Arc<dyn Speaker + Send + Sync>>,
+    /// Shareable as well, because a recording offered DURING an operation has
+    /// to be transcribed on the worker. It is the shortest leg at about three
+    /// quarters of a second, but it is still a network round trip and the
+    /// keepalive has six seconds in total to play with.
+    transcriber: Option<std::sync::Arc<dyn Transcriber + Send + Sync>>,
     /// Below this a transcript is treated as not heard, and the machine asks
     /// instead of acting. Carried here because it is read from the
     /// configuration and applied where a transcript is produced.
@@ -478,6 +487,16 @@ struct Voice {
     /// shared reference from everywhere and threading a mutable one through
     /// would touch every function that speaks.
     turns: std::cell::RefCell<std::collections::VecDeque<adi_decision::Turn>>,
+
+    /// How many things have been spoken, so each gets its own file.
+    ///
+    /// It was one fixed name, `spoken.wav`, rewritten every time. There are
+    /// nine places that speak and a single turn uses several of them - the
+    /// acknowledgement, then what happened - so each overwrote the one before
+    /// it. Nothing failed and nothing was logged; a supervisor playing that
+    /// file would simply have played whichever sentence won the race and
+    /// silently lost the rest.
+    spoken: std::cell::Cell<u64>,
 }
 
 /// How many exchanges are HELD, which is not how many are sent.
@@ -587,6 +606,7 @@ impl Voice {
                 speaker: None,
                 transcriber: None,
                 turns: std::cell::RefCell::new(std::collections::VecDeque::new()),
+            spoken: std::cell::Cell::new(0),
                 min_confidence: adi_language::DEFAULT_MIN_TRANSCRIPT_CONFIDENCE,
             });
         };
@@ -606,7 +626,7 @@ impl Voice {
                         }) {
                         Ok((speaker, rate)) => {
                             println!("  speaker      process ({command}) at {rate} Hz");
-                            Some(Box::new(speaker) as Box<dyn Speaker>)
+                            Some(std::sync::Arc::new(speaker) as std::sync::Arc<dyn Speaker + Send + Sync>)
                         }
                         Err(e) => {
                             println!("  speaker      unavailable: {e}");
@@ -634,7 +654,8 @@ impl Voice {
                             println!(
                                 "  transcriber  process ({command}) at {rate} Hz, asking below {threshold}"
                             );
-                            Some(Box::new(transcriber) as Box<dyn Transcriber>)
+                            Some(std::sync::Arc::new(transcriber)
+                                as std::sync::Arc<dyn Transcriber + Send + Sync>)
                         }
                         Err(e) => {
                             println!("  transcriber  unavailable: {e}");
@@ -650,6 +671,7 @@ impl Voice {
             speaker,
             transcriber,
             turns: std::cell::RefCell::new(std::collections::VecDeque::new()),
+            spoken: std::cell::Cell::new(0),
             min_confidence,
         })
     }
@@ -680,6 +702,44 @@ impl Voice {
         self.turns.borrow().iter().cloned().collect()
     }
 
+    /// Say something that has ALREADY been synthesised.
+    ///
+    /// The counterpart to `say` for anything answered from the worker thread,
+    /// where the three and a half seconds of synthesis has been spent off the
+    /// keepalive loop. Calling `say` here would spend it again, on the loop,
+    /// which is the whole thing this avoids.
+    /// Where the next thing spoken will be written.
+    ///
+    /// Numbered from one and never reused within a run. A supervisor plays
+    /// them in order and deletes each when it has, which is what makes a
+    /// sentence lost rather than overwritten if it falls behind.
+    fn write_spoken(&self, audio: &adi_language::Audio) {
+        let nth = self.spoken.get() + 1;
+        self.spoken.set(nth);
+        let path = std::path::PathBuf::from(format!("spoken-{nth:04}.wav"));
+        match write_wav(&path, audio) {
+            Ok(()) => println!(
+                "  spoken       {} samples at {} Hz, written to {}",
+                audio.samples.len(),
+                audio.sample_rate,
+                path.display()
+            ),
+            Err(e) => println!("  speaker      could not write the audio: {e}"),
+        }
+    }
+
+    fn played(&self, text: &str, audio: Option<adi_language::Audio>) {
+        if let Some(turn) = self.turns.borrow_mut().back_mut() {
+            turn.replies.push(text.to_string());
+        }
+        match audio {
+            Some(audio) => self.write_spoken(&audio),
+            // No speaker configured, or synthesis failed on the far side. The
+            // text has been printed, so nothing is lost but the voice.
+            None => {}
+        }
+    }
+
     fn say(&self, text: &str) {
         // Recorded BEFORE the speaker is consulted. `say` returns early with
         // no speaker configured, which is every build until the voice work
@@ -696,18 +756,7 @@ impl Voice {
         };
 
         match speaker.speak(text) {
-            Ok(audio) => {
-                let path = std::path::Path::new("spoken.wav");
-                match write_wav(&path.to_path_buf(), &audio) {
-                    Ok(()) => println!(
-                        "  spoken       {} samples at {} Hz, written to {}",
-                        audio.samples.len(),
-                        audio.sample_rate,
-                        path.display()
-                    ),
-                    Err(e) => println!("  speaker      could not write the audio: {e}"),
-                }
-            }
+            Ok(audio) => self.write_spoken(&audio),
             // A machine that cannot speak should still work. The text was
             // already printed, so nothing is lost but the voice.
             Err(e) => println!("  speaker      unavailable: {e}"),
@@ -851,6 +900,13 @@ fn report(error: &(dyn std::error::Error + 'static)) {
     } else if text.contains("both move") || text.contains("one iteration") {
         println!("  refused       the plan changed one thing two ways, which would make");
         println!("                the result impossible to attribute. Nothing ran.");
+        // AND WHAT THEY WERE. The error underneath names both steps and the
+        // variable - "steps 'x' and 'y' both move 'z' in one iteration" - and
+        // this printed a friendlier sentence INSTEAD of it, throwing away the
+        // only thing anybody could act on. It took a twelve-run sweep to find
+        // out what was conflicting, which is a diagnosis the message should
+        // simply have handed over.
+        println!("                {text}");
     } else {
         println!("  failed        {text}");
     }
@@ -985,6 +1041,282 @@ impl Keyboard {
 /// Bob - concludes its controller has died and abandons the drink. So nothing
 /// slow belongs in this loop: a stop is a word to match, not a question to
 /// think about.
+/// Whether a line is an instruction to this tool rather than something said.
+///
+/// Kept deliberately small and literal. It exists to stop a COMMAND being sent
+/// to a language model, not to guess at intent - anything it does not
+/// recognise is treated as speech, which is the right way round: a sentence
+/// mistaken for a command would be refused, while a command mistaken for a
+/// sentence is merely understood and then waits.
+fn is_command(line: &str) -> bool {
+    let line = line.trim();
+    // `listen <file>` is deliberately NOT here. It looks like a command and is
+    // one at the prompt, but what it carries is speech, and it is the only way
+    // a voice supervisor can say anything at all. Deferring it made a spoken
+    // question mid-brew impossible for the one caller that needs it.
+    matches!(line, "status" | "cycle" | "quit" | "exit" | "do")
+        || line.starts_with("do ")
+}
+
+/// Act on something understood WHILE an operation is still running.
+///
+/// The division is not about what is convenient, it is about what touches the
+/// appliance. Answering a question reads state the engine already holds and
+/// sends nothing, so it happens now. Anything that would move the machine has
+/// to wait for the mechanism, which is busy - so it is handed back to the
+/// prompt rather than refused, because the person has not asked for anything
+/// unreasonable, only something that cannot happen yet.
+fn answer_now(
+    session: &mut Session<'_>,
+    voice: &Voice,
+    keyboard: &Keyboard,
+    thought: Thought,
+    at_ms: u64,
+    // What was actually said, so that something which has to wait can be put
+    // back as the person's own words. The model's offered sentence is not a
+    // substitute: handing "Coming right up!" to the prompt would have the
+    // machine trying to carry out its own acknowledgement.
+    about: &str,
+) {
+    match thought.understood {
+        Err(reason) => println!("  could not    {reason}"),
+
+        // Touches nothing. Given straight away, with the audio the worker
+        // already synthesised.
+        Ok(Understood::Answer { text, drew_on }) => {
+            println!("  answers      {text}");
+            if !drew_on.is_empty() {
+                println!("  from         {}", drew_on.join(", "));
+            }
+            voice.played(&text, thought.audio);
+        }
+
+        // Also touches nothing: it is a question back.
+        Ok(Understood::Clarify { question, because }) => {
+            println!("  asks         {question}");
+            println!("  because      {because}");
+            voice.say(&question);
+        }
+
+        // A stop is the one moving thing that must not wait - it is the whole
+        // point of being able to speak during a drink.
+        Ok(Understood::Action(index)) if stop_action(session) == Some(index) => {
+            println!("  stopping     ...");
+            match session.act(index, at_ms) {
+                Ok(_) => println!("  stopped      it did not finish"),
+                Err(error) => println!("  could not    {error}"),
+            }
+        }
+
+        // Everything else moves the machine, and the machine is busy. Handed
+        // to the prompt, which takes it the moment this operation ends.
+        Ok(_) => {
+            println!("  after this   that needs the machine, so it waits its turn");
+            keyboard.keep(about);
+        }
+    }
+}
+
+/// An utterance being understood on another thread, while the loop ticks.
+///
+/// WHY THIS EXISTS. Understanding what somebody said takes five to seven
+/// seconds all told: about three quarters of a second to transcribe, one to
+/// three to interpret, and three and a half to synthesise the reply - the last
+/// of those measured twice against the live provider. Bob declares a
+/// `control_timeout_ms` of six seconds, and the loop that waits out a drink is
+/// the same loop that sends the keepalive. Doing any of that work on the loop
+/// stops the heartbeat for longer than the appliance tolerates, it declares
+/// its controller dead, and it abandons the drink. Somebody asking "how long
+/// is left?" would have destroyed the coffee they were asking about.
+///
+/// So the thinking happens here and NOTHING here touches the appliance. The
+/// snapshot is owned data, the answer comes back through a channel, and the
+/// main thread is the only thing that ever sends. One door, still.
+struct Thinking {
+    answer: std::sync::mpsc::Receiver<Thought>,
+
+    /// Kept so the utterance can be named while it is still being thought
+    /// about, and reported if the thread dies without answering.
+    about: String,
+}
+
+/// Everything the model needs, owned, so it can cross a thread boundary.
+///
+/// `SelectionContext` borrows, which is right for the engine and no use here,
+/// so each part is cloned once. All of it is small: a few decision records, a
+/// handful of readings and at most a few exchanges. It is a snapshot by
+/// design, not by accident - taken the moment somebody speaks, so the answer
+/// describes the machine as it was asked about rather than as it became.
+struct Snapshot {
+    /// What was said, where it arrived as text.
+    utterance: String,
+
+    /// What was said, where it arrived as sound.
+    ///
+    /// Transcribing on the worker rather than before it is the difference
+    /// between a spoken question mid-brew working and not working. The only
+    /// way a supervisor can hand speech to this tool is `listen <file>`, so
+    /// treating that as a command to defer - which is right for every OTHER
+    /// command - left the feature unreachable by the only thing that uses it.
+    heard: Option<adi_language::Audio>,
+
+    /// Below this a transcript is a guess, and the engine asks rather than
+    /// acting on it. Carried because the worker is the one that now decides.
+    min_confidence: f64,
+    history: Vec<adi_core::record::DecisionRecord>,
+    memory: adi_core::memory::RecentCycles,
+    measured: std::collections::BTreeMap<adi_protocol::ids::VariableId, Quantity>,
+    recent: Vec<adi_decision::Turn>,
+}
+
+/// What came back, with the speaking already done.
+struct Thought {
+    /// `Err` where the model or the network failed. Reported, never guessed at.
+    understood: Result<Understood, String>,
+
+    /// Already synthesised, because synthesis is the longest leg and belongs
+    /// on this side of the channel. The main thread only plays it.
+    audio: Option<adi_language::Audio>,
+}
+
+/// Think about an utterance without the appliance noticing.
+///
+/// Spawns and returns at once. The loop carries on ticking and picks the
+/// answer up with [`Thinking::ready`] when it arrives.
+fn think(
+    interpreter: std::sync::Arc<dyn Interpreter + Send + Sync>,
+    speaker: Option<std::sync::Arc<dyn Speaker + Send + Sync>>,
+    transcriber: Option<std::sync::Arc<dyn Transcriber + Send + Sync>>,
+    snapshot: Snapshot,
+) -> Thinking {
+    let (tell, answer) = std::sync::mpsc::channel();
+    let about = snapshot.utterance.clone();
+
+    std::thread::spawn(move || {
+        let context = SelectionContext {
+            history: &snapshot.history,
+            cycle: None,
+            memory: Some(&snapshot.memory),
+            rejected: None,
+            settings: None,
+            measured: Some(&snapshot.measured),
+            recent: &snapshot.recent,
+            // No style yet. These contexts serve the INTERPRETER, and the
+            // style is what the interpreter works out - it cannot be an input
+            // to the call that produces it.
+            style: None,
+};
+
+        // Sound first, where it arrived as sound.
+        let mut words = snapshot.utterance.clone();
+        if let Some(audio) = &snapshot.heard {
+            let Some(transcriber) = &transcriber else {
+                let _ = tell.send(Thought {
+                    understood: Err(
+                        "no transcriber is configured, so audio cannot be understood"
+                            .to_string(),
+                    ),
+                    audio: None,
+                });
+                return;
+            };
+            match transcriber.transcribe(audio) {
+                Ok(transcript) if transcript.confidence < snapshot.min_confidence => {
+                    // Not refused and not guessed at. ADI-P treats a transcript
+                    // below the threshold as something to ask about, and asking
+                    // touches nothing, so it can be asked mid-operation.
+                    let _ = tell.send(Thought {
+                        understood: Ok(Understood::Clarify {
+                            question: "Sorry, could you say that again?".to_string(),
+                            because: format!(
+                                "that came through at {:.2}, below the {:.2} this                                  machine acts on",
+                                transcript.confidence, snapshot.min_confidence
+                            ),
+                        }),
+                        audio: None,
+                    });
+                    return;
+                }
+                Ok(transcript) => words = transcript.text,
+                Err(e) => {
+                    let _ = tell.send(Thought {
+                        understood: Err(e.to_string()),
+                        audio: None,
+                    });
+                    return;
+                }
+            }
+        }
+
+        let reply = interpreter.reply(&words, &context);
+
+        // The model's offered sentence is deliberately dropped.
+        //
+        // It is an acknowledgement meant to be spoken WHILE something is
+        // carried out - "coming right up". Nothing understood here is carried
+        // out here: an answer is its own words, and an order has to wait for
+        // the mechanism, so speaking "coming right up" would announce a drink
+        // that is not being made. When the prompt takes that order up the turn
+        // runs properly and the acknowledgement is spoken then, by the code
+        // that is actually doing it.
+        let understood = match reply {
+            Ok(reply) => Ok(reply.understood),
+            Err(e) => Err(e.to_string()),
+        };
+
+        // Synthesised here, on this thread, for the same reason the
+        // interpreting is: it is the longest leg. Only what will actually be
+        // said aloud, and only where it is an answer - a step the main thread
+        // has yet to take may still be refused, and speaking first would have
+        // Bob announcing things that then do not happen.
+        let audio = match (&understood, &speaker) {
+            (Ok(Understood::Answer { text, .. }), Some(speaker)) => {
+                speaker.speak(text).ok()
+            }
+            _ => None,
+        };
+
+        // A closed channel means the main thread gave up waiting, which is not
+        // this thread's business to report.
+        let _ = tell.send(Thought { understood, audio });
+    });
+
+    Thinking { answer, about }
+}
+
+impl Thinking {
+    /// The answer, if it has arrived. Never blocks.
+    fn ready(&self) -> Option<Thought> {
+        match self.answer.try_recv() {
+            Ok(thought) => Some(thought),
+            // Disconnected means the thread ended without sending, which only
+            // happens if it panicked. Reported as a failure rather than left
+            // to wait forever.
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Thought {
+                understood: Err(format!(
+                    "the language service stopped without answering \"{}\"",
+                    self.about
+                )),
+                audio: None,
+            }),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+        }
+    }
+}
+
+/// Take a snapshot of what the model will need.
+fn snapshot(session: &Session<'_>, voice: &Voice, utterance: &str) -> Snapshot {
+    Snapshot {
+        utterance: utterance.to_string(),
+        heard: None,
+        min_confidence: voice.min_confidence,
+        history: session.history().to_vec(),
+        memory: session.memory().clone(),
+        measured: session.measurements().clone(),
+        recent: voice.recent(),
+    }
+}
+
 /// What became of the operation that was being waited on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Attended {
@@ -1003,6 +1335,11 @@ fn attend(
     session: &mut Session<'_>,
     keyboard: &Keyboard,
     now_ms: u64,
+    voice: &Voice,
+    // Passed down so that something said while an operation runs can be
+    // UNDERSTOOD rather than only matched against the word "stop". The
+    // understanding happens on another thread; see `think`.
+    mind: Option<&(std::sync::Arc<dyn Interpreter + Send + Sync>, String)>,
 ) -> Result<Attended, Box<dyn std::error::Error>> {
     if !session.working() {
         return Ok(Attended::Finished);
@@ -1011,9 +1348,25 @@ fn attend(
     let mut at_ms = now_ms;
     let mut said = false;
 
+    // At most one utterance is being thought about at a time. A second one
+    // arriving while the first is still out is kept for the prompt: two
+    // answers landing together would talk over each other, and the machine is
+    // in the middle of something either way.
+    let mut thinking: Option<Thinking> = None;
+
     while session.working() {
         session.tick(at_ms)?;
         at_ms = at_ms.saturating_add(250);
+
+        // Collected before the appliance is looked at, so an answer is given
+        // the moment it is ready rather than one tick later.
+        if let Some(pending) = &thinking {
+            if let Some(thought) = pending.ready() {
+                let about = pending.about.clone();
+                thinking = None;
+                answer_now(session, voice, keyboard, thought, at_ms, &about);
+            }
+        }
 
         if let Some(ended) = session.collect() {
             return match ended {
@@ -1056,10 +1409,82 @@ fn attend(
             }
             Some("") | None => {}
             Some(other) => {
-                // Kept, not dropped. This said "one moment" and then threw the
-                // line away - so a person was told they had been heard and
-                // then ignored. It ate four cases of its own acceptance test
-                // before anybody noticed.
+                // Understood on another thread, so the keepalive keeps going.
+                //
+                // This used to keep the line for the prompt and say "one
+                // moment" - which was the only safe thing to do when every
+                // model call blocked this loop. It is not a limitation worth
+                // keeping: an answer touches nothing. "How long is left?" or
+                // "is there enough syrup?" reads state the engine already
+                // holds, sends nothing, and can be given while the drink
+                // pours. Only a new ORDER has to wait, and it waits because
+                // the mechanism is busy rather than because the engine cannot
+                // think.
+                // A COMMAND IS NOT SPEECH. `listen <file>`, `do 3`, `status`
+                // and the rest are instructions to this tool, and handing one
+                // to the interpreter asks a model what somebody meant by
+                // "listen C:/tmp/order.wav" - which is nothing. It produced
+                // exactly that the first time the supervisor sent a second
+                // recording while a drink was pouring.
+                //
+                // They are kept for the prompt rather than run here for the
+                // same reason an order is: each of them moves the machine or
+                // starts a turn of its own, and the mechanism is busy.
+                if is_command(other) {
+                    keyboard.keep(other);
+                    if !said {
+                        println!("  after this   \"{other}\" waits its turn");
+                        said = true;
+                    }
+                    continue;
+                }
+
+                if let (Some((interpreter, _)), None) = (mind, &thinking) {
+                    // A recording, or words typed at the prompt. Either way
+                    // the whole turn goes to the worker from here.
+                    let (mut shot, what) = match other.strip_prefix("listen ") {
+                        Some(path) => match read_wav(Path::new(path.trim())) {
+                            Ok(audio) => {
+                                let mut shot = snapshot(session, voice, "");
+                                shot.heard = Some(audio);
+                                (shot, "a recording".to_string())
+                            }
+                            Err(e) => {
+                                println!("  could not    read {}: {e}", path.trim());
+                                continue;
+                            }
+                        },
+                        None => (
+                            snapshot(session, voice, other),
+                            format!("\"{other}\""),
+                        ),
+                    };
+
+                    // Only typed words are recorded as an exchange here. A
+                    // recording has no text until the worker has transcribed
+                    // it, and guessing at one would put the file path into the
+                    // conversation as though somebody had said it.
+                    if shot.heard.is_none() {
+                        voice.heard(other);
+                    } else {
+                        shot.utterance = String::new();
+                    }
+
+                    thinking = Some(think(
+                        interpreter.clone(),
+                        voice.speaker.clone(),
+                        voice.transcriber.clone(),
+                        shot,
+                    ));
+                    println!("  thinking     {what}");
+                    continue;
+                }
+
+                // No interpreter, or already thinking about something else.
+                // Kept, not dropped: this once said "one moment" and threw the
+                // line away, so a person was told they had been heard and then
+                // ignored. It ate four cases of its own acceptance test before
+                // anybody noticed.
                 keyboard.keep(other);
                 // Anything else has to wait. A second order would queue behind
                 // a drink nobody can see the end of, and asking the model what
@@ -1215,7 +1640,7 @@ fn status(session: &mut Session<'_>, now_ms: u64) -> Result<(), Box<dyn std::err
 /// The request path: a person asked for something in words.
 fn listen(
     session: &mut Session<'_>,
-    interpreter: Option<&(Box<dyn Interpreter>, String)>,
+    interpreter: Option<&(std::sync::Arc<dyn Interpreter + Send + Sync>, String)>,
     voice: &Voice,
     path: &str,
     now_ms: u64,
@@ -1237,6 +1662,10 @@ fn listen(
         audio.sample_rate
     );
 
+    // Held before the next line shadows it, so it can be handed on to the
+    // loop that waits out the operation. That loop needs the whole handle, not
+    // the unwrapped interpreter.
+    let mind = interpreter;
     let Some((interpreter, _)) = interpreter else {
         println!("  no interpreter is configured, so this cannot be understood.");
         return Ok(());
@@ -1250,8 +1679,11 @@ fn listen(
     // machine with a heating element, and the transcript is the one place where
     // a wrong word is indistinguishable downstream from a right one.
     let mut language = Language::new(
-        transcriber,
-        interpreter,
+        // Both reborrowed through their Arc. `Language` wants things
+        // implementing the seam traits, which a `&Arc<dyn _>` is not - only
+        // the thing inside it is.
+        &**transcriber,
+        &**interpreter,
         RecordExplainer,
         NoSpeaker,
     );
@@ -1281,7 +1713,11 @@ fn listen(
         // while the audio comes from a file; once a microphone opens an
         // exchange of its own, this wants the transcript instead.
         recent: &recent,
-    };
+            // No style yet. These contexts serve the INTERPRETER, and the
+            // style is what the interpreter works out - it cannot be an input
+            // to the call that produces it.
+            style: None,
+};
 
     // What it heard, before what was made of it. Without this line a misheard
     // word and a model reasoning badly about the right one look identical.
@@ -1302,12 +1738,13 @@ fn listen(
         declaration_path,
         explainer,
         keyboard,
+        mind,
     )
 }
 
 fn request(
     session: &mut Session<'_>,
-    interpreter: Option<&(Box<dyn Interpreter>, String)>,
+    interpreter: Option<&(std::sync::Arc<dyn Interpreter + Send + Sync>, String)>,
     words: &str,
     now_ms: u64,
     voice: &Voice,
@@ -1316,6 +1753,10 @@ fn request(
     // Read while the operation runs, so it can be stopped.
     keyboard: &Keyboard,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Held before the next line shadows it, so it can be handed on to the
+    // loop that waits out the operation. That loop needs the whole handle, not
+    // the unwrapped interpreter.
+    let mind = interpreter;
     let Some((interpreter, _)) = interpreter else {
         println!("  no interpreter is configured, so this cannot be understood.");
         println!("  run `adi models check` to see what is missing.");
@@ -1339,7 +1780,11 @@ fn request(
         settings: None,
         measured: Some(&readings),
         recent: &recent,
-    };
+            // No style yet. These contexts serve the INTERPRETER, and the
+            // style is what the interpreter works out - it cannot be an input
+            // to the call that produces it.
+            style: None,
+};
 
     let answer = interpreter.reply(words, &context)?;
     act_on(
@@ -1351,6 +1796,7 @@ fn request(
         declaration_path,
         explainer,
         keyboard,
+        mind,
     )
 }
 
@@ -1399,6 +1845,11 @@ fn act_on(
     explainer: &dyn Explainer,
     // Read while the operation runs, so it can be stopped.
     keyboard: &Keyboard,
+    // Passed down so that something said while an operation runs can be
+    // UNDERSTOOD rather than only matched against the word "stop". The
+    // understanding happens on another thread; see `think`.
+    mind: Option<&(std::sync::Arc<dyn Interpreter + Send + Sync>, String)>,
+
 ) -> Result<(), Box<dyn std::error::Error>> {
     match understood {
         // ADI-P 9.4.3. Asking is an outcome, not a failure.
@@ -1442,6 +1893,7 @@ fn act_on(
                     explainer,
                     declaration_path,
                     keyboard,
+                    mind,
                 )?;
             }
         }
@@ -1456,6 +1908,7 @@ fn act_on(
                 explainer,
                 declaration_path,
                 keyboard,
+                mind,
             )?;
         }
         Understood::Intent(intent) => {
@@ -1478,7 +1931,7 @@ fn act_on(
             // which reads the keyboard while it waits so the drink can be
             // stopped.
             let turn = session.begin(&intent, now_ms)?;
-            if attend(session, keyboard, now_ms)? == Attended::Stopped {
+            if attend(session, keyboard, now_ms, voice, mind)? == Attended::Stopped {
                 return Ok(());
             }
             if turn.performed.is_empty() {
@@ -1574,6 +2027,10 @@ fn perform_named(
     declaration_path: &Path,
     // Read while the operation runs, so it can be stopped.
     keyboard: &Keyboard,
+    // Passed down so that something said while an operation runs can be
+    // UNDERSTOOD rather than only matched against the word "stop". The
+    // understanding happens on another thread; see `think`.
+    mind: Option<&(std::sync::Arc<dyn Interpreter + Send + Sync>, String)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Past the appliance's own actions is one of the engine's. Checked first,
     // because `named_actions().get(index)` would return None for one of those
@@ -1651,7 +2108,7 @@ fn perform_named(
     // Nothing below may claim the action was carried out if it was cut
     // short. The lines that follow are written from the record, which says
     // what was INTENDED, so they read as a success whatever happened.
-    if attend(session, keyboard, now_ms)? == Attended::Stopped {
+    if attend(session, keyboard, now_ms, voice, mind)? == Attended::Stopped {
         return Ok(());
     }
 
@@ -2176,7 +2633,20 @@ fn load_chooser(
 }
 
 /// An interpreter and a description of where it came from, for the banner.
-type Loaded = Option<(Box<dyn Interpreter>, String)>;
+/// A loaded interpreter, shareable across threads.
+///
+/// `Arc` and `Send + Sync` rather than `Box`, because understanding an
+/// utterance has to happen OFF the loop that carries the keepalive. The legs
+/// measure 0.75 s to transcribe, one to three to interpret and three and a
+/// half to speak - five to seven all told, against Bob's `control_timeout_ms`
+/// of six. An appliance that hears nothing for that long declares its
+/// controller dead and abandons the drink, so a spoken question mid-brew would
+/// have cost the coffee it was asking about.
+///
+/// The bound is on the handle here and NOT on the `Interpreter` trait, which
+/// stays as it is: an engine on a single-threaded appliance has no use for it,
+/// and the trait is public.
+type Loaded = Option<(std::sync::Arc<dyn Interpreter + Send + Sync>, String)>;
 
 /// The interpreter seam, where it is configured.
 ///
@@ -2258,7 +2728,7 @@ pub(crate) fn start_interpreter(
                 .model_path(Seam::Interpreter)
                 .ok_or("the scripted backend names no answers file")?;
             let label = format!("scripted ({})", model.display());
-            Ok(Some((Box::new(ScriptedInterpreter::load(&model)?), label)))
+            Ok(Some((std::sync::Arc::new(ScriptedInterpreter::load(&model)?), label)))
         }
 
         Backend::Process => {
@@ -2320,34 +2790,120 @@ pub(crate) fn start_interpreter(
                 // Not an exclusion of base styles as such: a base style this
                 // machine can serve in full stays on offer, which is the whole
                 // point of having one.
-                styles: knowledge
-                    .styles_described()
-                    .into_iter()
-                    .filter(|(name, _)| {
-                        let Ok(resolved) = knowledge.resolve(name, None) else {
-                            return false;
-                        };
-                        // The STYLE's own bands, not the fully resolved set.
-                        // `targets` starts from the machine's constraints and
-                        // so names every constrained variable - ratio and shot
-                        // time among them - which failed every style on Bob
-                        // including its own. `style_targets` is what the recipe
-                        // actually specifies.
-                        let producible = resolved.style_targets.iter().all(|(variable, _)| {
-                            knowledge.is_preference(variable)
-                                || !planner
-                                    .candidates(&adi_protocol::ids::VariableId(
-                                        variable.clone(),
-                                    ))
-                                    .is_empty()
-                        });
+                //
+                // AND WHERE NONE QUALIFY, EVERYTHING IS OFFERED. The filter is
+                // there to stop a machine recommending a recipe written in a
+                // mechanism it does not have. On a machine where that
+                // describes every recipe it emptied the list instead, and the
+                // question became "I can make: . Which?" - which is worse than
+                // an imperfect list, because it asks somebody to choose from
+                // nothing.
+                //
+                // The shipped example appliance is exactly that machine: it
+                // serves `brew_temperature` and none of the other variables
+                // the base profile's recipes are written in. Bob is unaffected
+                // either way, since its own eight styles are producible in
+                // full and the base ones still drop out.
+                styles: {
+                    let described = knowledge.styles_described();
+
+                    let producible: Vec<_> = described
+                        .iter()
+                        .copied()
+                        .filter(|(name, _)| {
+                            let Ok(resolved) = knowledge.resolve(name, None) else {
+                                return false;
+                            };
+                            // The STYLE's own bands, not the fully resolved
+                            // set. `targets` starts from the machine's
+                            // constraints and so names every constrained
+                            // variable - ratio and shot time among them -
+                            // which failed every style on Bob including its
+                            // own. `style_targets` is what the recipe actually
+                            // specifies.
+                            resolved.style_targets.iter().all(|(variable, _)| {
+                                knowledge.is_preference(variable)
+                                    || !planner
+                                        .candidates(&adi_protocol::ids::VariableId(
+                                            variable.clone(),
+                                        ))
+                                        .is_empty()
+                            })
+                        })
+                        .collect();
+
+                    let offered = if producible.is_empty() {
+                        described
+                    } else {
                         producible
-                    })
-                    .map(|(name, description)| adi_language::context::StyleInfo {
-                        name: name.to_string(),
-                        description: description.map(str::to_string),
-                    })
-                    .collect(),
+                    };
+
+                    offered
+                        .into_iter()
+                        .map(|(name, description)| {
+                            // The recipe's own bands, where they can be
+                            // resolved. `style_targets` again, not `targets`:
+                            // the latter folds in the profile's quality
+                            // limits, which say where a variable may NOT go
+                            // rather than what this drink is.
+                            let targets = knowledge
+                                .resolve(name, None)
+                                .map(|resolved| {
+                                    resolved
+                                        .style_targets
+                                        .iter()
+                                        .map(|(variable, target)| {
+                                            let band = &target.value;
+                                            // THE AIM FIRST, the band after.
+                                            //
+                                            // Showing the band alone made
+                                            // things worse, measurably: a
+                                            // model that could see 90 to 130
+                                            // helpfully supplied 95, and a
+                                            // lungo came out at 95
+                                            // millilitres instead of 117.
+                                            // There was nothing wrong with
+                                            // its answer - 95 is inside the
+                                            // recipe - except that the engine
+                                            // was aiming at the middle and
+                                            // nothing had ever told the model
+                                            // that. Two rules for one number.
+                                            //
+                                            // With the aim stated they agree,
+                                            // and a figure the model does
+                                            // send is the same one the engine
+                                            // would have chosen.
+                                            (
+                                                variable.clone(),
+                                                match band.aim {
+                                                    Some(aim) => format!(
+                                                        "{} {} (may be {} to {})",
+                                                        aim,
+                                                        band.unit.as_str(),
+                                                        band.min,
+                                                        band.max
+                                                    ),
+                                                    None => format!(
+                                                        "{} to {} {}",
+                                                        band.min,
+                                                        band.max,
+                                                        band.unit.as_str()
+                                                    ),
+                                                },
+                                            )
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+
+                            adi_language::context::StyleInfo {
+                                name: name.to_string(),
+                                description: description.map(str::to_string),
+                                targets,
+                            }
+                        })
+                        .collect()
+                },
                 materials: knowledge
                     .material_ids()
                     .into_iter()
@@ -2418,7 +2974,7 @@ pub(crate) fn start_interpreter(
                     budget,
                 )?,
             };
-            Ok(Some((Box::new(interpreter), label)))
+            Ok(Some((std::sync::Arc::new(interpreter), label)))
         }
 
         other => Err(format!(

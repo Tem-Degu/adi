@@ -1,9 +1,20 @@
 # Models
 
-Artificial Domain Intelligence reaches a model at four seams: the transcriber,
-the interpreter, the explainer and the speaker. This document covers obtaining
-the files, which ones were measured and what they scored, choosing hardware,
-and using a model or a provider of your own.
+Artificial Domain Intelligence reaches a model at five seams: the transcriber,
+the interpreter, the selector, the explainer and the speaker (ADI-P 9.4.2).
+
+Four of them are configured here. The selector is not, and does not need to be:
+the engine starts it from the interpreter's configuration, as a second copy of
+the same program, and tells each copy which seam it is by the shape of the
+message. A configuration therefore names four seams and a session reaches five.
+
+The selector is also the only one that proposes an actuation value, which is
+why ADI-P 9.3 exists: the value it offers is clamped to the declared range,
+snapped to the declared resolution and checked against the envelope before
+anything is sent.
+
+This document covers obtaining the files, which ones were measured and what
+they scored, choosing hardware, and using a model or a provider of your own.
 
 The SDK itself is in [`README.md`](./README.md). Nothing here is required to
 run the engine: see [Running without models](#running-without-models).
@@ -176,7 +187,8 @@ language.
 ```
 interpreter  -> {"utterance":"half of last time","instruction":"...",
                  "schema":{...},
-                 "styles":[{"name":"...","description":"..."}],
+                 "styles":[{"name":"...","description":"...",
+                            "targets":[["shot_time","28 s (may be 25 to 32)"]]}],
                  "variables":[...],"materials":[...],
                  "notes":[...],"machine":"...","history":[...]}
              <- {"intent":{"kind":"produce","targets":{...}}}
@@ -185,7 +197,9 @@ interpreter  -> {"utterance":"half of last time","instruction":"...",
 
 chooser      -> {"goals":[{"variable":"shot_time","delta":-3.0,...}],
                  "candidates":[{"index":0,"tool":"...","variable":"shot_time",
-                                "per_unit":-1.4,"current":24,...}],
+                                "per_unit":-1.4,"current":24,
+                                "also_affects":["ratio"],...}],
+                 "style":"x.example.style.flat_white",
                  "level":"d2","constraints":[...],"instruction":"...",
                  "schema":{...}}
              <- {"steps":[{"candidate":0,"value":21}]}
@@ -198,6 +212,62 @@ speaker      -> {"text":"..."}
 ```
 
 Audio is base64 of 16-bit signed, little endian, single channel samples.
+
+`styles[].targets` carries each style's effective figures, as pairs of variable
+and a rendering of the aim and range. ADI-P 9.4.1 requires them: a model asked
+for a quantity alongside a style, shown no figure for it, is being asked to
+invent one. Which variables a style constrains is also how a model tells two
+styles apart that read alike in prose.
+
+`style` on the chooser request is what was asked for, where the intent named a
+style. ADI-P 9.4.2 requires it. A goal names a variable and a quantity, and on a
+machine offering several tools that move one variable that does not say which
+tool is meant.
+
+`also_affects` on a candidate is every other variable that tool moves. Without
+it no answer can satisfy ADI-P 9.5, because nothing says which candidates
+conflict.
+
+---
+
+## Honouring the schema the engine supplies
+
+**Both model requests carry a `schema`. Use it. Do not write your own.**
+
+This is the single most expensive mistake available to a backend author, and it
+is expensive because it is invisible. A backend that substitutes its own idea of
+a valid answer compiles, runs, and produces answers the engine then has to
+refuse — and no error anywhere says the engine's own schema was discarded.
+
+The schema the engine sends is narrower than one you can write, because it is
+built per request:
+
+- `candidate` is an enumeration of the indices actually offered, so naming a
+  tool that was never on the list cannot be emitted.
+- `steps` is bounded to one per goal, so a plan moving one variable twice
+  cannot be emitted. ADI-P 9.5 requires this of the shape and not only of the
+  validation.
+- At D1 the value field is absent, because the engine sizes the correction.
+
+A hand-written schema has none of that. It permits answers the contract refuses,
+and the result is a machine that fails intermittently for reasons that look like
+the model being unreliable.
+
+**The same applies to every shape in a request.** A backend that defines its own
+copy of a structure the engine sends will keep working while the engine's copy
+gains a field, and will silently stop conveying it. Read fields out of the
+request; do not restate the request's shape in your own program.
+
+Three faults of exactly this kind have been found in this SDK's own example
+backend: a reply arm that was unreachable because the example had its own reply
+schema, a style's figures dropped because a second wire type never gained the
+field, and the step bound above ignored because the example wrote its own
+chooser schema. Each time the engine did the work, sent it, and had it
+discarded one layer later.
+
+An engine validates every answer regardless, so none of these is a safety
+problem. They are correctness and reliability problems, and they cost more to
+find than they would ever have cost to avoid.
 
 A style carries what it is, as a variable carries its meaning and a tool its
 description. A request names a style the way a person would, and an identifier

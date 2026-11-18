@@ -527,6 +527,10 @@ impl<'a> Session<'a> {
             rejected: None,
             settings: None,
             measured: None,
+            // A cycle being corrected names no drink. This path is the
+            // machine reporting what it did and the engine deciding what to
+            // change next, which is about the readings and not about an order.
+            style: None,
         };
 
         let corrections = decide(
@@ -719,14 +723,103 @@ impl<'a> Session<'a> {
                         continue;
                     }
 
-                    // A style states a band rather than a point, so aim at the
-                    // middle of it. Either end would be a target the cycle
-                    // path then reads as borderline.
+                    // WHAT THE RECIPE SAYS IT IS, where it says.
+                    //
+                    // A band on its own only says how far a thing may be
+                    // pushed. `aim` is the recipe's own figure, and it exists
+                    // because averaging the band was arithmetic standing in
+                    // for the manufacturer's intent - a vendor wanting a lungo
+                    // at 120, with 90 to 130 there for tolerance, could not
+                    // say so.
+                    //
+                    // The midpoint remains the fallback, which is what every
+                    // declaration that does not mention an aim still gets.
+                    // Either END would be a target the cycle path then reads
+                    // as borderline, which is why it is the middle and not the
+                    // minimum.
                     let band = &target.value;
                     targets.entry(variable).or_insert_with(|| {
-                        Quantity::new((band.min + band.max) / 2.0, band.unit)
+                        let aim = band.aim.unwrap_or((band.min + band.max) / 2.0);
+                        Quantity::new(aim, band.unit)
                     });
                 }
+
+                // THE RECIPE GOVERNS WHAT THE RECIPE COVERS.
+                //
+                // Everything above this seeds what the request did not state.
+                // This decides what to do with what it DID state - and the
+                // honest position is that the engine cannot tell a figure the
+                // person said from one the model made up. Both arrive here as
+                // `intent.targets`, identically.
+                //
+                // That mattered. Asked for a lungo, whose recipe is 90 to 130
+                // grams, a model proposed 85 grams and a hot water step. The
+                // engine took both as the person's own wishes, overrode the
+                // recipe it had just chosen, ran two mechanisms, and produced
+                // 89 millilitres of something nobody ordered. The same hole
+                // made the volume wander between 116 and 118 for one order and
+                // made roughly one order in twelve refuse outright, because
+                // the invented figures gave two tools the same job.
+                //
+                // Why the model did it is not mysterious and not its fault: it
+                // is shown a style's NAME and a sentence of prose, never the
+                // band, so a figure it offers is offered blind. It is also
+                // told to give a target for whatever the request asks to
+                // change, and "a long cup, more water through the coffee" does
+                // ask to change something. The prose is also what varies - an
+                // espresso, described without a mechanism, never breaks - so
+                // no rule written in prose can be the guarantee. This can.
+                //
+                //   covered by the recipe  -> clipped into its band
+                //   not covered           -> dropped, unless a preference
+                //
+                // SILENTLY, and that is deliberate. The existing clamp
+                // announces itself because a person asked for 100 millilitres
+                // of syrup and got 30: the machine could not reach it, and
+                // they are owed that. Here nobody asked for 85. Saying "I
+                // adjusted 85 to 90" would report a figure they never gave.
+                //
+                // A preference survives either way, because syrup, milk and
+                // sugar are things a person adds to any drink and no recipe
+                // has to mention them to allow one.
+                let recipe: std::collections::BTreeMap<
+                    adi_protocol::ids::VariableId,
+                    adi_protocol::units::Range,
+                > = resolution
+                    .style_targets
+                    .iter()
+                    .map(|(name, target)| {
+                        (
+                            adi_protocol::ids::VariableId(name.clone()),
+                            target.value.clone(),
+                        )
+                    })
+                    .collect();
+
+                targets.retain(|variable, value| {
+                    // Seeded from the recipe a moment ago, so already inside
+                    // it by construction.
+                    if !stated.contains(variable) {
+                        return true;
+                    }
+
+                    match recipe.get(variable) {
+                        Some(band) => {
+                            if value.value < band.min {
+                                *value = Quantity::new(band.min, band.unit);
+                            } else if value.value > band.max {
+                                *value = Quantity::new(band.max, band.unit);
+                            }
+                            true
+                        }
+                        // Hot water is not part of a lungo. Dropping it gives
+                        // a plain lungo, which is wrong if somebody genuinely
+                        // asked for an americano and right every other time -
+                        // and the americano is a style of its own, which is
+                        // what the model should have named.
+                        None => knowledge.is_preference(&variable.0),
+                    }
+                });
             }
         }
 
@@ -772,6 +865,10 @@ impl<'a> Session<'a> {
             rejected: None,
             settings: None,
             measured: None,
+            // Already resolved a few lines above, to seed this request's
+            // targets from the recipe. It was in scope the whole time and
+            // simply never passed on.
+            style: resolved.style.as_deref(),
         };
 
         let corrections = decide(

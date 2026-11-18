@@ -85,6 +85,18 @@ struct StyleLine<'a> {
     name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<&'a str>,
+
+    /// The recipe's own bands, as ("yield_mass", "90 to 130 g").
+    ///
+    /// This type is a SECOND definition of a style's wire shape, beside
+    /// `StyleInfo`, and adding the bands to that one left them here. They were
+    /// filled in by the engine, dropped on the wire, and nothing reported it -
+    /// the model carried on being shown a name and a sentence. A field added
+    /// to one and not the other is invisible from both ends, which is the same
+    /// way an extra reply arm once sat unreachable because the Python copy of
+    /// the schema had never heard of it.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    targets: &'a [(String, String)],
 }
 
 /// A note as the backend is told about it.
@@ -426,6 +438,7 @@ impl Interpreter for ProcessInterpreter {
             .map(|s| StyleLine {
                 name: &s.name,
                 description: s.description.as_deref(),
+                targets: &s.targets,
             })
             .collect();
 

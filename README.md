@@ -467,7 +467,7 @@ with no allocation, no recursion and no floating point, so an M0 is enough.
 | RAM | no static or heap allocation. One context of 724 bytes, plus the frame buffers you size |
 | Integration | three platform functions and one handler |
 
-The full appliance test suite, 364 checks, passes on an emulated Cortex-M3.
+The full appliance test suite, 392 checks, passes on an emulated Cortex-M3.
 What emulation does not establish is real timing, which matters for the reply
 deadline and the failsafe interval, or the platform functions against real
 peripherals.
@@ -590,6 +590,7 @@ Ordered by when you need them rather than by importance.
 | [`sdk/MODELS.md`](./sdk/MODELS.md) | Before choosing a model | Which models were measured and what they scored, choosing hardware, using a model or a hosted provider of your own, and the speech seams. |
 | [`HOW-TO-PORT-TO-A-BOARD.md`](./HOW-TO-PORT-TO-A-BOARD.md) | First, on real hardware | Getting `libadip` onto your board and talking to an engine: the declaration, the generated tables, the three port functions, the transport, and the first heartbeat. Stops before any mechanism is callable. |
 | [`HOW-TO-ADD-A-TOOL.md`](./HOW-TO-ADD-A-TOOL.md) | Next, once the link works | One mechanism from a pin to something the engine can reason about: driver, handler, declaration entry, and the optional skill entry. Includes the electrical steps and the failure cases. |
+| [`HOW-TO-WRITE-KNOWLEDGE.md`](./HOW-TO-WRITE-KNOWLEDGE.md) | Before writing a style | The content of a knowledge layer rather than its format: what a style's description must and must not say, why every target needs an aim, and the faults that make a machine choose the wrong product. The only part of a deployment a model reads as prose and acts on, and the only part nothing checks. |
 | [`HOW-TO-ADD-A-DOMAIN.md`](./HOW-TO-ADD-A-DOMAIN.md) | For a machine that is not espresso | What a domain is, and the two ways to supply one. Describing your machine's outcomes in a file, which needs no code, and writing a profile when you want it to identify causes rather than report drift. |
 | [`sdk/c/DESIGN.md`](./sdk/c/DESIGN.md) | Alongside both | `libadip`, the appliance library. Freestanding C99, no allocation, no floating point, about 7.8 KB of flash on a Cortex-M4. Why it is shaped the way it is, and what it does not do. |
 | [`PROTOCOL.md`](./PROTOCOL.md) | As the reference | **ADI-P**, the integration contract. Safe Action Protocol, conformance and autonomy levels, the capability declaration, the skill, knowledge extensions, the execution model, the wire format and the espresso registry. Normative; the two guides above are the practical paths through it. |
@@ -604,8 +605,9 @@ first is a reasonable thing to do and is not the shortest route.
 Pre-release. The specification is stable, both implementations exchange
 messages over a transport, and a cycle runs end to end: observe, diagnose,
 plan, check the safety envelope, invoke, record, explain, remember. All three
-autonomy levels run against a real appliance, and all four model seams are
-reached in a session.
+autonomy levels run against a real appliance, and every model seam is reached
+in a session: the transcriber, the interpreter, the selector, the explainer and
+the speaker.
 
 The appliance library occupies about 7.8 KB of flash on a Cortex-M4, with no static
 or heap allocation, and its full test suite passes on an emulated Cortex-M3.
@@ -620,11 +622,25 @@ without removing it.
 
 Not yet done:
 
-- **No audio capture or playback.** Speech synthesis writes a file and
-  transcription reads one. Driving a microphone and a speaker needs a platform
-  library and a device, which belongs in a product and not in this SDK.
-  `sdk/README.md` sets out what an integrator supplies and what the SDK handles,
-  and no worked example against a real audio library is provided yet.
+- **No audio capture or playback in the SDK.** Speech synthesis writes a file
+  and transcription reads one. Driving a microphone and a speaker needs a
+  platform library and a device, which belongs in a product rather than here:
+  device names, mixer routing and which playback tool exists differ per
+  platform, and an SDK that owned them would inherit all of it.
+  `sdk/README.md` sets out what an integrator supplies and what the SDK handles.
+
+  No worked example of the product side ships here. What one has to do is
+  bounded and known: cut a continuous stream into utterances, decide which of
+  them were addressed to the machine, hand the samples to the transcriber seam,
+  and play what the speaker seam returns. The engine's side of that boundary is
+  complete and exercised; the device side is the integrator's.
+- **One test suite does not compile.** `adi-decision`'s integration tests
+  expect a `DecisionError` variant for a correction that points away from its
+  goal, and no such guard is implemented: a value already past its target can
+  still receive a mechanism's minimum. The test was written as the
+  specification and the guard was not built, so `cargo test --workspace` fails
+  on that crate while the other seven pass. The remaining suites can be run
+  individually.
 - **Models run beside the engine, not inside it.** The engine starts
   them and exchanges one message per line, so a developer supplies model files
   and writes no code. Backends that load models through ONNX Runtime and

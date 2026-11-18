@@ -55,7 +55,29 @@ import urllib.error
 import urllib.request
 
 API_URL = "https://api.openai.com/v1/chat/completions"
-MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+# Named by the configuration that starts this program, so which model a
+# machine uses is visible in its own config rather than in an environment
+# variable nobody reads. An argument wins, then the environment, then this.
+#
+# Not a free choice, and measured rather than assumed. Over twelve trials
+# gpt-4o-mini decided badly about one order in three - brewing with no water,
+# or sending nothing at all - while gpt-5 got all twelve right and timed out
+# twice at forty-five seconds.
+#
+# Round trips on a small prompt, four calls each:
+#
+#   gpt-4o-mini   1.4 - 1.6 s
+#   gpt-5-mini    3.6 - 4.8 s
+#   gpt-4.1       1.1 - 1.4 s
+#
+# So the obvious trade - accuracy for speed - turned out not to exist. gpt-4.1
+# is both the faster of the three and the stronger of the two cheap ones. Bob's
+# real prompts are much larger than that test's, so treat these as a floor.
+MODEL = (
+    sys.argv[1]
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-")
+    else os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+)
 # This MUST stay below the machine's control_timeout_ms, which is 6000 ms in
 # bob.yaml. The engine blocks here and stops sending heartbeats meanwhile, so
 # a timeout longer than that deadline means the appliance decides the link is
@@ -147,6 +169,19 @@ happens and the person is told otherwise.
 Prefer an outcome this machine can actually move. The variable list describes
 everything the domain models, not everything this machine has a mechanism for,
 and naming one it cannot move gets the whole request refused.
+
+A NAMED STYLE ALREADY CARRIES ITS FIGURES. Each drink above is listed with
+what it aims for - "yield_mass = 110 g (may be 90 to 130)". Naming the style is
+enough: give NO target for anything the style already states, and the machine
+uses the recipe's own figure.
+
+Give one only where the person asked for something different - "a lungo but
+only 100 grams" - and then give the figure THEY said, not one of your own.
+
+This is worth being exact about. Showing these figures without saying this made
+the machine worse: a model that could see "90 to 130" helpfully filled in 95,
+and a long coffee came out a fifth short of what the recipe asks for. Nothing
+was wrong with 95 except that nobody had asked for it.
 
 Give a target ONLY for what the request actually asks to change. Do not fill
 in the other outcomes, and never list one at zero to mean "leave it alone": a
@@ -418,6 +453,16 @@ def interpreter_prompt(request):
                     style["name"], (style.get("description") or "").strip()
                 )
             )
+            # The recipe itself, so a figure offered alongside a style is
+            # informed rather than guessed. Without this a model saw a name
+            # and a sentence, and one asked for 85 grams of a lungo whose
+            # recipe says 90 to 130 - not ignoring the band, never shown it.
+            #
+            # It also shows what a drink does NOT specify, which is the other
+            # half of the same mistake: "more water through the coffee" had a
+            # model reach for a hot water step belonging to another drink.
+            for variable, band in style.get("targets") or []:
+                lines.append("      {} = {}".format(variable, band))
 
     actions = request.get("actions", [])
     if actions:
@@ -654,7 +699,31 @@ with your best judgement rather than declining.
 """
 
 
-def chooser_schema():
+def chooser_schema(request=None):
+    """The shape of a valid answer.
+
+    THE ENGINE'S OWN SCHEMA FIRST, where it sent one. It arrives as
+    `request["schema"]` and it is narrower than anything written here: it
+    limits `candidate` to an enum of the indices actually offered, so naming a
+    tool that was not on the list becomes impossible to emit rather than
+    emitted and refused, and it caps `steps` at one per goal.
+
+    That cap is why this now takes the request. The engine computed it,
+    serialised it and sent it; this file ignored it in favour of the
+    hand-written fallback below, which bounds nothing. So a chooser kept
+    answering with two steps for one goal - about four times in ten - the
+    engine kept refusing the plan, and the fix was already on the wire.
+    Twice before, a second definition of a shape in this file has quietly won
+    over the engine's: an extra reply arm sat unreachable for the same reason,
+    and a style's recipe bands were dropped on the way out.
+
+    The fallback stays for a backend that sends no schema.
+    """
+    if request:
+        sent = request.get("schema")
+        if isinstance(sent, dict) and sent.get("properties"):
+            return sent
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -679,28 +748,79 @@ def chooser_schema():
 def choose(request):
     level = request.get("level", "d2")
 
-    lines = ["Goals:"]
-    for goal in request.get("goals", []):
-        lines.append("  " + json.dumps(goal))
+    lines = []
 
-    lines.append("\nCandidates:")
+    # What was asked for, where a style named it. The one piece of information
+    # genuinely added rather than rearranged: a goal alone does not say which
+    # drink it belongs to, and three tools serve "move yield_mass" on this
+    # machine. Asked for a doppio, a chooser given only the goal picked the
+    # single-shot tool.
+    if request.get("style"):
+        lines.append("Asked for: " + request["style"])
+        lines.append("")
+
+    lines.append("Goals:")
+    for goal in request.get("goals", []):
+        variable = goal.get("variable") or "(unnamed)"
+        lines.append("  " + variable)
+        for label, key in (
+            ("wanted change", "delta"),
+            ("why", "cause"),
+            ("confidence", "confidence"),
+        ):
+            if goal.get(key) is not None:
+                lines.append("      {:<14} {}".format(label, goal[key]))
+
+    lines.append("")
+    lines.append("Candidates:")
     for candidate in request.get("candidates", []):
-        lines.append("  " + json.dumps(candidate))
+        lines.append(
+            "  [{}] {}".format(
+                candidate.get("index"), candidate.get("tool") or "(unnamed)"
+            )
+        )
+        for label, key in (
+            ("moves", "variable"),
+            ("by setting", "parameter"),
+            ("in", "unit"),
+            ("now at", "current"),
+            ("per unit", "per_unit"),
+            ("confidence", "confidence"),
+        ):
+            if candidate.get(key) is not None:
+                lines.append("      {:<14} {}".format(label, candidate[key]))
+        also = candidate.get("also_affects") or []
+        if also:
+            lines.append("      {:<14} {}".format("also moves", ", ".join(also)))
+        # On its own lines rather than inside the object, because this is the
+        # part that says what the tool is FOR and it was the least readable
+        # thing in the request.
+        text = (candidate.get("description") or "").strip()
+        if text:
+            lines.append("      what it is:")
+            for sentence in text.replace("\n", " ").split(". "):
+                sentence = sentence.strip().rstrip(".")
+                if sentence:
+                    lines.append("        " + sentence + ".")
 
     constraints = request.get("constraints", [])
     if constraints:
-        lines.append("\nConstraints you must satisfy:")
+        lines.append("")
+        lines.append("Constraints you must satisfy:")
         for rule in constraints:
             lines.append("  - " + rule)
 
     remembered = request.get("remembered", [])
     if remembered:
-        lines.append("\nWhat the machine remembers: " + json.dumps(remembered))
+        lines.append("")
+        lines.append("What the machine remembers:")
+        for item in remembered:
+            lines.append("  " + str(item))
 
     if request.get("rejected"):
-        lines.append(
-            "\nYour previous answer was refused because: " + request["rejected"]
-        )
+        lines.append("")
+        lines.append("Your previous answer was refused because:")
+        lines.append("  " + request["rejected"])
 
     lines.append(
         "\nLevel is {}. {}".format(
@@ -711,7 +831,7 @@ def choose(request):
         )
     )
 
-    reply = call_model(CHOOSER_SYSTEM, "\n".join(lines), chooser_schema())
+    reply = call_model(CHOOSER_SYSTEM, "\n".join(lines), chooser_schema(request))
 
     if reply is None:
         # No steps refuses the whole plan, which the selector treats as an

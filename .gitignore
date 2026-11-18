@@ -59,3 +59,39 @@ secrets/
 sdk/machines/*/firmware/build/
 # Host-built test binaries that sit beside their source.
 *.exe
+
+# ---------------------------------------------------------------- Bob --------
+#
+# The Jura ENA 8 retrofit lives in its own repository, beside this one. It was
+# separated because it carries reverse-engineered vendor protocol detail -
+# service-port verbs and a table of product codes - and publishing that needs
+# its own decision, which the engine and the protocol should not wait for.
+#
+# These paths are ignored rather than merely absent so that a stray copy cannot
+# find its way back into a commit. The machine's own repository is the one to
+# edit; a copy left here will drift and nothing will say so.
+sdk/machines/bob/
+sdk/c/generated/adip_generated_bob.c
+sdk/c/generated/adip_generated_bob.h
+BOB-DEPLOY.md
+
+# Model prompt and reply traces. ADI_TRACE names a FILE, so setting it to `1`
+# writes a trace to a file called `1`, which is how one got loose.
+sdk/1
+*.trace
+trace*.txt
+
+# Speech the speaker seam wrote, numbered per turn.
+sdk/spoken-*.wav
+spoken-*.wav
+
+# Correspondence and working notes that have nothing to do with the project.
+log.txt
+log*.txt
+
+# Superseded planning documents, and the index of them. They record why
+# decisions were made rather than what the code does, every one of them is
+# already ignored by name, and an index of files a reader cannot see is worse
+# than no index.
+docs/history/
+docs/

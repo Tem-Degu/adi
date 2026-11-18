@@ -51,6 +51,15 @@ MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as defined in RFC 2119.
 - **Knowledge extensions** are introduced, with explicit layering and precedence.
 - **Procedures** are demoted from a headline feature to a narrow escape hatch,
   and constrained by the binding rule in 8.3.2.
+- **Aimed values** are added to declared ranges in 6.2, with their resolution
+  through layers in 6.6 rule 4. A range says how far a parameter may be pushed;
+  an aim says what it is set to.
+- The **selector** is specified as a model seam in 9.4.2, with what it MUST be
+  given. It was referenced by 9.4.6 and 9.5 without being defined.
+- **9.4.8** governs a target that arrives alongside a named style, and **9.4.9**
+  requires an engine to report where it could not do as asked.
+- **9.5** requires that the shape of a valid selection cannot express a plan
+  moving one variable twice.
 
 ---
 
@@ -864,16 +873,16 @@ knowledge_extension:
     - id: "x.example.style.flat_white"
       inherits: "adi.espresso.style.espresso"
       targets:
-        ratio:       { min: 1.8, max: 2.2, unit: none }
-        shot_time:   { min: 25, max: 32, unit: s }
-        milk_volume: { min: 90, max: 130, unit: ml }
+        ratio:       { aim: 2.0,   min: 1.8, max: 2.2, unit: none }
+        shot_time:   { aim: 28,    min: 25,  max: 32,  unit: s }
+        milk_volume: { aim: 110.0, min: 90,  max: 130, unit: ml }
 
   material_priors:
     - id: "x.example.material.house_blend"
       attributes: { roast: "medium_dark" }
       offsets:    { grind_setting: -3.0 }
       targets:
-        brew_temperature: { min: 90.0, max: 92.0, unit: c }
+        brew_temperature: { aim: 91.0, min: 90.0, max: 92.0, unit: c }
 
   defaults:
     - variable: "dose_mass"
@@ -891,6 +900,21 @@ Requirements:
 
 0. Every range MUST carry a unit, as everywhere else in this protocol. A
    dimensionless ratio uses `none`.
+
+   A range MAY also carry `aim`: the value the parameter is normally set to
+   when this style is produced and nothing else has been asked for. It MUST lie
+   within `min` and `max`.
+
+   A range without an aim states only how far a parameter may be pushed, which
+   is not the same as saying what the thing is. Two styles may share a range and
+   differ entirely in what they aim at, and a vendor whose recipe sits off the
+   centre of its tolerance has no other way to say so. Where `aim` is absent an
+   engine MUST use the midpoint, which is a defensible default and nothing more:
+   it is arithmetic standing in for a figure the knowledge did not state.
+
+   The aim is the engine's own starting point and is binding on nothing else. A
+   person or a model MAY ask for any value the range admits, and 9.4.8 governs
+   what happens to such a value.
 1. Every identifier a vendor introduces MUST begin with its namespace.
 2. A vendor extension MUST NOT redefine an identifier it does not own. Attempting
    to redefine `adi.espresso.style.espresso` MUST be rejected at validation.
@@ -982,6 +1006,19 @@ A prior MUST NOT carry a target for a variable that distinguishes one style from
 another, since by rule 3 it would silently narrow every style that uses it and
 by disjointness would make some styles unreachable. In espresso, `ratio` is such
 a variable and no roast prior declares one.
+
+**4. An aim follows its range.** Where a layer replaces a range by inheritance
+under rule 1, it replaces that range's aim; a child declaring a range and no aim
+has no aim, and the midpoint of its own range applies. Where rule 2 or rule 3
+narrows a range, an aim outside what remains MUST be clamped into it, since a
+range may only ever narrow and an aim outside its own range is not a value the
+machine may hold.
+
+An aim is a starting value, not a bound, so an aim disjoint from a narrowing
+layer is not a fault. This is the one place where clamping rather than reporting
+is correct, and it is correct because nobody asked for the aim: it is what the
+knowledge suggests in the absence of a request, and rule 2's prohibition on
+silent clamping protects a declared target, which an aim is not.
 
 **Attribution.** Under 9.3 requirement 5 every effective value carries the layer that
 produced it. A layer that restates a range already in force has narrowed
@@ -1420,8 +1457,9 @@ either word.
 #### 9.4.1 What the model is given
 
 The reasoning on this path is the model's. An engine MUST therefore supply it
-with what reasoning requires: the utterance, the declared styles and materials,
-the declared variables **with their units and meanings** (§7.3), the decision
+with what reasoning requires: the utterance, the declared styles and materials
+**with the figures each one asks for**, the declared variables **with their
+units and meanings** (§7.3), the decision
 history, **the cycles the machine remembers**, meaning the same store the
 engine resolves a relative target against, and **what the appliance is
 currently reporting** for each variable it measures, which is what a target
@@ -1431,6 +1469,18 @@ is answered from.
 A variable supplied as a bare identifier can be mapped onto a request only where
 the model was trained on the domain, which is not a property a profile may
 assume, and is never true of a variable a manufacturer introduced (§6.3).
+
+A style MUST likewise be supplied with the effective targets it resolves to
+under 6.6, each with its aim and range, and not with its identifier and
+description alone. Two requirements follow from this and neither is optional.
+
+A model asked for a quantity alongside a style, having been shown no figure for
+it, is being asked to invent one; what it offers will be plausible and will have
+no relation to what the knowledge says. And a style's figures are what
+distinguish it from a style that shares its prose: whether a given style governs
+some variable at all is a fact about the recipe, and a model that cannot see
+which variables a style constrains will reach for a mechanism belonging to a
+different one.
 
 An engine SHOULD also supply what bears on a question rather than a request: the
 device identity from the declaration, the declared tools with their descriptions
@@ -1462,16 +1512,47 @@ time" without being told what last time was.
 
 #### 9.4.2 Where models attach
 
-Four seams, and every one of them is a model. None of them produces an actuation
-value, which is why the language layer may be as capable as the best model
-available without weakening §9.3.
+Five seams, and every one of them is a model.
 
 | Seam | Turns | Into |
 |---|---|---|
 | Transcriber | recorded audio | words, with a confidence |
 | Interpreter | words | intent, or a question |
+| Selector | goals and candidate tools | a choice of tool per goal, and at D2 a value |
 | Explainer | a decision record | words |
 | Speaker | words | audio |
+
+The first two and the last two produce no actuation value, which is why that
+part of the language layer may be as capable as the best model available
+without weakening §9.3.
+
+**The selector is the exception and MUST be treated as one.** It names a
+mechanism, and at D2 it proposes the figure to send. Everything in §9.3 exists
+because of this seam: the value is clamped to the declared range, snapped to the
+declared resolution, checked against the envelope, and attributed in the record
+to the component that produced it. A selection is a proposal, and the engine is
+what makes it safe.
+
+**What a selector MUST be given.** Per-goal, the variable, the change sought and
+why. Per-candidate, the tool, the parameter it moves, that parameter's unit and
+present value, the relationship between a change in the parameter and a change
+in the variable, and **every other variable the tool moves** (§5.4), without
+which 9.5 cannot be satisfied by any answer.
+
+It MUST also be given **what was asked for**: the style the intent named, where
+it named one.
+
+A goal states a variable and a quantity, and that is not enough to choose
+between mechanisms. Where a machine offers several tools that move one variable,
+a goal alone does not distinguish them, and nothing else in the request does
+either. The style is the fact that makes the choice decidable, and withholding
+it leaves the decision to whichever description a model happens to weigh most.
+
+This is context and not an instruction. The answer is still a tool chosen for a
+goal, still checked against the declaration, still recorded identically. An
+engine MUST NOT ask a model which tools produce a named style: that places the
+knowledge of styles inside the engine, and leaves the record unable to say which
+mechanism moved which variable.
 
 An engine MAY ship without any of them. Such a build MUST refuse the parts it
 cannot perform and name the seam that is missing, rather than returning silence
@@ -1632,6 +1713,79 @@ engine's nor a model's: D0 forbids a model producing an actuation parameter and
 this produces none, and an engine with no model at all MUST still offer the list
 to whatever is talking to the person.
 
+#### 9.4.8 A named style governs the variables it declares
+
+Normative. Where an intent names a style, an engine MUST reconcile the targets
+the intent carries against that style's effective targets before planning:
+
+1. A target on a variable the style declares MUST be clamped into that style's
+   range for the variable.
+2. A target on a variable the style does not declare MUST be discarded, unless
+   the variable is declared a preference (9.4.4), which a person may ask for
+   alongside any style.
+3. A variable the style declares and the intent does not MUST be seeded from the
+   style, at its aim where 6.2 gives one and the midpoint of its range
+   otherwise.
+
+An engine MUST NOT report a clamp under rule 1 or a discard under rule 2 as a
+limit it could not meet. 9.4.9 requires such a report where a person asked for
+something the machine cannot reach; these rules govern a value that arrived
+without anyone asking, and announcing an adjustment to a figure the person never
+gave describes the machine wrongly.
+
+The two cases are told apart by what was asked for, not by which component
+produced the number. A style was named and the style's own figures govern it;
+that is a correction to a suggestion, and silent. A figure in the request that
+the envelope cannot reach is a request the machine is failing to meet, and
+9.4.9 requires saying so.
+
+**Why an engine cannot decide this by looking at the value.** A target a person
+stated and a target a model supplied arrive identically, and nothing in the
+structured intent distinguishes them. An engine therefore MUST NOT treat a
+target as authoritative merely because it is present. The style is the thing
+that was asked for; a figure outside it was not.
+
+The alternative, obeying any target within the envelope, produces a machine that
+makes something other than what was named while reporting that it made what was
+named. The envelope is wide because it describes everything the machine can
+physically do; a recipe is narrow because it describes one product.
+
+Rule 2 has a cost worth stating. Where a person genuinely asks for a mechanism
+the named style does not govern, the request is discarded rather than served,
+and the engine SHOULD instead resolve such a request to a style that does govern
+it. An engine that cannot do so MUST discard rather than obey, because serving
+it silently is how a machine comes to run two mechanisms for one outcome and
+refuse the plan whole under 9.5.
+
+#### 9.4.9 An engine MUST say where it could not do as asked
+
+Normative. 9.3 requirement 6 governs the record: where clamping changed a
+value, what was wanted is retained alongside what was sent. This section governs
+what is said, and raises that requirement's SHOULD to a MUST for one case.
+
+Where the value clamped is one **a person asked for**, an engine MUST report
+both what was asked for and what was used, and MUST attribute the difference to
+the machine's limit rather than to the request.
+
+A machine that quietly substitutes a figure it can reach is indistinguishable
+from one that did as it was told, and the person has no way to learn that their
+request was out of range. Requirement 6 is a SHOULD because it covers any
+clamped value, including figures no person ever stated; where the person stated
+it, they are owed the answer.
+
+Which makes the pair with 9.4.8 exact. A figure the request carried and the
+machine could not reach MUST be reported. A figure that arrived alongside a
+named style and sat outside that style MUST NOT be, because nobody asked for
+it, and reporting an adjustment to a figure the person never gave describes the
+machine wrongly.
+
+An engine MUST NOT report a limit it did not hit. A report that a value was
+reduced, where the value was in fact served, is a worse fault than silence: it
+describes a machine that does not exist, and a person acting on it will correct
+a problem they do not have.
+
+---
+
 ### 9.5 One variable at a time, not one action at a time
 
 When correcting a diagnosed fault, the engine MUST NOT invoke two tools whose
@@ -1653,6 +1807,27 @@ An engine MUST therefore derive its candidate set from **every** goal in the
 plan. Deriving it from one variable makes the rule above unsatisfiable for any
 plan longer than one step, since every candidate on offer then moves the same
 variable.
+
+**An engine MUST NOT offer a model a shape that can express this mistake.**
+Where a selection is requested from a model under a schema (9.3 requirement 3),
+that schema MUST bound the number of steps to the number of goals, and MUST
+restrict the choice of candidate to those actually supplied.
+
+Stating the rule in a prompt is necessary and is not sufficient. A model shown
+several candidates that all serve one goal, and told to pick one, may answer
+with several; told afterwards exactly which rule it broke, it may answer with
+the same several again. A constraint expressed in prose is advice to a component
+that is free to disregard it, while a constraint expressed in the shape of a
+valid answer cannot be disregarded by any component that emits a valid answer.
+
+This is the same reasoning that makes a candidate index an enumeration of the
+candidates offered rather than an integer. Naming a tool that was never offered,
+and moving one variable twice, are both mistakes it is better to make
+unsayable than to refuse after the fact.
+
+An engine MUST validate the answer regardless. A schema constrains a model that
+honours it, and the engine's refusal is what holds when something between the
+two does not.
 
 ---
 

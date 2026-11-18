@@ -108,7 +108,7 @@ fn selection(level: &str) -> String {
         "remembered": ["cycle-0012", "cycle-0011"],
         "constraints": ["no two steps may move the same variable"],
         "instruction": adi_models::CHOOSER_INSTRUCTION,
-        "schema": selection_schema(2, level),
+        "schema": selection_schema(2, level, 2),
     })
     .to_string()
 }

@@ -25,7 +25,7 @@ seams:
   interpreter:
     backend: process
     command: python
-    args: ["examples/interpreters/hosted.py"]
+    args: ["examples/interpreters/hosted.py", "gpt-4.1"]
 
     # Three by default, which is enough to resolve "half of last time" and not
     # enough to see a habit. Somebody who has ordered the same drink five times
@@ -83,7 +83,7 @@ seams:
   explainer:
     backend: process
     command: python
-    args: ["examples/interpreters/hosted.py"]
+    args: ["examples/interpreters/hosted.py", "gpt-4.1"]
 
   # Speech is not wired up yet. The SDK handles sound once it is samples and
   # once it has produced samples; capture and playback belong to a product and
@@ -91,7 +91,21 @@ seams:
   # audio tools. Until that exists these stay unserved, and the engine refuses
   # the operations they provide by name rather than failing.
   transcriber:
-    backend: none
+    backend: process
+    command: python
+    args: ["examples/interpreters/openai_speech.py", "transcribe",
+           "gpt-4o-transcribe"]
+    # The engine REFUSES audio at any other rate rather than resampling it, so
+    # whatever records must be told to produce exactly this. A USB microphone
+    # will happily hand over 44100 and nothing would look wrong.
+    sample_rate: 16000
+    min_confidence: 0.6
 
   speaker:
-    backend: none
+    backend: process
+    command: python
+    args: ["examples/interpreters/openai_speech.py", "speak",
+           "gpt-4o-mini-tts"]
+    # What the provider returns for raw PCM. Measured, not assumed: a round
+    # trip through this seam came back 24000 Hz mono 16-bit.
+    sample_rate: 24000

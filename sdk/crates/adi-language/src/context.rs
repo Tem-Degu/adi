@@ -246,6 +246,22 @@ pub struct StyleInfo {
     pub name: String,
     /// Absent where the knowledge declares a style and says nothing about it.
     pub description: Option<String>,
+
+    /// What the recipe actually asks for, as "90 to 130 g".
+    ///
+    /// A style used to reach the model as a NAME and a sentence of prose, and
+    /// never its figures. So a model asked to supply a quantity alongside a
+    /// style was supplying it blind: offered a lungo, whose recipe is 90 to
+    /// 130 grams, one proposed 85. It was not ignoring the band. It had never
+    /// been shown it.
+    ///
+    /// The engine clips such a figure into the recipe either way, because a
+    /// prompt is advice and the envelope has to hold regardless. This is the
+    /// other half: it stops the guess being necessary, and it lets the model
+    /// see that a lungo has a figure for what ends up in the cup and none for
+    /// anything else - which is what sent it reaching for a hot water step
+    /// that belongs to a different drink.
+    pub targets: Vec<(String, String)>,
 }
 
 /// A variable as the model is told about it.
@@ -298,6 +314,12 @@ impl ModelContext {
                 .map(|(name, description)| StyleInfo {
                     name: name.to_string(),
                     description: description.map(str::to_string),
+                    // The bands are filled in by whoever has a resolver to
+                    // hand. This path builds a context from the knowledge
+                    // alone and resolving every style here would make
+                    // assembling one cost a resolution per drink, so the tool
+                    // that already resolves them supplies them instead.
+                    targets: Vec::new(),
                 })
                 .collect(),
             materials: knowledge.material_ids().into_iter().map(str::to_string).collect(),

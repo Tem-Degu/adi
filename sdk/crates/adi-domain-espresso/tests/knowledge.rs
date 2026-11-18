@@ -176,6 +176,7 @@ fn a_bad_extension_leaves_the_profile_working() {
     e.constraints.insert(
         "brew_temperature".into(),
         adi_protocol::Range {
+            aim: None,
             min: 80.0,
             max: 110.0,
             resolution: None,
@@ -422,6 +423,7 @@ fn a_rejected_extension_adds_no_variable() {
     e.constraints.insert(
         "brew_temperature".into(),
         adi_protocol::Range {
+            aim: None,
             min: 80.0,
             max: 110.0,
             resolution: None,

@@ -412,10 +412,29 @@ pub fn narrowed_schema(
 /// are `0..count`. At D2 a value is required; at D1 it is absent, because the
 /// engine sizes the correction itself.
 ///
+/// `goals` is how many outcomes are being pursued, which bounds how many steps
+/// an answer may contain. ONE GOAL IS ONE STEP: a goal names a single variable
+/// and a step serving it moves that variable, so two steps for one goal must
+/// both move it - which ADI-P 9.5 forbids and the engine refuses.
+///
+/// That refusal used to be the only defence, and it was not enough. Asked for
+/// an espresso, a chooser returned both `brew.start` and `brew.double` for the
+/// one goal about four times in ten. The engine refused, correctly, retried,
+/// and showed the model the exact rule it had broken - "steps 'x' and 'y' both
+/// move 'ratio' in one iteration" - and the second answer was the same two
+/// steps with one value changed from 38.0 to 38.8. A constraint stated in a
+/// prompt was never going to hold this; a shape that cannot express the
+/// mistake does.
+///
+/// Which is the principle this function already applied to candidate indices,
+/// and the comment on the field that carries it says so: naming a candidate
+/// the engine did not supply is impossible to emit rather than emitted and
+/// refused. The step COUNT had been left out of that.
+///
 /// An empty candidate list would give an empty enum, which no grammar can
 /// satisfy, so the index falls back to an integer there. The engine refuses an
 /// unknown index regardless.
-pub fn selection_schema(count: usize, level: &str) -> serde_json::Value {
+pub fn selection_schema(count: usize, level: &str, goals: usize) -> serde_json::Value {
     use serde_json::json;
 
     let candidate = if count == 0 {
@@ -441,6 +460,15 @@ pub fn selection_schema(count: usize, level: &str) -> serde_json::Value {
         "properties": {
             "steps": {
                 "type": "array",
+                // At least one, because an empty plan is an error the engine
+                // raises anyway, and at most one per goal.
+                //
+                // Floored at one so that a request carrying no goals still
+                // describes a satisfiable shape: a zero-length enum and a
+                // maxItems of nought are the two ways to hand a constrained
+                // decoder something it cannot answer at all.
+                "minItems": 1,
+                "maxItems": goals.max(1),
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
@@ -744,7 +772,7 @@ mod tests {
     /// ADI-P 9.3 requirement 3 on the way out: only an offered index.
     #[test]
     fn a_selection_may_name_only_an_offered_candidate() {
-        let schema = selection_schema(3, "d2");
+        let schema = selection_schema(3, "d2", 2);
         let candidate = &schema["properties"]["steps"]["items"]["properties"]["candidate"];
         assert_eq!(candidate["enum"], serde_json::json!([0, 1, 2]));
     }
@@ -753,11 +781,11 @@ mod tests {
     /// engine sizes the correction itself.
     #[test]
     fn a_value_belongs_to_d2_alone() {
-        let d2 = selection_schema(2, "d2");
+        let d2 = selection_schema(2, "d2", 2);
         let step = &d2["properties"]["steps"]["items"];
         assert_eq!(step["required"], serde_json::json!(["candidate", "value"]));
 
-        let d1 = selection_schema(2, "d1");
+        let d1 = selection_schema(2, "d1", 2);
         let step = &d1["properties"]["steps"]["items"];
         assert_eq!(step["required"], serde_json::json!(["candidate"]));
         assert!(step["properties"].get("value").is_none(), "got {step}");
@@ -766,7 +794,7 @@ mod tests {
     /// No candidates would give an empty enum, which no grammar can satisfy.
     #[test]
     fn no_candidates_leaves_a_compilable_schema() {
-        let schema = selection_schema(0, "d2");
+        let schema = selection_schema(0, "d2", 1);
         let candidate = &schema["properties"]["steps"]["items"]["properties"]["candidate"];
         assert_eq!(candidate["type"], "integer", "got {candidate}");
     }

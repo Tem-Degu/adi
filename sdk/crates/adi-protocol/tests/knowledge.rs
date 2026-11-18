@@ -159,6 +159,7 @@ fn an_empty_range_is_refused() {
     e.styles[0].targets.insert(
         "cycle_time".to_string(),
         Range {
+            aim: None,
             min: 10.0,
             max: 1.0,
             resolution: None,
@@ -204,7 +205,10 @@ fn a_style_targeting_an_undeclared_variable_is_refused() {
     let mut base = base();
     base.styles[0]
         .targets
-        .insert("cylce_time".into(), Range { min: 1.0, max: 2.0, unit: Unit::S, resolution: None });
+        .insert(
+            "cylce_time".into(),
+            Range { aim: None, min: 1.0, max: 2.0, unit: Unit::S, resolution: None },
+        );
 
     let err = Knowledge::new(base.into_layer()).expect_err("a typo must be caught");
     assert!(
@@ -268,7 +272,7 @@ fn a_vendor_style_may_target_a_vendor_variable() {
     );
     extension.styles[0].targets.insert(
         "x.acme.tray_state".into(),
-        Range { min: 0.0, max: 1.0, unit: Unit::None, resolution: None },
+        Range { aim: None, min: 0.0, max: 1.0, unit: Unit::None, resolution: None },
     );
 
     knowledge

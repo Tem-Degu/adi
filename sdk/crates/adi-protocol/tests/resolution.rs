@@ -39,6 +39,7 @@ fn with_vendor() -> Knowledge {
 
 fn range(min: f64, max: f64, unit: Unit) -> Range {
     Range {
+        aim: None,
         min,
         max,
         resolution: None,

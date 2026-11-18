@@ -144,6 +144,27 @@ pub struct SelectionContext<'a> {
     /// Filled by `decide` from the same map the planner computes with, so the
     /// model and the engine are working from one set of numbers.
     pub settings: Option<&'a std::collections::BTreeMap<String, Quantity>>,
+
+    /// What was asked for, where a style named it.
+    ///
+    /// The chooser is asked which tool moves an outcome, and that is the right
+    /// question: the engine knows variables and mechanisms, not drinks, which
+    /// is what lets the same engine run something that is not a coffee machine
+    /// and what makes every change attributable to one tool and one variable.
+    ///
+    /// But the question was being stripped of the one fact that makes it
+    /// decidable. "Move yield_mass by 36" has three answers on a machine that
+    /// can brew normally, brew a double grind, or brew from the powder chute.
+    /// "An espresso: move yield_mass by 36" has one. A chooser given the first
+    /// returned two tools about four times in ten, was shown the exact rule it
+    /// had broken, and returned the same two again.
+    ///
+    /// It is CONTEXT, not an instruction. The answer is still a tool for a
+    /// goal, still checked against the declaration, still recorded the same
+    /// way. Nothing here asks what tools make a drink - that would put the
+    /// knowledge of drinks inside the engine and leave the record unable to
+    /// say what moved what.
+    pub style: Option<&'a str>,
     /// The latest reading of each outcome the appliance measures.
     ///
     /// Where the machine stands, as opposed to what it was set to. An
@@ -187,6 +208,10 @@ impl<'a> SelectionContext<'a> {
             settings: None,
             measured: None,
             rejected: None,
+            // None by default, like the conversation below: a cycle being
+            // corrected has no style named at it, and the paths that do have
+            // one set the field directly.
+            style: None,
             // None by default. A caller holding a conversation sets the field
             // directly; this constructor serves the paths that hold none.
             recent: &[],

@@ -113,6 +113,25 @@ pub struct Range {
     #[serde(default)]
     pub resolution: Option<f64>,
     pub unit: Unit,
+
+    /// What this parameter is normally set to, where the declaration says.
+    ///
+    /// A range on its own says how far something MAY be pushed. It does not
+    /// say what the thing is. A recipe reading 90 to 130 grams was being
+    /// turned into a drink by averaging it, and the midpoint is arithmetic
+    /// standing in for the manufacturer's intent: a vendor wanting a lungo at
+    /// 120, with the range there for tolerance, had no way to say so.
+    ///
+    /// It also had a worse consequence. The engine aimed at the middle and a
+    /// model, shown only the range, picked anywhere inside it - two different
+    /// rules for the same number, neither knowing about the other, so the
+    /// drink depended on which got there first. One order came out at 117
+    /// millilitres, 95, or nothing at all.
+    ///
+    /// Optional, and the midpoint remains the documented fallback where it is
+    /// absent, so a declaration that never mentions it behaves as before.
+    #[serde(default)]
+    pub aim: Option<f64>,
 }
 
 impl Range {
@@ -128,12 +147,22 @@ impl Range {
         }
         let min = self.min.max(other.min);
         let max = self.max.min(other.max);
+
+        // The narrower side's aim survives, clamped into the bounds that are
+        // left. Layering only ever narrows, so an aim can end up outside the
+        // band that remains - a vendor's 120 under a user band of 90 to 110 -
+        // and the band is the thing that cannot be widened.
+        let aim = self
+            .aim
+            .or(other.aim)
+            .map(|value| value.clamp(min, max));
         if min > max {
             return None;
         }
         Some(Range {
             min,
             max,
+            aim,
             resolution: self.resolution.or(other.resolution),
             unit: self.unit,
         })
@@ -253,6 +282,7 @@ mod tests {
     #[test]
     fn clamp_snaps_to_the_declared_resolution() {
         let range = Range {
+            aim: None,
             min: 0.0,
             max: 60.0,
             resolution: Some(1.0),
@@ -265,8 +295,10 @@ mod tests {
 
     #[test]
     fn intersect_refuses_to_cross_units() {
-        let steps = Range { min: 0.0, max: 10.0, resolution: None, unit: Unit::Step };
-        let seconds = Range { min: 0.0, max: 10.0, resolution: None, unit: Unit::S };
+        let steps =
+            Range { aim: None, min: 0.0, max: 10.0, resolution: None, unit: Unit::Step };
+        let seconds =
+            Range { aim: None, min: 0.0, max: 10.0, resolution: None, unit: Unit::S };
         assert!(steps.intersect(&seconds).is_none());
     }
 }

@@ -45,10 +45,12 @@ fn script() -> String {
 fn styles() -> Vec<adi_language::context::StyleInfo> {
     vec![
         adi_language::context::StyleInfo {
+            targets: Vec::new(),
             name: "adi.espresso.style.espresso".into(),
             description: Some("The standard shot.".into()),
         },
         adi_language::context::StyleInfo {
+            targets: Vec::new(),
             name: "adi.espresso.style.lungo".into(),
             description: None,
         },
@@ -120,6 +122,7 @@ macro_rules! interpreter {
 
 fn empty() -> SelectionContext<'static> {
     SelectionContext {
+        style: None,
         // One utterance per case; nothing was said before it.
         recent: &[],
         history: &[],
@@ -192,6 +195,7 @@ fn a_relative_request_crosses_as_a_relation() {
     assert_eq!(memory.len(), 1);
 
     let context = SelectionContext {
+        style: None,
         // One utterance per case; nothing was said before it.
         recent: &[],
         history: &[],

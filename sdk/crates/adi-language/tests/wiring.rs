@@ -16,6 +16,7 @@ fn the_documented_wiring_compiles() {
     let samples: Vec<i16> = vec![0; 16];
     let audio = Audio::new(samples, 16_000);
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &[],

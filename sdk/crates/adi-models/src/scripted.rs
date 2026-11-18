@@ -145,13 +145,14 @@ mod tests {
 
     fn context() -> SelectionContext<'static> {
         SelectionContext {
-                recent: &[],
+            recent: &[],
             history: &[],
             cycle: None,
             memory: None,
             rejected: None,
             settings: None,
             measured: None,
+            style: None,
         }
     }
 

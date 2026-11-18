@@ -449,7 +449,7 @@ plan from until it has set something itself.
 
 ## Step 5: First contact
 
-### Before the board exists
+### Testing without hardware
 
 Build your firmware as a host executable with stdin and stdout as the wire,
 exactly as `sdk/c/example/main.c` does, and let the engine start it:
@@ -500,7 +500,7 @@ If it will not open at all, the three usual causes are the port name, something
 else already holding it open, which a serial monitor does, and on Linux not
 being in the `dialout` group.
 
-### Then ask it something
+### Issuing a first request
 
 Type `status`. It sends a heartbeat and prints what came back.
 
@@ -508,7 +508,7 @@ If that answers, your framing, your CRC, your clock and your write path are all
 correct. That is the whole of what first contact proves, and it is most of the
 work.
 
-### If you would rather own the transport
+### Supplying your own transport
 
 `Transport` is two methods, `send` and `recv` with a timeout, where `Ok(None)`
 from `recv` means nothing arrived yet rather than an error. A product will want
@@ -517,7 +517,7 @@ its own implementation eventually, over whatever link it actually ships, and
 copy. The reassembly is the part worth reading: a frame arrives in pieces, two
 frames arrive in one read, and the line is noisy at power on.
 
-### When it does not work
+### Diagnosing a link that does not answer
 
 Nothing below is exotic. Each line is a mistake that produces a symptom
 pointing somewhere else.
@@ -532,7 +532,7 @@ pointing somewhere else.
 | Safe state entered unexpectedly | `adip_port_millis` stopping while interrupts are disabled |
 | Nothing over serial, fine over stdio | Baud mismatch, or TX and RX not crossed |
 
-### Before you believe it
+### What the tests do not establish
 
 Run the library's own suite on your target, not just on a host:
 
@@ -542,7 +542,7 @@ make test        # on a host
 make arm-test    # on an emulated Cortex-M3, if you have the toolchain
 ```
 
-364 checks across seven suites. They test the arithmetic, the decoder, the
+392 checks across seven suites. They test the arithmetic, the decoder, the
 validation and the failsafe. If they pass on your target and your link answers `status`, the port
 is done.
 
@@ -550,9 +550,40 @@ What neither emulation nor these tests establish is **real timing against real
 peripherals**. The reply deadline and the failsafe interval are promises your
 hardware makes, and only your hardware can keep them. Measure both.
 
+Two more things they cannot establish, and both have bitten.
+
+**That a vendor command means what you think it means.** Where your handler maps
+an ADI tool onto a command the appliance's own firmware understands, that mapping
+is an assumption until you have checked it against the vendor's documentation.
+Nothing in the protocol, the tests or a host build can tell you a code is the
+wrong one: it is well formed, the appliance accepts it, and the appliance does
+something other than what you meant.
+
+The example in this repository had one. A tool documented as producing a double
+into a single vessel was mapped onto the appliance's *two-vessel* command — a
+different feature with a neighbouring code. Every test passed, because every
+test exercised the mapping rather than the meaning. It would have failed in
+front of a customer, with half the product on the floor.
+
+Check every mapping against the vendor's own manual, and record which ones you
+have checked. A table of codes is the easiest place in a port to be confidently
+wrong.
+
+**What your host build does not model.** A host build stands in for the
+appliance so the engine can be exercised without hardware, and it models the
+protocol faithfully. It does not model physics. It will accept a command and
+report a plausible outcome without knowing how many vessels the real machine
+fills, where the liquid goes, how long a mechanism really takes, or what the
+appliance does when a consumable runs out.
+
+So "it works against the host build" means the conversation is right. It does not
+mean the machine will do the right thing. Keep a short list of what your host
+build does not simulate, and treat everything on it as untested until the
+hardware exists.
+
 ---
 
-## One thing to know before you write a handler
+## Reading arguments in a handler
 
 Bring-up needs no handler, because nothing is invoking anything yet. The moment
 you add one, this is the part that bites.

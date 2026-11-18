@@ -339,6 +339,22 @@ cargo run -p adi-cli -- capabilities examples/declarations/ex900.yaml \
 cargo run -p adi-cli -- conformance conformance/espresso/cases
 ```
 
+**`cargo build` does not compile tests.** It builds the libraries and the
+binaries and stops, so a workspace whose test code no longer compiles still
+reports a clean build with no warnings. Adding a field to a public struct, or
+an argument to a public function, breaks every test fixture that constructs it
+and nothing says so.
+
+```sh
+cargo test --workspace --no-run
+```
+
+That is the check to run after any change to a shared type, and it is
+considerably faster than running the suites. Without it a suite can stop
+compiling and stay that way for weeks: the symptom is silence, and the usual
+way it is noticed is somebody wondering why a test they expected to fail did
+not.
+
 The appliance side needs a C compiler:
 
 ```sh
@@ -347,6 +363,11 @@ make test        # unit tests, no hardware, no platform
 make example     # a working appliance the engine can talk to
 make size        # flash and RAM against the budget in DESIGN.md
 ```
+
+Each `make` target here builds against a deliberately hostile warning set and
+is expected to produce none. A host build models the protocol and not the
+machine: see HOW-TO-PORT-TO-A-BOARD.md, "What the tests do not establish", for what that
+does and does not establish.
 
 With the example built, the loopback tests run the engine against a real
 `libadip` build as a child process:
@@ -451,7 +472,7 @@ The appliance library occupies **about 7.8 KB of flash on a Cortex-M4** with no
 static or heap allocation, against the 16 KB budget stated in
 [`c/DESIGN.md`](./c/DESIGN.md). A product adds its own generated tables.
 
-The full appliance test suite, 364 checks, passes on an emulated Cortex-M3:
+The full appliance test suite, 392 checks, passes on an emulated Cortex-M3:
 
 ```sh
 cd c

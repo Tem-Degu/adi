@@ -176,7 +176,11 @@ fn run(
         rejected: None,
         settings: None,
         measured: None,
-    };
+            // No style yet. These contexts serve the INTERPRETER, and the
+            // style is what the interpreter works out - it cannot be an input
+            // to the call that produces it.
+            style: None,
+};
 
     for case in &corpus.cases {
         if case.expect.clarify.is_some() {

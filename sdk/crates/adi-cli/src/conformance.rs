@@ -367,7 +367,11 @@ fn run_case(
             rejected: None,
             settings: None,
             measured: None,
-            };
+            // No style yet. These contexts serve the INTERPRETER, and the
+            // style is what the interpreter works out - it cannot be an input
+            // to the call that produces it.
+            style: None,
+};
 
             match interpreter.interpret(words, &context) {
                 Ok(adi_decision::Understood::Intent(intent)) => {

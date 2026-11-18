@@ -96,6 +96,7 @@ $(BUILD)/example: $(SRC) $(EX900) $(EXAMPLE) | $(BUILD)
 
 example: $(BUILD)/example
 
+
 test: $(TESTS)
 	./$(BUILD)/test_m1
 	./$(BUILD)/test_m2

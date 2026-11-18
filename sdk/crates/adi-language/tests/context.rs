@@ -88,6 +88,7 @@ fn what_the_machine_reads_now_reaches_the_model() {
     );
 
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &[],
@@ -119,6 +120,7 @@ fn the_model_is_given_what_the_protocol_requires() {
     let memory = remembered(2);
     let history = decisions(1);
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &history,
@@ -153,6 +155,7 @@ fn only_the_most_recent_cycles_are_offered() {
     let k = knowledge();
     let memory = remembered(20);
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &[],
@@ -185,6 +188,7 @@ fn the_budget_is_enforced_however_much_is_remembered() {
     let memory = remembered(500);
     let history = decisions(500);
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &history,
@@ -221,6 +225,7 @@ fn truncation_drops_history_before_it_drops_memory() {
     let memory = remembered(3);
     let history = decisions(3);
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &history,
@@ -262,6 +267,7 @@ fn what_was_dropped_is_reported() {
     let memory = remembered(10);
     let history = decisions(10);
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &history,
@@ -292,6 +298,7 @@ fn what_was_dropped_is_reported() {
 fn an_empty_memory_is_not_an_error() {
     let k = knowledge();
     let context = SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
         history: &[],
@@ -347,6 +354,7 @@ fn notes_are_the_first_thing_a_tight_budget_drops() {
         &knowledge,
         &[],
         &SelectionContext {
+        style: None,
         // Nothing said before this; these tests assemble one utterance.
         recent: &[],
             history: &[],
@@ -364,6 +372,7 @@ fn notes_are_the_first_thing_a_tight_budget_drops() {
         adi_language::context::NoteLine { id: "b".into(), text: "y ".repeat(400) },
     ];
     context.styles = vec![adi_language::context::StyleInfo {
+        targets: Vec::new(),
         name: "adi.example.style.one".into(),
         description: None,
     }];
@@ -400,10 +409,12 @@ fn enforce_records_every_section_it_drops() {
         utterance: "make me a coffee".into(),
         styles: vec![
             adi_language::context::StyleInfo {
+                targets: Vec::new(),
                 name: "x.test.style.one".into(),
                 description: Some("a".repeat(400)),
             },
             adi_language::context::StyleInfo {
+                targets: Vec::new(),
                 name: "x.test.style.two".into(),
                 description: Some("b".repeat(400)),
             },

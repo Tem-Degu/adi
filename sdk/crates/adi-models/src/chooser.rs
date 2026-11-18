@@ -67,6 +67,12 @@ struct Request<'a> {
     /// Why the previous answer was refused. Absent on a first attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     rejected: Option<&'a str>,
+
+    /// What was asked for, where a style named it. See
+    /// `SelectionContext::style` for why a goal alone is not enough to decide
+    /// between several tools that all serve it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    style: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -237,13 +243,18 @@ impl ProcessChooser {
                 .collect(),
             level: self.level,
             instruction: CHOOSER_INSTRUCTION,
-            schema: crate::selection_schema(candidates.len(), self.level),
+            schema: crate::selection_schema(
+                candidates.len(),
+                self.level,
+                goals.len(),
+            ),
             constraints: CONSTRAINTS
                 .iter()
                 .copied()
                 .filter(|rule| self.level == "d2" || !rule.starts_with("Every step"))
                 .collect(),
             rejected: context.rejected,
+            style: context.style,
             remembered: context
                 .memory
                 // No import needed: these are trait methods on a trait

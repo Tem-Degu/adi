@@ -343,6 +343,10 @@ impl Parameter {
                 max: *max,
                 resolution: *resolution,
                 unit: *unit,
+                // No aim. This range is what the mechanism can physically
+                // do; what it is normally set to is a property of the recipe
+                // being made, not of the hardware.
+                aim: None,
             }),
             Parameter::Integer {
                 unit,
@@ -355,6 +359,7 @@ impl Parameter {
                 max: *max as f64,
                 resolution: resolution.map(|r| r as f64).or(Some(1.0)),
                 unit: *unit,
+                aim: None,
             }),
             _ => None,
         }
